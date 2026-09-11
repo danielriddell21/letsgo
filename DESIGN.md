@@ -5,7 +5,9 @@ A release tool for Go. Only Go.
 > **A release should be correct before it ships, provable at the moment it
 > ships, and legible long after.**
 
-This document is the design plan. No code exists yet.
+This document is the design rationale: the decisions, the alternatives we
+rejected, and the reasoning behind both. For the intended user experience and
+the roadmap, see [README.md](README.md). No code exists yet.
 
 ---
 
