@@ -1,0 +1,189 @@
+package repro_test
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/danielriddell21/letsgo/internal/gobuild"
+	"github.com/danielriddell21/letsgo/internal/repro"
+)
+
+// A fixed instant standing in for a commit timestamp. Nothing in a release may
+// depend on the wall clock, so this value is the only time the pipeline sees.
+var commitTime = time.Date(2024, 3, 15, 12, 30, 45, 0, time.UTC)
+
+func options(t *testing.T, sourceDir, workDir string) repro.Options {
+	t.Helper()
+	return repro.Options{
+		ModuleDir:  sourceDir,
+		Package:    ".",
+		Name:       "fixture",
+		Version:    "1.2.3",
+		Commit:     "9f2ab1c",
+		ModTime:    commitTime,
+		ExtraFiles: []string{"README.md", "LICENSE"},
+		WorkDir:    workDir,
+	}
+}
+
+// build runs the pipeline in an environment deliberately unlike the previous
+// run's: a different source directory, a different work directory, and a
+// different temporary directory.
+func build(t *testing.T, label string, coldCache bool) []repro.Artifact {
+	t.Helper()
+
+	root := t.TempDir()
+	source := filepath.Join(root, "src-"+label)
+	work := filepath.Join(root, "work-"+label)
+	tmp := filepath.Join(root, "tmp-"+label)
+
+	copyDir(t, "testdata/fixture", source)
+	mkdir(t, tmp)
+
+	// -trimpath is what makes the source path invisible to the compiler. Using
+	// a different path each run is how we find out whether it is working.
+	t.Setenv("TMPDIR", tmp)
+	if coldCache {
+		cache := filepath.Join(root, "gocache-"+label)
+		mkdir(t, cache)
+		t.Setenv("GOCACHE", cache)
+	}
+
+	artifacts, err := repro.Build(context.Background(), options(t, source, work))
+	if err != nil {
+		t.Fatalf("build %s: %v", label, err)
+	}
+	if len(artifacts) == 0 {
+		t.Fatalf("build %s produced no artifacts", label)
+	}
+	return artifacts
+}
+
+// This is the property the entire tool rests on. If it does not hold, letsgo
+// cannot verify a release, cannot safely resume an upload, and has no reason
+// to exist in preference to GoReleaser.
+func TestReproducibleAcrossRuns(t *testing.T) {
+	first := build(t, "a", false)
+
+	// Cross a whole-second boundary so that any reliance on the clock — in the
+	// compiler, the archive writer, or our own code — has a chance to show up.
+	time.Sleep(1100 * time.Millisecond)
+
+	second := build(t, "b", false)
+	compare(t, first, second)
+}
+
+// The build cache is a plausible hiding place for nondeterminism: a cached
+// object produced under one set of conditions could differ from a freshly
+// compiled one. Building from an empty cache proves the output does not depend
+// on what the machine happened to have compiled before.
+func TestReproducibleFromColdCache(t *testing.T) {
+	if testing.Short() {
+		t.Skip("recompiles the standard library twice")
+	}
+	first := build(t, "cold-a", true)
+	second := build(t, "cold-b", true)
+	compare(t, first, second)
+}
+
+// Injected version metadata has to actually reach the binary. Checking the
+// symbol exists is a structural test; running the thing is an empirical one,
+// and this is the seed of the smoke-test gate described in DESIGN.md.
+func TestVersionMetadataReachesTheBinary(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "src")
+	work := filepath.Join(root, "work")
+	copyDir(t, "testdata/fixture", source)
+
+	opts := options(t, source, work)
+	opts.Targets = []gobuild.Target{gobuild.Host()}
+
+	if _, err := repro.Build(context.Background(), opts); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	host := gobuild.Host()
+	bin := filepath.Join(work, "fixture_"+host.OS+"_"+host.Arch, "fixture"+host.Ext())
+
+	out, err := exec.Command(bin, "--version").Output()
+	if err != nil {
+		t.Fatalf("running %s: %v", bin, err)
+	}
+
+	got := strings.TrimSpace(string(out))
+	want := "fixture 1.2.3 (9f2ab1c) built 2024-03-15T12:30:45Z"
+	if got != want {
+		t.Errorf("binary reported %q, want %q", got, want)
+	}
+}
+
+func compare(t *testing.T, first, second []repro.Artifact) {
+	t.Helper()
+
+	if len(first) != len(second) {
+		t.Fatalf("artifact count differs: %d vs %d", len(first), len(second))
+	}
+
+	for i := range first {
+		a, b := first[i], second[i]
+		if a.Archive != b.Archive {
+			t.Errorf("artifact %d name differs: %s vs %s", i, a.Archive, b.Archive)
+			continue
+		}
+
+		// Report the binary first. If the binaries match and the archives do
+		// not, the archive writer is at fault; if the binaries differ, nothing
+		// downstream of the compiler is worth investigating yet.
+		if a.BinarySHA256 != b.BinarySHA256 {
+			t.Errorf("%s: binary is not reproducible\n  run 1: %s\n  run 2: %s",
+				a.Target, a.BinarySHA256, b.BinarySHA256)
+			continue
+		}
+		if a.ArchiveSHA256 != b.ArchiveSHA256 {
+			t.Errorf("%s: binary matches but archive does not — the archive writer is leaking state\n  run 1: %s\n  run 2: %s",
+				a.Target, a.ArchiveSHA256, b.ArchiveSHA256)
+		}
+	}
+
+	if !t.Failed() {
+		t.Logf("%d artifacts reproduced byte for byte on %s/%s", len(first), runtime.GOOS, runtime.GOARCH)
+	}
+}
+
+func mkdir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func copyDir(t *testing.T, src, dst string) {
+	t.Helper()
+	mkdir(t, dst)
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		from := filepath.Join(src, e.Name())
+		to := filepath.Join(dst, e.Name())
+		if e.IsDir() {
+			copyDir(t, from, to)
+			continue
+		}
+		data, err := os.ReadFile(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(to, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
