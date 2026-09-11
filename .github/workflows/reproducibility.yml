@@ -1,0 +1,112 @@
+name: reproducibility
+
+on:
+  push:
+  pull_request:
+
+env:
+  # Pinned to an exact patch release rather than "stable" on purpose. Compiler
+  # and linker output can legitimately differ between Go versions, so a version
+  # skew between two runners would look like a reproducibility failure. The
+  # toolchain is a build input, and a release manifest records it for the same
+  # reason.
+  GO_VERSION: "1.24.7"
+
+jobs:
+  # Does a machine agree with itself? Varies source directory, work directory,
+  # TMPDIR, wall clock and build cache within a single host.
+  same-machine:
+    name: same machine (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: false
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed for:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test ./... -v -timeout 20m
+
+  # Do two machines agree with each other? This is the claim a third party
+  # relies on when they run letsgo verify on hardware we do not control, and
+  # the one that decides whether the tool has a reason to exist.
+  cross-machine:
+    name: digests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: false
+
+      - name: build fixture and record digests
+        run: go run ./internal/repro/cmd/reprodigest > digests.json
+
+      - run: cat digests.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.os }}
+          path: digests.json
+
+  compare:
+    name: compare across machines
+    needs: cross-machine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: digests
+
+      - name: every machine must produce identical artifacts
+        run: |
+          set -euo pipefail
+          reference=""
+          failed=0
+
+          for file in digests/*/digests.json; do
+            echo "--- $file"
+            cat "$file"
+            if [ -z "$reference" ]; then
+              reference="$file"
+              continue
+            fi
+            if ! diff -u "$reference" "$file"; then
+              echo "::error::artifacts differ between $reference and $file"
+              failed=1
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::builds are not reproducible across machines"
+            exit 1
+          fi
+          echo "all machines produced byte-identical artifacts"

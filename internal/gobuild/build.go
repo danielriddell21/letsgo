@@ -119,17 +119,34 @@ func Build(ctx context.Context, req Request) error {
 // passthrough names the environment variables the toolchain genuinely needs:
 // where to find itself, where to cache, and how to reach a module proxy.
 // Everything else is dropped.
+//
+// None of these can change the bytes the compiler emits. They decide where the
+// toolchain looks for things, not what it produces — which is the line that
+// separates a variable worth passing through from one worth dropping.
 var passthrough = []string{
+	// Locating the toolchain and its caches.
 	"PATH",
 	"HOME",
-	"USERPROFILE", // Windows equivalent of HOME
-	"SystemRoot",  // Windows needs this for DNS resolution
-	"TMPDIR", "TMP", "TEMP",
 	"GOROOT", "GOPATH", "GOCACHE", "GOMODCACHE", "GOTOOLCHAIN",
-	"GOPROXY", "GONOSUMDB", "GONOSUMCHECK", "GOSUMDB", "GOPRIVATE", "GONOPROXY",
+
+	// Scratch space.
+	"TMPDIR", "TMP", "TEMP",
+
+	// Module resolution and verification.
+	"GOPROXY", "GONOPROXY", "GOPRIVATE", "GOSUMDB", "GONOSUMDB", "GONOSUMCHECK",
 	"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
 	"http_proxy", "https_proxy", "no_proxy",
 	"SSL_CERT_FILE", "SSL_CERT_DIR",
+
+	// Windows. These are not optional extras: with GOCACHE unset, the
+	// toolchain derives the build cache location from %LocalAppData%, and
+	// without it refuses to build at all. An allowlist strict enough to
+	// protect determinism is also strict enough to break the toolchain, so
+	// each platform's genuine requirements have to be named explicitly.
+	"USERPROFILE", "LOCALAPPDATA", "APPDATA",
+	"SystemRoot", "windir", "ComSpec", "PATHEXT",
+	"HOMEDRIVE", "HOMEPATH",
+	"NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
 }
 
 func environ(t Target) []string {

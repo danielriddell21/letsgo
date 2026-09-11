@@ -1,0 +1,8 @@
+# Disable all end-of-line conversion.
+#
+# Reproducibility depends on a checkout being byte-identical everywhere. With
+# Git's default autocrlf behaviour a Windows runner would check out source
+# files with CRLF line endings, compile different bytes, and produce a
+# different binary from a Linux runner building the same commit — a real
+# failure that would look like a compiler bug.
+* -text
