@@ -110,8 +110,16 @@ func PreviousTag(ctx context.Context, dir string) (string, error) {
 }
 
 func git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	// Resolved to an absolute path in a system directory rather than looked up
+	// through the inherited PATH. See exec.go for why.
+	bin, err := gitBinary()
+	if err != nil {
+		return "", err
+	}
+
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
+	cmd.Env = gitEnv()
 
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
