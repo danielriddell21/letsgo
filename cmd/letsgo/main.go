@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -12,9 +13,11 @@ import (
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/build"
+	"github.com/danielriddell21/letsgo/internal/bump"
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
@@ -36,6 +39,7 @@ usage:
   letsgo release [--draft] [-o dir]      build and publish, resumably
   letsgo release --snapshot              rehearse a release without publishing
   letsgo verify [tag]                    rebuild a published release and compare it
+  letsgo tag [--major|--minor|--patch]   work out the next version and tag it
   letsgo fmt [file]                      format letsgo.mod
   letsgo version                         print the version (also --version)
 
@@ -60,6 +64,8 @@ func main() {
 		err = runRelease(args)
 	case "verify":
 		err = runVerify(args)
+	case "tag":
+		err = runTag(args)
 	case "fmt":
 		err = runFmt(args)
 	case "version", "--version", "-version", "-v":
@@ -352,6 +358,158 @@ func verifyTarget(ctx context.Context, explicit string) (github.Repo, string, er
 		return github.Repo{}, "", err
 	}
 	return github.Repo{Owner: found.Owner, Name: found.Name}, module.Dir, nil
+}
+
+func runTag(args []string) error {
+	fs := flag.NewFlagSet("tag", flag.ExitOnError)
+	yes := fs.Bool("yes", false, "create the tag without asking")
+	major := fs.Bool("major", false, "force a major bump")
+	minor := fs.Bool("minor", false, "force a minor bump")
+	patch := fs.Bool("patch", false, "force a patch bump")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+
+	module, err := discover.FindModule(".")
+	if err != nil {
+		return err
+	}
+	git, err := discover.FindGit(ctx, module.Dir)
+	if err != nil {
+		return err
+	}
+	if !git.Clean {
+		return fmt.Errorf("uncommitted changes; a tag names a commit, so commit first")
+	}
+
+	previous, err := discover.PreviousTag(ctx, module.Dir)
+	if err != nil {
+		return err
+	}
+
+	proposal, err := proposeVersion(ctx, module, git, previous, forced(*major, *minor, *patch))
+	if err != nil {
+		return err
+	}
+
+	reportProposal(proposal, previous)
+
+	if discover.TagExists(ctx, module.Dir, proposal.Next) {
+		return fmt.Errorf("%s already exists", proposal.Next)
+	}
+	if !*yes && !confirm(proposal.Next) {
+		fmt.Println("\n  nothing was tagged")
+		return nil
+	}
+
+	if err := discover.CreateTag(ctx, module.Dir, proposal.Next, proposal.Next); err != nil {
+		return err
+	}
+	fmt.Printf("\n  tagged %s\n  push it with: git push origin %s\n", proposal.Next, proposal.Next)
+	return nil
+}
+
+// forced returns the level a flag demands, or bump.None for no flag.
+func forced(major, minor, patch bool) bump.Level {
+	switch {
+	case major:
+		return bump.Major
+	case minor:
+		return bump.Minor
+	case patch:
+		return bump.Patch
+	default:
+		return bump.None
+	}
+}
+
+// proposeVersion gathers both signals and combines them.
+func proposeVersion(ctx context.Context, module discover.Module, git discover.Git, previous string, force bump.Level) (bump.Proposal, error) {
+	if force != bump.None {
+		return bump.Propose(previous, module.Path,
+			bump.Signal{Source: "you", Level: force, Detail: "requested on the command line"})
+	}
+
+	commits, err := discover.Commits(ctx, module.Dir, previous, "HEAD")
+	if err != nil {
+		return bump.Proposal{}, err
+	}
+	notes := changelog.Build(previous, "", commits)
+
+	// The API signal needs an earlier tree to compare against, and something
+	// importable to compare. Where either is missing it simply has no view,
+	// which the report says rather than hides.
+	var changes []gate.Change
+	available := false
+	if previous != "" {
+		old, cleanup, err := checkoutForDiff(ctx, module.Dir, previous)
+		if err == nil {
+			defer cleanup()
+			if changes, err = gate.APIDiff(ctx, old, module.Dir); err == nil {
+				available = true
+			}
+		}
+	}
+
+	return bump.Propose(previous, module.Path,
+		bump.FromAPI(changes, available),
+		bump.FromCommits(notes.Entries))
+}
+
+func checkoutForDiff(ctx context.Context, repoDir, tag string) (string, func(), error) {
+	base, err := os.MkdirTemp("", "letsgo-tag-")
+	if err != nil {
+		return "", nil, err
+	}
+	dir := filepath.Join(base, "previous")
+	if err := discover.AddWorktree(ctx, repoDir, dir, tag); err != nil {
+		os.RemoveAll(base)
+		return "", nil, err
+	}
+	return dir, func() {
+		_ = discover.RemoveWorktree(ctx, repoDir, dir)
+		os.RemoveAll(base)
+	}, nil
+}
+
+func reportProposal(p bump.Proposal, previous string) {
+	from := previous
+	if from == "" {
+		from = "(no earlier tag)"
+	}
+	fmt.Printf("%s \u2192 %s  (%s)\n\n", from, p.Next, p.Level)
+
+	width := 0
+	for _, s := range p.Signals {
+		width = max(width, len(s.Source))
+	}
+	for _, s := range p.Signals {
+		fmt.Printf("  %-*s  %-6s %s\n", width, s.Source, s.Level, s.Detail)
+	}
+
+	// Worth showing rather than resolving silently: the two signals measure
+	// different things, and where they differ one of them is usually telling
+	// you something about the change you did not intend.
+	if p.Disagree() {
+		fmt.Printf("\n  the signals disagree; the larger is used\n")
+	}
+	for _, note := range p.Notes {
+		fmt.Printf("\n  ! %s\n", note)
+	}
+}
+
+func confirm(version string) bool {
+	fmt.Printf("\n  create tag %s? [y/N] ", version)
+
+	reader := bufio.NewReader(os.Stdin)
+	answer, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == "y" || answer == "yes"
 }
 
 // releaseTag is the tag a release is published under.

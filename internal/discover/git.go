@@ -237,3 +237,21 @@ func RemoveWorktree(ctx context.Context, repoDir, dir string) error {
 	_, err := git(ctx, repoDir, "worktree", "remove", "--force", dir)
 	return err
 }
+
+// CreateTag writes an annotated tag at HEAD.
+//
+// Annotated rather than lightweight: a release tag carries an author and a
+// date, and `git describe` prefers them, so the tag that names a release
+// should be an object in its own right rather than a bare pointer.
+func CreateTag(ctx context.Context, dir, tag, message string) error {
+	if _, err := git(ctx, dir, "tag", "-a", tag, "-m", message); err != nil {
+		return err
+	}
+	return nil
+}
+
+// TagExists reports whether a tag is already present.
+func TagExists(ctx context.Context, dir, tag string) bool {
+	_, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/tags/"+tag)
+	return err == nil
+}
