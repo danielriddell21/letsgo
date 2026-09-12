@@ -190,9 +190,9 @@ letsgo build                build + archive + checksum into dist/. no publish
 letsgo release              plan, build, publish. resumable, idempotent
 letsgo release --snapshot   same code path; publishing swapped for a recorder
 letsgo verify [tag]         rebuild from source, compare against published digests
+letsgo tag                  work out the next version from the API and the commits
 letsgo diff <tag> <tag>     size, dependency, and API deltas between two releases
 letsgo yank <tag>           retract a bad release, including the go.mod directive
-letsgo migrate              read .goreleaser.yaml, emit the equivalent letsgo config
 ```
 
 Plus `letsgo fmt` (formats the config) and `letsgo version`.
@@ -484,17 +484,17 @@ resolved ldflags, plus the gate summary.
 
 ## 10. Resumability
 
-State lives in two places, and neither is authoritative alone:
-
-- **Local:** `dist/.letsgo-state.json` records each completed step keyed by
-  content digest. A re-run in the same working directory is near-instant.
-- **Remote:** before uploading, list the release's existing assets and compare
-  name plus digest, falling back to size where the API does not expose a
-  digest. Matching assets are skipped; mismatched assets are deleted and
-  re-uploaded.
+Before uploading, the release's existing assets are listed and compared by name
+and digest, falling back to size where the forge reports no digest. Matching
+assets are skipped; mismatched ones are deleted and re-uploaded.
 
 Because artifacts are reproducible, "already uploaded and correct" is a question
 with a definite answer. That is what makes resume safe rather than hopeful.
+
+There is no local state file. An earlier draft of this design had one, recording
+completed steps by digest so a re-run in the same directory would be instant.
+Building it showed it to be a cache of an answer the forge gives directly, and a
+cache that disagrees with the server is worse than no cache at all.
 
 **Build cache.** Binaries are cached under a content-addressed key of
 `(commit, target, flags, toolchain version)`. Go's own build cache handles
@@ -628,15 +628,22 @@ release. The module path requires case-escaping (uppercase letters become
 
 ## 15. Migration
 
-`letsgo migrate` reads an existing `.goreleaser.yaml` and emits the equivalent
-`letsgo.mod`. For a typical personal repo the output is under ten lines,
-because most of a GoReleaser config restates defaults we already infer.
+Moving a repository off GoReleaser is mostly deletion. Most of a
+`.goreleaser.yaml` describes behaviour letsgo infers, so a ninety-line config
+becomes nothing at all or a `letsgo.mod` of three or four lines.
 
-Anything mapping to a non-goal (Docker, snap, scoop, announcements) is reported
-explicitly as unmigrated with a one-line explanation, never silently dropped.
-The tool must never let you believe a release is equivalent when it is not.
+There is deliberately no `letsgo migrate` command. A converter for a config
+that mostly says "use the defaults" earns little, and the parts that would need
+one are the parts letsgo does not do — where the answer is a decision about
+which tool to use for that repository, not a translation. Building it would
+also have cost the project its only dependency, a YAML parser, to read files
+that are about to be deleted.
 
----
+[MIGRATING.md](MIGRATING.md) carries the mapping, a worked example, and the
+behaviour changes to expect on the first release: a renamed checksum file,
+digests that no longer match because the archives are now reproducible, version
+metadata taken from the commit rather than the clock, and a wrong `-X` path
+that now fails instead of silently producing a binary reporting `dev`.
 
 ## 16. Architecture
 
@@ -656,17 +663,18 @@ internal/verify/       rebuild-and-compare
 internal/diff/         manifest-to-manifest release diffing
 internal/yank/         retraction workflow
 internal/plan/         orchestration and the plan report
-internal/migrate/      .goreleaser.yaml importer
 ```
 
-### Dependency budget: ≤3 direct dependencies
+### Dependency budget: zero direct dependencies
 
 The GitHub API is accessed with `net/http` directly rather than through an SDK;
 we use roughly eight endpoints. Config needs no dependency. Archives,
 compression, and hashing are stdlib. `apidiff` and `govulncheck` are invoked as
-external binaries (§9), keeping them out of the module graph. The one likely
-dependency is a YAML parser used *only* by `migrate`, behind a build tag if
-feasible.
+external binaries (§9), keeping them out of the module graph.
+
+The budget was ≤3, kept for a YAML parser that `migrate` would have needed.
+Writing the migration as documentation instead spends none of it, so `go.mod`
+has no require block at all.
 
 A small dependency tree is not asceticism. This tool signs and publishes your
 releases, so its attack surface is part of its threat model, and a fast
@@ -696,8 +704,9 @@ and `apidiff` gates, plus the API-derived changelog section that falls out of
 the latter.
 
 **M3 — Adoption and afterlife**
-`letsgo migrate`. Homebrew tap generation pointed at our own source archive.
-Generated `install.sh`. `letsgo diff` and size budgets.
+A migration guide (MIGRATING.md) rather than a converter. Homebrew tap
+generation pointed at our own source archive. Generated `install.sh`.
+`letsgo diff` and size budgets.
 
 *MVP complete. letsgo can now replace GoReleaser across the repos it targets,
 and does several things GoReleaser does not.*
@@ -736,6 +745,7 @@ of the design.
    opinionated check in §9 and the most likely to annoy. Default-on with
    `--allow-breaking` is proposed, but default-warn is defensible for a first
    release while we learn its false-positive rate.
-5. **M3 scope.** MVP now carries `diff`, `migrate`, Homebrew, and `verify`
-   between them. If the timeline matters more than completeness, `diff` is the
-   cheapest to defer, since the manifest makes it easy to add later.
+5. **M3 scope.** `migrate` was dropped in favour of a guide, which also
+   returns the dependency budget to zero. What remains is Homebrew,
+   `install.sh`, `diff` and size budgets; `diff` is the cheapest to defer,
+   since the manifest makes it easy to add later.
