@@ -157,3 +157,56 @@ func TrackedFiles(ctx context.Context, dir string) ([]string, error) {
 	}
 	return files, nil
 }
+
+// Commit is one entry from the history.
+type Commit struct {
+	SHA     string
+	Subject string
+	Body    string
+	Author  string
+}
+
+// Commits lists the commits reachable from to but not from from, newest first.
+// An empty from means the whole history.
+//
+// The walk follows first parents only. In a merge-based workflow that reports
+// each pull request once, as its merge commit, rather than reporting the merge
+// and every commit it brought in. In a squash-based workflow there are no
+// merges and it changes nothing.
+func Commits(ctx context.Context, dir, from, to string) ([]Commit, error) {
+	if to == "" {
+		to = "HEAD"
+	}
+	revisions := to
+	if from != "" {
+		revisions = from + ".." + to
+	}
+
+	// Unit and record separators, because a commit body may contain anything
+	// a person can type, newlines and tabs included.
+	const format = "--format=%H%x1f%s%x1f%b%x1f%an%x1e"
+
+	out, err := git(ctx, dir, "log", "--first-parent", format, revisions)
+	if err != nil {
+		return nil, err
+	}
+
+	var commits []Commit
+	for _, record := range strings.Split(out, "\x1e") {
+		record = strings.TrimLeft(record, "\n")
+		if strings.TrimSpace(record) == "" {
+			continue
+		}
+		fields := strings.Split(record, "\x1f")
+		if len(fields) < 4 {
+			continue
+		}
+		commits = append(commits, Commit{
+			SHA:     fields[0],
+			Subject: strings.TrimSpace(fields[1]),
+			Body:    strings.TrimSpace(fields[2]),
+			Author:  strings.TrimSpace(fields[3]),
+		})
+	}
+	return commits, nil
+}
