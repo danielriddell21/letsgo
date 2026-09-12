@@ -47,10 +47,13 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          # Pinned to an exact patch, not "stable". Compiler and linker output
-          # can differ between Go releases, and the toolchain is a build
-          # input: a release built with a different one cannot reproduce.
-          go-version: "1.26.8"
+          # Read from go.mod, which carries an exact patch version rather than
+          # a major.minor. Compiler and linker output can differ between Go
+          # releases, and the toolchain is a build input: a release built with
+          # a different one cannot reproduce. Keeping the pin in go.mod means
+          # CI, the reproducibility runs and the release all read the same
+          # number, and it travels in the source archive.
+          go-version-file: go.mod
           check-latest: false
 
       # Everything cheap happens before anything expensive. A misconfigured
