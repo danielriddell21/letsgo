@@ -56,6 +56,11 @@ type Request struct {
 
 	// GoBin overrides the toolchain binary. Defaults to "go" on PATH.
 	GoBin string
+
+	// Toolchain pins the Go version, e.g. "go1.24.7". The toolchain is a
+	// build input, so reproducing a release means compiling with the one it
+	// recorded; Go fetches a version it does not have.
+	Toolchain string
 }
 
 // Build compiles a single binary.
@@ -100,7 +105,7 @@ func Build(ctx context.Context, req Request) error {
 
 	cmd := exec.CommandContext(ctx, gobin, args...)
 	cmd.Dir = req.Dir
-	cmd.Env = environ(req.Target)
+	cmd.Env = environ(req.Target, req.Toolchain)
 
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -149,7 +154,7 @@ var passthrough = []string{
 	"NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
 }
 
-func environ(t Target) []string {
+func environ(t Target, toolchain string) []string {
 	env := make(map[string]string, len(passthrough)+6)
 
 	for _, key := range passthrough {
@@ -174,6 +179,10 @@ func environ(t Target) []string {
 
 	// Locale can affect tool output formatting. Pin it for good measure.
 	env["LC_ALL"] = "C"
+
+	if toolchain != "" {
+		env["GOTOOLCHAIN"] = toolchain
+	}
 
 	out := make([]string, 0, len(env))
 	for k, v := range env {

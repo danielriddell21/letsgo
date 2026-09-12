@@ -18,6 +18,13 @@ permissions:
   # Creating the release and attaching assets.
   contents: write
 
+  # Provenance. The attestation is signed with a short-lived identity minted
+  # for this run, so there is no key to store and none to rotate; what it
+  # attests to is the workflow, repository and commit that produced the
+  # artifact, which is the one thing rebuilding cannot establish.
+  id-token: write
+  attestations: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -58,6 +65,15 @@ jobs:
         run: go run ./cmd/letsgo release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Records which workflow built these bytes. Keyed by digest, so it
+      # applies equally to the copies already uploaded.
+      - name: attest provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
 
       # Kept for inspection when a run needs explaining. The artifacts are
       # reproducible, so this is a convenience rather than the only copy.

@@ -95,3 +95,25 @@ func WriteSource(ctx context.Context, o SourceOptions) (Source, error) {
 
 	return Source{Name: name, SHA256: sum, Size: info.Size()}, nil
 }
+
+// DocumentationFiles are the repository-root files included in each archive
+// when they exist.
+//
+// Exported because verification has to reach the same answer as the release
+// did from the same tree; two copies of this list would be two chances to
+// disagree about what a published archive contains.
+var DocumentationFiles = []string{
+	"README.md", "README", "LICENSE", "LICENSE.md", "CHANGELOG.md",
+}
+
+// FindDocumentation returns the documentation files present in dir, in a
+// fixed order.
+func FindDocumentation(dir string) []string {
+	var found []string
+	for _, name := range DocumentationFiles {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			found = append(found, name)
+		}
+	}
+	return found
+}

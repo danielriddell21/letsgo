@@ -61,6 +61,14 @@ type Options struct {
 	// ExtraLDFlags are appended after the version-injection flags.
 	ExtraLDFlags []string
 
+	// ExactLDFlags, when set, replaces the derived version-injection flags
+	// entirely. Verification uses it to replay the flags a release recorded
+	// rather than reconstruct them and hope the reconstruction matches.
+	ExactLDFlags []string
+
+	// Toolchain pins the Go version, e.g. "go1.24.7".
+	Toolchain string
+
 	// Smoke, when set, runs the host-platform binary before the rest of the
 	// matrix is built. Skipped automatically when the host is not a target.
 	Smoke *Smoke
@@ -127,6 +135,9 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 		"-X", "main.commit=" + o.Commit,
 		"-X", "main.date=" + o.ModTime.UTC().Format(time.RFC3339),
 	}
+	if len(o.ExactLDFlags) > 0 {
+		ldflags = o.ExactLDFlags
+	}
 	ldflags = append(ldflags, o.ExtraLDFlags...)
 	ldflagString := strings.Join(append([]string{"-s", "-w"}, ldflags...), " ")
 
@@ -146,12 +157,13 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 		}
 
 		err := gobuild.Build(ctx, gobuild.Request{
-			Dir:     o.ModuleDir,
-			Package: o.Package,
-			Output:  binPath,
-			Target:  target,
-			LDFlags: ldflags,
-			GoBin:   o.GoBin,
+			Dir:       o.ModuleDir,
+			Package:   o.Package,
+			Output:    binPath,
+			Target:    target,
+			LDFlags:   ldflags,
+			GoBin:     o.GoBin,
+			Toolchain: o.Toolchain,
 		})
 		if err != nil {
 			return nil, err

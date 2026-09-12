@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/archive"
+	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
@@ -486,12 +487,11 @@ func (p *Plan) resolveFiles() {
 		return
 	}
 
-	// Conventional documentation, included when present.
-	for _, candidate := range []string{"README.md", "README", "LICENSE", "LICENSE.md", "CHANGELOG.md"} {
-		if _, err := os.Stat(filepath.Join(p.Module.Dir, candidate)); err == nil {
-			p.Files = append(p.Files, candidate)
-		}
-	}
+	// Conventional documentation, included when present. The list lives in
+	// internal/build so verification reaches the same answer from the same
+	// tree rather than keeping a second copy of it.
+	p.Files = build.FindDocumentation(p.Module.Dir)
+
 	if len(p.Files) > 0 {
 		p.note("archive files", strings.Join(p.Files, ", "), "found in the repository root")
 	}

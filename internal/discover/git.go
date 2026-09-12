@@ -210,3 +210,30 @@ func Commits(ctx context.Context, dir, from, to string) ([]Commit, error) {
 	}
 	return commits, nil
 }
+
+// AddWorktree checks commit out into dir as a detached worktree.
+//
+// A worktree rather than a checkout because verification must not disturb the
+// caller's working copy: someone verifying a release should not find their
+// branch moved when it finishes.
+func AddWorktree(ctx context.Context, repoDir, dir, commit string) error {
+	if _, err := git(ctx, repoDir, "cat-file", "-e", commit+"^{commit}"); err != nil {
+		return fmt.Errorf("discover: %s does not contain commit %s", repoDir, commit)
+	}
+	// Checked out with content filters disabled so the files land exactly as
+	// the index holds them. Git's default on Windows rewrites line endings on
+	// checkout, which would hand a rebuild different source bytes from the
+	// ones the release was compiled from — a verification failure with no
+	// defect behind it.
+	_, err := git(ctx, repoDir,
+		"-c", "core.autocrlf=false",
+		"-c", "core.eol=lf",
+		"worktree", "add", "--quiet", "--detach", dir, commit)
+	return err
+}
+
+// RemoveWorktree discards a worktree created by AddWorktree.
+func RemoveWorktree(ctx context.Context, repoDir, dir string) error {
+	_, err := git(ctx, repoDir, "worktree", "remove", "--force", dir)
+	return err
+}

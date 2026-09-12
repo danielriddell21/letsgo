@@ -503,3 +503,82 @@ func (c *Client) CanCreateRelease(ctx context.Context, repo Repo) (bool, error) 
 		return false, fmt.Errorf("%w: %s", ErrIndeterminate, apiErr)
 	}
 }
+
+// DownloadAsset fetches a release asset's content.
+//
+// The asset API returns metadata by default and the file itself only when
+// asked for a media type it cannot represent as JSON.
+func (c *Client) DownloadAsset(ctx context.Context, repo Repo, assetID int64) ([]byte, error) {
+	url := fmt.Sprintf("%s/repos/%s/releases/assets/%d", c.api, repo, assetID)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("github: %w", err)
+	}
+	c.setHeaders(req)
+	req.Header.Set("Accept", "application/octet-stream")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("github: downloading asset %d: %w", assetID, err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return nil, fmt.Errorf("github: reading asset %d: %w", assetID, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return nil, parseError(req, resp, data)
+	}
+	return data, nil
+}
+
+// LatestRelease returns the most recent published release, or nil when the
+// repository has none. Drafts and prereleases are excluded by the forge.
+func (c *Client) LatestRelease(ctx context.Context, repo Repo) (*Release, error) {
+	var release Release
+	url := fmt.Sprintf("%s/repos/%s/releases/latest", c.api, repo)
+
+	err := c.do(ctx, http.MethodGet, url, nil, "", &release)
+	if NotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &release, nil
+}
+
+// Attestation is a signed statement about how an artifact was produced.
+type Attestation struct {
+	Bundle struct {
+		MediaType            string `json:"mediaType"`
+		VerificationMaterial struct {
+			Certificate struct {
+				RawBytes string `json:"rawBytes"`
+			} `json:"certificate"`
+		} `json:"verificationMaterial"`
+	} `json:"bundle"`
+	RepositoryID int64 `json:"repository_id"`
+}
+
+// Attestations returns the provenance recorded for an artifact digest.
+//
+// An empty result is not an error: most releases have none, and saying so is
+// more useful than failing.
+func (c *Client) Attestations(ctx context.Context, repo Repo, sha256Hex string) ([]Attestation, error) {
+	var result struct {
+		Attestations []Attestation `json:"attestations"`
+	}
+
+	url := fmt.Sprintf("%s/repos/%s/attestations/sha256:%s", c.api, repo, sha256Hex)
+	err := c.do(ctx, http.MethodGet, url, nil, "", &result)
+	if NotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return result.Attestations, nil
+}

@@ -14,11 +14,13 @@ import (
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
+	"github.com/danielriddell21/letsgo/internal/verify"
 )
 
 // version is replaced at link time. It is declared exactly the way letsgo
@@ -33,6 +35,7 @@ usage:
   letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
   letsgo release [--draft] [-o dir]      build and publish, resumably
   letsgo release --snapshot              rehearse a release without publishing
+  letsgo verify [tag]                    rebuild a published release and compare it
   letsgo fmt [file]                      format letsgo.mod
   letsgo version                         print the version (also --version)
 
@@ -55,6 +58,8 @@ func main() {
 		err = runBuild(args)
 	case "release":
 		err = runRelease(args)
+	case "verify":
+		err = runVerify(args)
 	case "fmt":
 		err = runFmt(args)
 	case "version", "--version", "-version", "-v":
@@ -75,6 +80,9 @@ func main() {
 // errPlanFailed marks a failure already reported in full by the plan output,
 // so main does not print a second, vaguer version of the same thing.
 var errPlanFailed = errors.New("plan failed")
+
+// errVerifyFailed likewise: the report already names every mismatch.
+var errVerifyFailed = errors.New("verification failed")
 
 func runPlan(args []string) error {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)
@@ -265,6 +273,81 @@ func runRelease(args []string) error {
 
 	fmt.Printf("\n  released in %s\n  %s\n", took(started), published.Release.HTMLURL)
 	return nil
+}
+
+func runVerify(args []string) error {
+	fs := flag.NewFlagSet("verify", flag.ExitOnError)
+	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
+	repoFlag := fs.String("repo", "", "repository to verify as owner/name (default: this repository's origin)")
+	noRebuild := fs.Bool("no-rebuild", false, "compare published assets against the manifest without rebuilding")
+	work := fs.String("work", "", "scratch directory (default: a temporary one)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	started := time.Now()
+
+	repo, dir, err := verifyTarget(ctx, *repoFlag)
+	if err != nil {
+		return err
+	}
+
+	workDir := *work
+	if workDir == "" {
+		workDir, err = os.MkdirTemp("", "letsgo-verify-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(workDir)
+	}
+
+	tokenValue, _ := plan.Token(*token)
+	client := github.New(tokenValue)
+	client.UserAgent = "letsgo/" + version
+
+	result, err := verify.Run(ctx, verify.Options{
+		Client: client, Repo: repo, Tag: fs.Arg(0),
+		Dir: dir, WorkDir: workDir, SkipRebuild: *noRebuild,
+	})
+	if err != nil {
+		return err
+	}
+
+	result.Report(os.Stdout)
+
+	if !result.OK() {
+		fmt.Printf("\n  %s does not verify (%s)\n", result.Tag, took(started))
+		return errVerifyFailed
+	}
+	fmt.Printf("\n  %s verified in %s\n", result.Tag, took(started))
+	return nil
+}
+
+// verifyTarget resolves which repository to verify and, where possible, a
+// local checkout to rebuild from.
+//
+// Verifying someone else's release is the point, so a repository outside the
+// current directory is allowed; it simply cannot be rebuilt from a local
+// checkout, and the report says so.
+func verifyTarget(ctx context.Context, explicit string) (github.Repo, string, error) {
+	if explicit != "" {
+		owner, name, ok := strings.Cut(explicit, "/")
+		if !ok || owner == "" || name == "" {
+			return github.Repo{}, "", fmt.Errorf("--repo must be owner/name, got %q", explicit)
+		}
+		return github.Repo{Owner: owner, Name: name}, "", nil
+	}
+
+	module, err := discover.FindModule(".")
+	if err != nil {
+		return github.Repo{}, "", fmt.Errorf("%w (use --repo to verify a release elsewhere)", err)
+	}
+	found, err := discover.FindRepo(ctx, module.Dir)
+	if err != nil {
+		return github.Repo{}, "", err
+	}
+	return github.Repo{Owner: found.Owner, Name: found.Name}, module.Dir, nil
 }
 
 // releaseTag is the tag a release is published under.
