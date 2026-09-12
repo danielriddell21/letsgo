@@ -69,6 +69,15 @@ type Options struct {
 	// Toolchain pins the Go version, e.g. "go1.24.7".
 	Toolchain string
 
+	// CacheKey identifies the source these binaries are built from, enabling
+	// reuse across runs. Empty disables caching, which is correct whenever the
+	// inputs are not fully described by a key — a dirty worktree, or a
+	// verification, where reusing an earlier build would prove nothing.
+	CacheKey string
+
+	// Cache holds previously built binaries. Nil disables caching.
+	Cache *Cache
+
 	// Smoke, when set, runs the host-platform binary before the rest of the
 	// matrix is built. Skipped automatically when the host is not a target.
 	Smoke *Smoke
@@ -147,6 +156,7 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 	targets = hostFirst(targets)
 
 	out := make([]Artifact, 0, len(targets))
+	cached := 0
 
 	for _, target := range targets {
 		binName := o.Name + target.Ext()
@@ -156,17 +166,29 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 			return nil, fmt.Errorf("build: %w", err)
 		}
 
-		err := gobuild.Build(ctx, gobuild.Request{
-			Dir:       o.ModuleDir,
-			Package:   o.Package,
-			Output:    binPath,
-			Target:    target,
-			LDFlags:   ldflags,
-			GoBin:     o.GoBin,
-			Toolchain: o.Toolchain,
-		})
-		if err != nil {
-			return nil, err
+		// The key covers everything that determines these bytes. A build
+		// reused on a partial key would be a build nobody can account for.
+		var key string
+		if o.CacheKey != "" {
+			key = CacheKey(o.CacheKey, o.Package, target.String(),
+				strings.Join(ldflags, " "), o.Toolchain, binName)
+		}
+
+		if o.Cache.Get(key, binPath) {
+			cached++
+		} else {
+			if err := gobuild.Build(ctx, gobuild.Request{
+				Dir:       o.ModuleDir,
+				Package:   o.Package,
+				Output:    binPath,
+				Target:    target,
+				LDFlags:   ldflags,
+				GoBin:     o.GoBin,
+				Toolchain: o.Toolchain,
+			}); err != nil {
+				return nil, err
+			}
+			o.Cache.Put(key, binPath)
 		}
 
 		if o.Smoke != nil && target == gobuild.Host() {
@@ -220,6 +242,10 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 			BinarySHA256:  binSum,
 			ArchiveSHA256: archiveSum,
 		})
+	}
+
+	if cached > 0 && o.Warnf != nil {
+		o.Warnf("%d of %d binaries reused from the build cache", cached, len(targets))
 	}
 
 	slices.SortFunc(out, func(a, b Artifact) int { return strings.Compare(a.Archive, b.Archive) })

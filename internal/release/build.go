@@ -52,6 +52,15 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 	// somewhere to write, not that the value survived to main.
 	smoke := &build.Smoke{Want: p.Version}
 
+	// Cached only when the commit fully describes the source. A dirty
+	// worktree has inputs no key can capture, so a hit would be a build
+	// nobody could account for.
+	cacheKey := ""
+	if p.Git.Clean {
+		cacheKey = p.Git.Commit
+	}
+	cache := build.OpenCache("")
+
 	var artifacts []build.Artifact
 	for _, cmd := range p.Commands {
 		name := p.Project
@@ -72,6 +81,8 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 			WorkDir:      dir,
 			Smoke:        smoke,
 			Warnf:        warnf,
+			CacheKey:     cacheKey,
+			Cache:        cache,
 		})
 		if err != nil {
 			return nil, err

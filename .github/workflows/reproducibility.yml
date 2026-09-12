@@ -10,7 +10,7 @@ env:
   # skew between two runners would look like a reproducibility failure. The
   # toolchain is a build input, and a release manifest records it for the same
   # reason.
-  GO_VERSION: "1.24.7"
+  GO_VERSION: "1.26.8"
 
 jobs:
   # Does a machine agree with itself? Varies source directory, work directory,

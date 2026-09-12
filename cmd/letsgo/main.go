@@ -90,6 +90,7 @@ func runPlan(args []string) error {
 	snapshot := fs.Bool("snapshot", false, "plan an untagged working version")
 	allowDirty := fs.Bool("allow-dirty", false, "permit an unclean worktree")
 	publishGates := fs.Bool("publish", false, "also check the gates a release needs: a forge, and a token that may write to it")
+	analyse := fs.Bool("analyse", false, "also run the slower analysis gates, as a release does")
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -98,7 +99,7 @@ func runPlan(args []string) error {
 	started := time.Now()
 	p, err := plan.Resolve(context.Background(), plan.Options{
 		Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty,
-		Publish: *publishGates, Token: *token,
+		Publish: *publishGates, Token: *token, Analyse: *analyse,
 	})
 	if err != nil {
 		return err
@@ -169,6 +170,7 @@ func runRelease(args []string) error {
 	skipWarm := fs.Bool("no-proxy-warm", false, "skip priming the Go module proxy")
 	snapshot := fs.Bool("snapshot", false, "rehearse the release without publishing anything")
 	appendNotes := fs.Bool("append-notes", false, "add the changelog after an existing release description instead of replacing it")
+	allowVulnerable := fs.Bool("allow-vulnerable", false, "publish despite reachable vulnerabilities, recording which were accepted")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -180,6 +182,7 @@ func runRelease(args []string) error {
 	// them are not run.
 	p, err := plan.Resolve(ctx, plan.Options{
 		Dir: ".", Publish: !*snapshot, Token: *token, Snapshot: *snapshot,
+		Analyse: true, AllowVulnerable: *allowVulnerable,
 	})
 	if err != nil {
 		return err

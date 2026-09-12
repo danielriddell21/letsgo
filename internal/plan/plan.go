@@ -12,6 +12,7 @@ package plan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
@@ -48,6 +50,17 @@ type Options struct {
 
 	// APIEndpoint overrides the forge API host. Empty means the real one.
 	APIEndpoint string
+
+	// Analyse runs the gates that need program analysis rather than
+	// inspection. They take seconds rather than milliseconds, so a bare plan
+	// leaves them out and a release does not: the promise that a plan fails in
+	// about two seconds is about configuration mistakes, and paying for an
+	// analysis on every iteration would trade that away for little.
+	Analyse bool
+
+	// AllowVulnerable publishes despite reachable vulnerabilities, recording
+	// which were accepted rather than hiding them.
+	AllowVulnerable bool
 }
 
 // Status is the outcome of one check.
@@ -165,6 +178,9 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	if opts.Publish {
 		p.checkForge(ctx, opts)
 	}
+	if opts.Analyse {
+		p.checkVulnerabilities(ctx, opts)
+	}
 
 	return p, nil
 }
@@ -185,6 +201,45 @@ func Token(override string) (token, source string) {
 		}
 	}
 	return "", ""
+}
+
+// checkVulnerabilities refuses to publish a binary that can reach known
+// vulnerable code.
+//
+// The claim is deliberately narrow. Not "this release has no vulnerable
+// dependencies", which is unachievable and would block every release, but
+// "nothing in this binary can execute code with a known advisory against it".
+// That is checkable, actionable, and rare enough to be worth stopping for.
+func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
+	found, err := gate.Vulncheck(ctx, p.Module.Dir)
+
+	switch {
+	case errors.Is(err, gate.ErrToolMissing):
+		// A gate that did not run is not a gate that passed.
+		p.add("vulnerabilities", Skip, "%v", err)
+		return
+	case err != nil:
+		p.add("vulnerabilities", Warn, "could not be checked: %v", err)
+		return
+	case len(found) == 0:
+		p.add("vulnerabilities", Pass, "no reachable vulnerabilities")
+		return
+	}
+
+	lines := make([]string, 0, len(found)+1)
+	for _, v := range found {
+		lines = append(lines, v.String())
+	}
+
+	if opts.AllowVulnerable {
+		// Recorded rather than suppressed: the manifest carries gate results,
+		// so a consumer can see what this release was published in spite of.
+		p.add("vulnerabilities", Warn, "%s\naccepted with --allow-vulnerable", strings.Join(lines, "\n"))
+		return
+	}
+
+	lines = append(lines, "override with --allow-vulnerable")
+	p.add("vulnerabilities", Fail, "%s", strings.Join(lines, "\n"))
 }
 
 func underActions() bool { return os.Getenv("GITHUB_ACTIONS") == "true" }
