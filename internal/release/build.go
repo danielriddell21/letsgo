@@ -28,6 +28,10 @@ type Result struct {
 	Artifacts []build.Artifact
 	Source    build.Source
 
+	// Images are assembled but not pushed. Their digests are already fixed,
+	// which is why the manifest can name them.
+	Images []ImageBuild
+
 	// Files are the names of every file to publish, in upload order.
 	Files []string
 }
@@ -115,6 +119,14 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 		return nil, err
 	}
 
+	// Assembled here, published later. An image's digest is a pure function of
+	// its inputs, so it is known before anything reaches a registry — which is
+	// the only order in which the manifest can record it.
+	images, err := buildImages(ctx, p, artifacts, warnf)
+	if err != nil {
+		return nil, err
+	}
+
 	m := &manifest.Manifest{
 		Schema:          manifest.Schema,
 		Project:         p.Project,
@@ -127,6 +139,7 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 		Modules:         mods,
 		Gates:           gates(p),
 		APIChanges:      apiChanges(p),
+		Images:          imageRecords(images),
 	}
 
 	for _, a := range artifacts {
@@ -180,7 +193,10 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 	}
 	files = append(files, build.ChecksumFile)
 
-	return &Result{Dir: dir, Manifest: m, Artifacts: artifacts, Source: source, Files: files}, nil
+	return &Result{
+		Dir: dir, Manifest: m, Artifacts: artifacts, Source: source,
+		Images: images, Files: files,
+	}, nil
 }
 
 // apiChanges carries the exported API delta into the manifest, so comparing

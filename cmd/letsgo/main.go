@@ -169,6 +169,14 @@ func runBuild(args []string) error {
 	fmt.Printf("    %s  %s\n", result.Source.SHA256[:12], result.Source.Name)
 	fmt.Printf("    %-12s  %s\n", "", manifest.FileName)
 	fmt.Printf("    %-12s  %s\n", "", build.ChecksumFile)
+
+	// The image is assembled, not pushed. Its digest is final either way, so
+	// there is something specific to print rather than a promise.
+	if len(result.Images) > 0 {
+		fmt.Printf("\n  images assembled, not pushed\n")
+		fmt.Print(release.Describe(result.Images))
+	}
+
 	fmt.Printf("\n  %s\n", dir)
 	return nil
 }
@@ -280,6 +288,10 @@ func runRelease(args []string) error {
 		return err
 	}
 
+	if err := publishImages(ctx, p, result, tokenValue, *snapshot); err != nil {
+		return err
+	}
+
 	// Best effort, and deliberately after publication: a proxy that is slow
 	// has not broken a release that is already live.
 	if !*skipWarm && !*snapshot && !published.Release.Draft {
@@ -334,6 +346,7 @@ func runVerify(args []string) error {
 	result, err := verify.Run(ctx, verify.Options{
 		Client: client, Repo: repo, Tag: fs.Arg(0),
 		Dir: dir, WorkDir: workDir, SkipRebuild: *noRebuild,
+		UserAgent: "letsgo/" + version,
 	})
 	if err != nil {
 		return err

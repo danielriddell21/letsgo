@@ -44,16 +44,23 @@ func run() error {
 	// Fixed inputs. Every value that feeds the build is stated here rather
 	// than read from the environment, so the only thing that varies between
 	// two runs of this command is the machine it runs on.
+	modTime := time.Date(2024, 3, 15, 12, 30, 45, 0, time.UTC)
+
 	artifacts, err := repro.Build(context.Background(), repro.Options{
 		ModuleDir:  *fixture,
 		Package:    ".",
 		Name:       "fixture",
 		Version:    "1.2.3",
 		Commit:     "9f2ab1c",
-		ModTime:    time.Date(2024, 3, 15, 12, 30, 45, 0, time.UTC),
+		ModTime:    modTime,
 		ExtraFiles: []string{"README.md", "LICENSE"},
 		WorkDir:    workDir,
 	})
+	if err != nil {
+		return err
+	}
+
+	image, err := repro.ImageDigest(artifacts, "fixture", modTime)
 	if err != nil {
 		return err
 	}
@@ -70,6 +77,7 @@ func run() error {
 	enc.SetIndent("", "  ")
 	return enc.Encode(struct {
 		Go        string           `json:"go"`
+		Image     string           `json:"image"`
 		Artifacts []repro.Artifact `json:"artifacts"`
-	}{Go: version, Artifacts: artifacts})
+	}{Go: version, Image: image, Artifacts: artifacts})
 }

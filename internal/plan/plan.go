@@ -27,6 +27,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
+	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
@@ -103,6 +104,41 @@ type Artifact struct {
 	Format  archive.Format
 }
 
+// ImageTarget is where a release's container images go.
+type ImageTarget struct {
+	// Registry is the host as it is written and published — "docker.io", not
+	// the "registry-1.docker.io" its API answers on. APIHost is the latter.
+	// Recording the written form matters: it is what goes in the manifest and
+	// what someone types into `docker pull`.
+	Registry string
+	APIHost  string
+
+	// Repository is the path under the registry. A module with one command
+	// publishes to Repository; one with several publishes each command to
+	// Repository/<binary>, because a repository holds one image.
+	Repository string
+
+	// Base is the image to stack on. The zero value means scratch.
+	Base oci.Reference
+
+	// Platforms are the targets that get an image, which is the Linux subset
+	// of the build matrix: nothing else runs in a container.
+	Platforms []gobuild.Target
+}
+
+// Repos returns the repository each binary publishes to.
+func (t *ImageTarget) Repos(binaries []string) map[string]string {
+	out := make(map[string]string, len(binaries))
+	for _, binary := range binaries {
+		if len(binaries) == 1 {
+			out[binary] = t.Repository
+			continue
+		}
+		out[binary] = t.Repository + "/" + binary
+	}
+	return out
+}
+
 // Plan is a fully resolved, unexecuted release.
 type Plan struct {
 	Module     discover.Module
@@ -131,6 +167,10 @@ type Plan struct {
 	// Tap is the Homebrew repository a formula is published to. Zero when no
 	// tap is configured.
 	Tap github.Repo
+
+	// Image is the container image a release publishes. Nil when none is
+	// configured, which is the default.
+	Image *ImageTarget
 
 	Checks  []Check
 	Sources []Source
@@ -199,6 +239,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveArtifacts()
 
 	p.resolveTap()
+	p.resolveImage()
 
 	if opts.Publish {
 		p.checkForge(ctx, opts)
@@ -497,6 +538,81 @@ func (p *Plan) resolveTap() {
 	}
 	p.Tap = tap
 	p.note("brew tap", tap.String(), ConfigFile)
+}
+
+// resolveImage works out where the container images go.
+//
+// The reference names a repository and nothing else: the tag comes from the
+// release, so accepting one here would create two answers to what a release is
+// called and let them disagree.
+func (p *Plan) resolveImage() {
+	if p.Config.Image == nil {
+		return
+	}
+
+	reference, source := p.Config.Image.Reference, ConfigFile
+	if reference == "" {
+		if !p.HasRepo {
+			p.add("image", Fail,
+				"no 'origin' remote, so there is no default image name; write one after `image`")
+			return
+		}
+		// ghcr.io mirrors the repository it is released from, which is the
+		// one name nobody has to be told.
+		reference = "ghcr.io/" + p.Repo.Owner + "/" + p.Project
+		source = "the repository owner and project name"
+	}
+
+	ref, err := oci.ParseReference(reference)
+	if err != nil {
+		p.add("image", Fail, "%v", err)
+		return
+	}
+	if ref.Tag != "" || ref.Digest != "" {
+		p.add("image", Fail,
+			"%s carries a tag; the tag comes from the release, so name the repository only", reference)
+		return
+	}
+
+	target := &ImageTarget{
+		Registry: ref.Registry, APIHost: ref.APIHost(), Repository: ref.Repository,
+	}
+	for _, t := range p.Targets {
+		if t.OS == "linux" {
+			target.Platforms = append(target.Platforms, t)
+		}
+	}
+	if len(target.Platforms) == 0 {
+		p.add("image", Fail, "an image was asked for but no linux target is built")
+		return
+	}
+
+	if base := p.Config.Image.Base; base != "" {
+		parsed, err := oci.ParseReference(base)
+		if err != nil {
+			p.add("image", Fail, "image base: %v", err)
+			return
+		}
+		target.Base = parsed
+	}
+
+	p.Image = target
+	p.note("image", ref.Registry+"/"+ref.Repository, source)
+
+	if target.Base == (oci.Reference{}) {
+		p.add("image", Pass, "%s on scratch, for %d platform(s)", reference, len(target.Platforms))
+		return
+	}
+	if target.Base.Digest == "" {
+		// A tag is a moving target. The resolved digest is recorded in the
+		// manifest either way, so this is a warning rather than a refusal.
+		p.add("image", Warn,
+			"%s on %s, for %d platform(s)\n"+
+				"  the base is named by tag, so two releases of the same commit can differ; pin it with @sha256:…",
+			reference, target.Base, len(target.Platforms))
+		return
+	}
+	p.add("image", Pass, "%s on %s, for %d platform(s)", reference, target.Base, len(target.Platforms))
 }
 
 // checkTap establishes that the formula has somewhere to go before anything is

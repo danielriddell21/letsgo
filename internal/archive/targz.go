@@ -13,11 +13,30 @@ import (
 // Two layers each contribute their own sources of nondeterminism, and both are
 // pinned here rather than left to the standard library's defaults.
 func writeTarGz(w io.Writer, entries []Entry, modTime time.Time) error {
+	zw, err := NewGzipWriter(w)
+	if err != nil {
+		return err
+	}
+	if err := writeTar(zw, entries, modTime); err != nil {
+		return err
+	}
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("archive: closing gzip: %w", err)
+	}
+	return nil
+}
+
+// NewGzipWriter returns a gzip writer whose output depends only on its input.
+//
+// Exported because an image layer is compressed outside this package and must
+// be compressed the same way; two definitions of "deterministic gzip" would be
+// one too many.
+func NewGzipWriter(w io.Writer) (*gzip.Writer, error) {
 	// The compression level is part of the output. Pinning it means a future
 	// change to the default cannot silently invalidate published checksums.
 	zw, err := gzip.NewWriterLevel(w, gzip.BestCompression)
 	if err != nil {
-		return fmt.Errorf("archive: gzip writer: %w", err)
+		return nil, fmt.Errorf("archive: gzip writer: %w", err)
 	}
 
 	// gzip headers carry an original filename, a modification time and a byte
@@ -30,13 +49,25 @@ func writeTarGz(w io.Writer, entries []Entry, modTime time.Time) error {
 	zw.ModTime = time.Time{} // zero: written as MTIME 0, meaning "no timestamp"
 	zw.OS = 255              // unknown, rather than the building platform
 
-	tw := tar.NewWriter(zw)
+	return zw, nil
+}
+
+// writeTar writes a deterministic uncompressed tar stream.
+func writeTar(w io.Writer, entries []Entry, modTime time.Time) error {
+	tw := tar.NewWriter(w)
 
 	for _, e := range entries {
+		typeflag, name, size := byte(tar.TypeReg), e.Path, e.Size
+		if e.Dir {
+			// A trailing slash is what every extractor keys on, and a
+			// directory entry carrying a size would be malformed.
+			typeflag, name, size = tar.TypeDir, e.Path+"/", 0
+		}
+
 		hdr := &tar.Header{
-			Typeflag: tar.TypeReg,
-			Name:     e.Path,
-			Size:     e.Size,
+			Typeflag: typeflag,
+			Name:     name,
+			Size:     size,
 			Mode:     int64(e.mode()),
 			ModTime:  modTime,
 
@@ -63,6 +94,9 @@ func writeTarGz(w io.Writer, entries []Entry, modTime time.Time) error {
 			// Say so, rather than letting the caller guess.
 			return fmt.Errorf("archive: tar header for %q (paths must fit USTAR limits): %w", e.Path, err)
 		}
+		if e.Dir {
+			continue
+		}
 		if err := copyExactly(tw, e); err != nil {
 			return err
 		}
@@ -70,9 +104,6 @@ func writeTarGz(w io.Writer, entries []Entry, modTime time.Time) error {
 
 	if err := tw.Close(); err != nil {
 		return fmt.Errorf("archive: closing tar: %w", err)
-	}
-	if err := zw.Close(); err != nil {
-		return fmt.Errorf("archive: closing gzip: %w", err)
 	}
 	return nil
 }

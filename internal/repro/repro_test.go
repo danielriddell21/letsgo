@@ -151,8 +151,25 @@ func compare(t *testing.T, first, second []repro.Artifact) {
 		}
 	}
 
+	// The container image is published with the same promise, and is assembled
+	// from these same binaries — so if it does not reproduce, the fault is in
+	// the layer writer or the config, and that distinction is worth having.
+	firstImage, err := repro.ImageDigest(first, "fixture", commitTime)
+	if err != nil {
+		t.Fatalf("assembling the first image: %v", err)
+	}
+	secondImage, err := repro.ImageDigest(second, "fixture", commitTime)
+	if err != nil {
+		t.Fatalf("assembling the second image: %v", err)
+	}
+	if firstImage != secondImage {
+		t.Errorf("the container image is not reproducible\n  run 1: %s\n  run 2: %s",
+			firstImage, secondImage)
+	}
+
 	if !t.Failed() {
-		t.Logf("%d artifacts reproduced byte for byte on %s/%s", len(first), runtime.GOOS, runtime.GOARCH)
+		t.Logf("%d artifacts and the image reproduced byte for byte on %s/%s",
+			len(first), runtime.GOOS, runtime.GOARCH)
 	}
 }
 

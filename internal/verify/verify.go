@@ -72,6 +72,10 @@ type Options struct {
 	// SkipRebuild compares the published assets against the manifest without
 	// rebuilding, which needs no toolchain and no source.
 	SkipRebuild bool
+
+	// UserAgent identifies letsgo to registries, which the forge client
+	// carries separately.
+	UserAgent string
 }
 
 // Result is what verification established.
@@ -86,6 +90,10 @@ type Result struct {
 	SourceFrom string
 
 	Checks []Check
+
+	// userAgent identifies letsgo to anything this verification contacts
+	// beyond the forge.
+	userAgent string
 }
 
 // OK reports whether every check passed.
@@ -126,7 +134,10 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		return nil, err
 	}
 
-	result := &Result{Tag: release.TagName}
+	result := &Result{Tag: release.TagName, userAgent: o.UserAgent}
+	if result.userAgent == "" {
+		result.userAgent = "letsgo"
+	}
 
 	m, err := fetchManifest(ctx, o, release)
 	if err != nil {
@@ -138,6 +149,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 
 	comparePublished(result, release, m)
 	checkProvenance(ctx, o, result, m)
+	checkImages(ctx, result, m)
 
 	if o.SkipRebuild {
 		result.add("rebuild", Skip, "not requested")

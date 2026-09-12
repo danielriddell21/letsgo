@@ -108,6 +108,11 @@ type Artifact struct {
 	// nothing else in here distinguishes them.
 	Binary string `json:"binary"`
 
+	// BinaryPath is where the compiled binary sits on disk, for anything that
+	// needs the executable rather than the archive — a container layer, say.
+	// Never serialised: it is a fact about this machine, not about the release.
+	BinaryPath string `json:"-"`
+
 	// Target is the GOOS/GOARCH pair, e.g. "linux/amd64".
 	Target string `json:"target"`
 
@@ -249,6 +254,7 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 		out = append(out, Artifact{
 			Archive:       archiveName,
 			Binary:        o.Name,
+			BinaryPath:    binPath,
 			Target:        target.String(),
 			OS:            target.OS,
 			Arch:          target.Arch,

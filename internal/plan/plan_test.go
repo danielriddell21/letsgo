@@ -350,3 +350,104 @@ func TestBudgetForAnUnbuiltTargetFailsThePlan(t *testing.T) {
 		t.Errorf("budget error does not name the target: %q", c.Detail)
 	}
 }
+
+func TestImageDefaultsToTheRepositoryOwner(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\n\nimage\n")
+	r.commit("v1.0.0")
+	r.git("remote", "add", "origin", "https://github.com/you/foo.git")
+
+	p := r.resolve(plan.Options{})
+
+	if !p.OK() {
+		t.Fatalf("plan should pass: %+v", p.Checks)
+	}
+	if p.Image == nil {
+		t.Fatal("Image = nil")
+	}
+	if p.Image.Registry != "ghcr.io" || p.Image.Repository != "you/foo" {
+		t.Errorf("image = %s/%s", p.Image.Registry, p.Image.Repository)
+	}
+	if len(p.Image.Platforms) != 1 {
+		t.Errorf("platforms = %v", p.Image.Platforms)
+	}
+}
+
+// The tag comes from the release. Accepting one here would create two answers
+// to what a release is called and let them disagree.
+func TestImageReferenceMayNotCarryATag(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\n\nimage ghcr.io/you/foo:v1\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+
+	if p.OK() {
+		t.Fatal("plan passed with a tagged image reference")
+	}
+	if c := check(t, p, "image"); !strings.Contains(c.Detail, "tag") {
+		t.Errorf("image error = %q", c.Detail)
+	}
+}
+
+// An image with no Linux target would be a request nothing could satisfy.
+func TestImageNeedsALinuxTarget(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build darwin/arm64\n\nimage ghcr.io/you/foo\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+
+	if p.OK() {
+		t.Fatal("plan passed with no linux target")
+	}
+	if c := check(t, p, "image"); !strings.Contains(c.Detail, "linux") {
+		t.Errorf("image error = %q", c.Detail)
+	}
+}
+
+// A base named by tag can change under a release, so it is reported — but it
+// is a real thing to want, so it does not block.
+func TestUnpinnedBaseWarnsWithoutBlocking(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\n\nimage ghcr.io/you/foo\nimage base gcr.io/distroless/static:nonroot\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+
+	if !p.OK() {
+		t.Fatalf("an unpinned base should not block: %+v", p.Checks)
+	}
+	c := check(t, p, "image")
+	if c.Status != plan.Warn || !strings.Contains(c.Detail, "sha256") {
+		t.Errorf("image check = %+v", c)
+	}
+}
+
+// No directive means no image, and no check either: a repository that did not
+// ask should see nothing about registries at all.
+func TestNoImageConfiguredMeansNoImageCheck(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+
+	if p.Image != nil {
+		t.Errorf("Image = %+v, want nil", p.Image)
+	}
+	for _, c := range p.Checks {
+		if c.Name == "image" {
+			t.Errorf("an image check appeared unasked: %+v", c)
+		}
+	}
+}
