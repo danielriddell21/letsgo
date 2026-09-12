@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
 // writeInstaller generates the self-verifying installer and returns its name
@@ -34,8 +36,8 @@ func writeInstaller(p *plan.Plan, artifacts []build.Artifact, dir string) (strin
 	script, err := install.Script(install.Options{
 		Project: p.Project,
 		Version: p.Version,
-		BaseURL: fmt.Sprintf("https://github.com/%s/%s/releases/download/%s",
-			p.Repo.Owner, p.Repo.Name, p.Tag),
+		BaseURL: strings.TrimSuffix(
+			github.DownloadURL(github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}, p.Tag, ""), "/"),
 		Targets: targets,
 	})
 	if err != nil {

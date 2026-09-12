@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/bump"
 	"github.com/danielriddell21/letsgo/internal/changelog"
@@ -231,10 +232,14 @@ func runRelease(args []string) error {
 
 	// Everything above this line is identical in a rehearsal. Only the thing
 	// that writes to the world is exchanged.
-	var forge publish.Forge = client
+	var (
+		forge  publish.Forge = client
+		tapAPI brew.FileAPI  = client
+	)
 	if *snapshot {
 		fmt.Println("\n  rehearsal: the calls below would be made, and are not")
-		forge = publish.NewRecorder(os.Stdout)
+		recorder := publish.NewRecorder(os.Stdout)
+		forge, tapAPI = recorder, recorder
 	}
 
 	published, err := publish.Run(ctx, publish.Options{
@@ -268,6 +273,12 @@ func runRelease(args []string) error {
 		fmt.Printf(", replaced %d", len(published.Replaced))
 	}
 	fmt.Println()
+
+	// After publication, because a formula names download URLs that only
+	// exist once the assets are attached.
+	if err := publishTap(ctx, p, result, tapAPI, client, repo); err != nil {
+		return err
+	}
 
 	// Best effort, and deliberately after publication: a proxy that is slow
 	// has not broken a release that is already live.

@@ -103,6 +103,11 @@ type Artifact struct {
 	// Archive is the archive filename, e.g. "foo_1.0.0_linux_amd64.tar.gz".
 	Archive string `json:"archive"`
 
+	// Binary is the executable's name inside the archive. A module with
+	// several commands produces one artifact per command per target, and
+	// nothing else in here distinguishes them.
+	Binary string `json:"binary"`
+
 	// Target is the GOOS/GOARCH pair, e.g. "linux/amd64".
 	Target string `json:"target"`
 
@@ -243,6 +248,7 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 
 		out = append(out, Artifact{
 			Archive:       archiveName,
+			Binary:        o.Name,
 			Target:        target.String(),
 			OS:            target.OS,
 			Arch:          target.Arch,

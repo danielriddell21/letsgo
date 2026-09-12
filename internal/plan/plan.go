@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/archive"
+	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/config"
@@ -127,6 +128,10 @@ type Plan struct {
 	// full matrix has been compiled.
 	Budgets map[string]bytesize.Size
 
+	// Tap is the Homebrew repository a formula is published to. Zero when no
+	// tap is configured.
+	Tap github.Repo
+
 	Checks  []Check
 	Sources []Source
 
@@ -192,6 +197,8 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveCommands()
 	p.resolveFiles()
 	p.resolveArtifacts()
+
+	p.resolveTap()
 
 	if opts.Publish {
 		p.checkForge(ctx, opts)
@@ -471,6 +478,54 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 	}
 
 	p.note("token", source, "environment")
+
+	p.checkTap(ctx, client)
+}
+
+// resolveTap parses the configured Homebrew tap.
+//
+// Separate from checkTap so that a malformed tap is reported by a plain
+// `letsgo plan`, which contacts nothing.
+func (p *Plan) resolveTap() {
+	if p.Config.BrewTap == "" {
+		return
+	}
+	tap, err := brew.ParseTap(p.Config.BrewTap)
+	if err != nil {
+		p.add("brew tap", Fail, "%v", err)
+		return
+	}
+	p.Tap = tap
+	p.note("brew tap", tap.String(), ConfigFile)
+}
+
+// checkTap establishes that the formula has somewhere to go before anything is
+// built. A release that succeeds and then cannot update the tap has left the
+// two out of step, which is worse than not starting.
+func (p *Plan) checkTap(ctx context.Context, client *github.Client) {
+	if p.Tap == (github.Repo{}) {
+		return
+	}
+
+	access, err := client.CheckAccess(ctx, p.Tap)
+	switch {
+	case err != nil:
+		p.add("brew tap", Fail, "%v", err)
+	case access.Archived:
+		p.add("brew tap", Fail, "%s is archived and cannot receive a formula", p.Tap)
+	case access.CanPush:
+		p.add("brew tap", Pass, "%s can receive the formula", p.Tap)
+	case underActions():
+		// Same limitation as the release token: an installation token's
+		// permissions are not described by the repository endpoint, and a
+		// tap in another repository needs a token this one cannot inspect.
+		p.add("brew tap", Warn,
+			"whether this token can write to %s cannot be confirmed from inside Actions\n"+
+				"  a workflow token cannot write to another repository; the tap needs a PAT or an App token",
+			p.Tap)
+	default:
+		p.add("brew tap", Fail, "this token cannot write to %s", p.Tap)
+	}
 }
 
 func (p *Plan) loadConfig(moduleDir string) {
