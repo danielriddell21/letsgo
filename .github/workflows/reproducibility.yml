@@ -4,48 +4,45 @@ on:
   push:
   pull_request:
 
-env:
-  # Pinned to an exact patch release rather than "stable" on purpose. Compiler
-  # and linker output can legitimately differ between Go versions, so a version
-  # skew between two runners would look like a reproducibility failure. The
-  # toolchain is a build input, and a release manifest records it for the same
-  # reason.
-  GO_VERSION: "1.26.8"
-
 jobs:
-  # Does a machine agree with itself? Varies source directory, work directory,
-  # TMPDIR, wall clock and build cache within a single host.
+  # Lint, vet, build and test, on every platform letsgo runs on.
+  #
+  # This is the shared reusable workflow the other repos call, but fanned out
+  # over a matrix instead of a single runner: a release tool has to be correct
+  # on all three, and the test suite is also the same-machine reproducibility
+  # check, varying source directory, work directory, TMPDIR, wall clock and
+  # build cache within one host.
   same-machine:
     name: same machine (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: false
+    uses: danielriddell21/github-actions/.github/workflows/ci.yaml@v1
+    # Nothing here writes: tagging is letsgo's own job, not this workflow's.
+    permissions:
+      contents: read
+    with:
+      runs-on: ${{ matrix.os }}
+      vet: true
 
-      - name: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "::error::gofmt needed for:"
-            echo "$unformatted"
-            exit 1
-          fi
+      # The repro suite rebuilds fixtures repeatedly, so it needs longer than
+      # the 10m default.
+      test-command: go test -coverprofile=coverage.txt ./... -timeout 20m
 
-      - name: vet
-        run: go vet ./...
+      # One upload is enough; three would be the same lines counted three
+      # times under different runners.
+      coverage: ${{ matrix.os == 'ubuntu-latest' }}
 
-      - name: test
-        run: go test ./... -v -timeout 20m
+      # letsgo tags itself with `letsgo tag`, and release.yml fires on the tag
+      # push. A second tagger here would race its own release path — and on a
+      # matrix it would race two copies of itself as well.
+      tag: false
+
+      # No .gremlins.yaml yet.
+      mutate: false
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
   # Do two machines agree with each other? This is the claim a third party
   # relies on when they run letsgo verify on hardware we do not control, and
@@ -62,9 +59,15 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      # go.mod carries an exact patch version, not a major.minor. Compiler and
+      # linker output can legitimately differ between Go releases, so skew
+      # between two runners would look like a reproducibility failure. The
+      # toolchain is a build input, and the release manifest records it for the
+      # same reason — reading it from go.mod keeps one source of truth, shared
+      # with the shared workflow above.
       - uses: actions/setup-go@v5
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version-file: go.mod
           check-latest: false
 
       - name: build fixture and record digests
