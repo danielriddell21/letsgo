@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: ["trunk"]
+  pull_request:
+    branches: ["trunk"]
+
+jobs:
+  ci:
+    uses: danielriddell21/github-actions/.github/workflows/ci.yaml@v1
+    # Nothing here writes: tagging is letsgo's own job, not this workflow's.
+    permissions:
+      contents: read
+    with:
+      vet: true
+
+      # The repro suite rebuilds fixtures repeatedly, so it needs longer than
+      # the 10m default.
+      test-command: go test -coverprofile=coverage.txt ./... -timeout 20m
+
+      # letsgo tags itself with `letsgo tag`, and release.yml fires on the tag
+      # push. A second tagger here would race its own release path.
+      tag: false
+
+      # No .gremlins.yaml yet.
+      mutate: false
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
