@@ -14,7 +14,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/config"
-	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
@@ -30,9 +29,10 @@ var version = "dev"
 const usage = `letsgo builds and publishes Go releases.
 
 usage:
-  letsgo plan [--explain] [--snapshot]   resolve and check a release without performing one
+  letsgo plan [--explain] [--publish]    resolve and check a release without performing one
   letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
   letsgo release [--draft] [-o dir]      build and publish, resumably
+  letsgo release --snapshot              rehearse a release without publishing
   letsgo fmt [file]                      format letsgo.mod
   letsgo version                         print the version (also --version)
 
@@ -81,6 +81,8 @@ func runPlan(args []string) error {
 	explain := fs.Bool("explain", false, "show where each resolved value came from")
 	snapshot := fs.Bool("snapshot", false, "plan an untagged working version")
 	allowDirty := fs.Bool("allow-dirty", false, "permit an unclean worktree")
+	publishGates := fs.Bool("publish", false, "also check the gates a release needs: a forge, and a token that may write to it")
+	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -88,6 +90,7 @@ func runPlan(args []string) error {
 	started := time.Now()
 	p, err := plan.Resolve(context.Background(), plan.Options{
 		Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty,
+		Publish: *publishGates, Token: *token,
 	})
 	if err != nil {
 		return err
@@ -156,6 +159,7 @@ func runRelease(args []string) error {
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	out := fs.String("o", "dist", "output directory")
 	skipWarm := fs.Bool("no-proxy-warm", false, "skip priming the Go module proxy")
+	snapshot := fs.Bool("snapshot", false, "rehearse the release without publishing anything")
 	appendNotes := fs.Bool("append-notes", false, "add the changelog after an existing release description instead of replacing it")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -164,7 +168,11 @@ func runRelease(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	p, err := plan.Resolve(ctx, plan.Options{Dir: ".", Publish: true, Token: *token})
+	// A rehearsal needs no forge and no token, so the gates that check for
+	// them are not run.
+	p, err := plan.Resolve(ctx, plan.Options{
+		Dir: ".", Publish: !*snapshot, Token: *token, Snapshot: *snapshot,
+	})
 	if err != nil {
 		return err
 	}
@@ -188,25 +196,35 @@ func runRelease(args []string) error {
 	}
 	fmt.Printf("\n  built %d files\n", len(result.Files))
 
-	notes, err := releaseNotes(ctx, p)
-	if err != nil {
-		return err
-	}
-
 	tokenValue, _ := plan.Token(*token)
 	client := github.New(tokenValue)
 	client.UserAgent = "letsgo/" + version
 
+	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
+
+	notes, err := releaseNotes(ctx, p, client, repo)
+	if err != nil {
+		return err
+	}
+
+	// Everything above this line is identical in a rehearsal. Only the thing
+	// that writes to the world is exchanged.
+	var forge publish.Forge = client
+	if *snapshot {
+		fmt.Println("\n  rehearsal: the calls below would be made, and are not")
+		forge = publish.NewRecorder(os.Stdout)
+	}
+
 	published, err := publish.Run(ctx, publish.Options{
-		Client: client,
-		Repo:   github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name},
+		Client: forge,
+		Repo:   repo,
 		Dir:    dir,
 		Files:  result.Files,
 		Sums:   sumsFrom(result),
 		Notes:  notesMode(*appendNotes),
 		Release: github.ReleaseInput{
-			TagName:         p.Tag,
-			Name:            p.Tag,
+			TagName:         releaseTag(p),
+			Name:            releaseTag(p),
 			Body:            notes,
 			Draft:           *draft || p.Config.Draft,
 			Prerelease:      isPrerelease(p),
@@ -231,7 +249,7 @@ func runRelease(args []string) error {
 
 	// Best effort, and deliberately after publication: a proxy that is slow
 	// has not broken a release that is already live.
-	if !*skipWarm && !published.Release.Draft {
+	if !*skipWarm && !*snapshot && !published.Release.Draft {
 		if err := publish.WarmProxy(ctx, "", p.Module.Path, p.Version); err != nil {
 			fmt.Printf("  ! could not prime the module proxy: %v\n", err)
 			fmt.Printf("    `go install` may fail briefly until the proxy fetches %s\n", p.Tag)
@@ -240,8 +258,26 @@ func runRelease(args []string) error {
 		}
 	}
 
+	if *snapshot {
+		fmt.Printf("\n  rehearsed in %s \u00b7 nothing was published\n  artifacts: %s\n", took(started), dir)
+		return nil
+	}
+
 	fmt.Printf("\n  released in %s\n  %s\n", took(started), published.Release.HTMLURL)
 	return nil
+}
+
+// releaseTag is the tag a release is published under.
+//
+// A real release always has one, because the plan will not pass without it. A
+// rehearsal does not, so the version supplies it: showing an empty tag name
+// would misrepresent the call being rehearsed, and the point of a rehearsal is
+// that it does not misrepresent anything.
+func releaseTag(p *plan.Plan) string {
+	if p.Tag != "" {
+		return p.Tag
+	}
+	return "v" + p.Version
 }
 
 func notesMode(appendNotes bool) publish.NotesMode {
@@ -252,13 +288,21 @@ func notesMode(appendNotes bool) publish.NotesMode {
 }
 
 // releaseNotes builds the changelog for everything since the previous tag.
-func releaseNotes(ctx context.Context, p *plan.Plan) (string, error) {
-	previous, err := discover.PreviousTag(ctx, p.Module.Dir)
-	if err != nil {
-		return "", err
+//
+// A shallow checkout is the normal shape of a CI clone, so the history is
+// fetched from the forge rather than demanded of the caller.
+func releaseNotes(ctx context.Context, p *plan.Plan, client *github.Client, repo github.Repo) (string, error) {
+	if p.Git.Shallow {
+		fmt.Println("  shallow clone; reading history from the forge")
 	}
 
-	commits, err := discover.Commits(ctx, p.Module.Dir, previous, p.Tag)
+	previous, commits, err := changelog.Collect(ctx, changelog.Source{
+		Dir:     p.Module.Dir,
+		Tag:     p.Tag,
+		Shallow: p.Git.Shallow,
+		Client:  client,
+		Repo:    repo,
+	})
 	if err != nil {
 		return "", err
 	}

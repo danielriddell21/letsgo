@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,9 +24,23 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
+// Forge is the part of a release API that publishing needs.
+//
+// An interface rather than a concrete client so that --snapshot can run the
+// same code down to the last decision and swap only the final write. A dry run
+// that takes a different path proves less than it appears to.
+type Forge interface {
+	ReleaseByTag(ctx context.Context, repo github.Repo, tag string) (*github.Release, error)
+	CreateRelease(ctx context.Context, repo github.Repo, in github.ReleaseInput) (*github.Release, error)
+	UpdateRelease(ctx context.Context, repo github.Repo, id int64, in github.ReleaseInput) (*github.Release, error)
+	Assets(ctx context.Context, repo github.Repo, releaseID int64) ([]github.Asset, error)
+	DeleteAsset(ctx context.Context, repo github.Repo, assetID int64) error
+	UploadAsset(ctx context.Context, repo github.Repo, releaseID int64, name string, size int64, content io.Reader) (*github.Asset, error)
+}
+
 // Options describe a publication.
 type Options struct {
-	Client *github.Client
+	Client Forge
 	Repo   github.Repo
 
 	// Dir holds the files named in Files.

@@ -44,6 +44,9 @@ type Options struct {
 
 	// Token overrides the token read from the environment.
 	Token string
+
+	// APIEndpoint overrides the forge API host. Empty means the real one.
+	APIEndpoint string
 }
 
 // Status is the outcome of one check.
@@ -159,7 +162,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveArtifacts()
 
 	if opts.Publish {
-		p.checkForge(ctx, opts.Token)
+		p.checkForge(ctx, opts)
 	}
 
 	return p, nil
@@ -183,10 +186,50 @@ func Token(override string) (token, source string) {
 	return "", ""
 }
 
+func underActions() bool { return os.Getenv("GITHUB_ACTIONS") == "true" }
+
+// unconfirmedUnderActions says what could not be established and where to
+// look if the publish then fails, without asserting a permission is missing.
+func unconfirmedUnderActions(repo string) string {
+	return fmt.Sprintf(
+		"write access to %s could not be confirmed\n"+
+			"a workflow token's permissions are not described by the repository\n"+
+			"endpoint, so this is not evidence that it lacks them\n"+
+			"if publishing fails: check `permissions: contents: write` in the\n"+
+			"workflow, and Settings \u2192 Actions \u2192 General \u2192 Workflow permissions",
+		repo)
+}
+
+// noActionsWriteAccess explains a refusal in terms of where the permission is
+// granted to a workflow, which is not where a token's scopes live.
+//
+// A workflow may request no more than the repository allows, so
+// `permissions: contents: write` has no effect while the repository default is
+// read-only — and that setting is several screens away from the workflow file
+// the reader is looking at.
+func noActionsWriteAccess(repo string) string {
+	return fmt.Sprintf(
+		"this workflow's token may not create releases in %s\n"+
+			"check both: `permissions: contents: write` in the workflow, and\n"+
+			"Settings \u2192 Actions \u2192 General \u2192 Workflow permissions\n"+
+			"\u2192 \"Read and write permissions\"",
+		repo)
+}
+
+// noWriteAccess explains a missing permission in terms of where it is granted.
+// Only reached outside Actions, where the reported permission is trustworthy.
+func noWriteAccess(source, repo string) string {
+	return fmt.Sprintf(
+		"%s cannot write to %s; a release needs contents:write\n"+
+			"a fine-grained token needs the Contents repository permission set to\n"+
+			"Read and write; a classic token needs the repo scope",
+		source, repo)
+}
+
 // checkForge verifies, before anything is built, that there is somewhere to
 // publish and permission to do it. One API call now is worth more than a
 // perfect set of artifacts and a 401.
-func (p *Plan) checkForge(ctx context.Context, override string) {
+func (p *Plan) checkForge(ctx context.Context, opts Options) {
 	if !p.HasRepo {
 		p.add("forge", Fail, "no 'origin' remote, so there is nowhere to publish")
 		return
@@ -196,19 +239,56 @@ func (p *Plan) checkForge(ctx context.Context, override string) {
 		return
 	}
 
-	token, source := Token(override)
+	token, source := Token(opts.Token)
 	if token == "" {
 		p.add("token", Fail, "no token; set %s", strings.Join(TokenEnvVars, " or "))
 		return
 	}
 
 	client := github.New(token)
-	if err := client.CheckToken(ctx, github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}); err != nil {
+	if opts.APIEndpoint != "" {
+		client.SetEndpoints(opts.APIEndpoint, opts.APIEndpoint)
+	}
+	access, err := client.CheckAccess(ctx, github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name})
+	if err != nil {
+		// Unreachable is definitive: the repository is private to this token,
+		// renamed, or gone.
 		p.add("token", Fail, "%v", err)
 		return
 	}
+	if access.Archived {
+		p.add("token", Fail, "%s is archived and cannot receive a release", p.Repo)
+		return
+	}
 
-	p.add("token", Pass, "%s can write to %s", source, p.Repo)
+	switch {
+	case access.CanPush:
+		p.add("token", Pass, "%s can write to %s", source, p.Repo)
+
+	case !underActions():
+		// For a user token the reported permission is accurate, so this is a
+		// real answer and worth stopping for.
+		p.add("token", Fail, "%s", noWriteAccess(source, p.Repo.String()))
+		return
+
+	default:
+		// A workflow token is an installation token, whose permissions the
+		// repository endpoint does not describe. Ask the forge directly.
+		allowed, err := client.CanCreateRelease(ctx, github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name})
+		switch {
+		case err != nil:
+			// Neither established nor refuted. Blocking here would refuse
+			// correctly configured releases on no evidence, and the publish
+			// attempt will give a definitive answer shortly.
+			p.add("token", Warn, "%s", unconfirmedUnderActions(p.Repo.String()))
+		case allowed:
+			p.add("token", Pass, "%s may create releases in %s", source, p.Repo)
+		default:
+			p.add("token", Fail, "%s", noActionsWriteAccess(p.Repo.String()))
+			return
+		}
+	}
+
 	p.note("token", source, "environment")
 }
 

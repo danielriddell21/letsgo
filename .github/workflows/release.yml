@@ -1,0 +1,70 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+  # Releasing by hand is occasionally necessary: a tag that was pushed before
+  # the workflow existed, or a run that failed for a reason since fixed.
+  # Re-running is safe because publishing is idempotent — every asset is
+  # keyed by content, so a second run uploads only what the first did not.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release"
+        required: true
+
+permissions:
+  # Creating the release and attaching assets.
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+          # Deliberately no fetch-depth: 0.
+          #
+          # The usual advice is to fetch the full history so the changelog can
+          # be computed locally, which makes every run of every workflow in
+          # the repository slower in order to serve one step of one job. When
+          # the clone is shallow letsgo reads the history from the API
+          # instead, so the default checkout is enough.
+          #
+          # fetch-tags is still needed: the tag being released must be present
+          # for letsgo to identify the version from it.
+          fetch-tags: true
+
+      - uses: actions/setup-go@v5
+        with:
+          # Pinned to an exact patch, not "stable". Compiler and linker output
+          # can differ between Go releases, and the toolchain is a build
+          # input: a release built with a different one cannot reproduce.
+          go-version: "1.24.7"
+          check-latest: false
+
+      # Everything cheap happens before anything expensive. A misconfigured
+      # release fails here, in seconds, with nothing built and nothing
+      # published.
+      - name: plan
+        run: go run ./cmd/letsgo plan --publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: release
+        run: go run ./cmd/letsgo release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Kept for inspection when a run needs explaining. The artifacts are
+      # reproducible, so this is a convenience rather than the only copy.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: ignore
+          retention-days: 7

@@ -233,9 +233,21 @@ func (c *Client) UploadAsset(ctx context.Context, repo Repo, releaseID int64, na
 	return &asset, nil
 }
 
-// CheckToken verifies the token can write to the repository, in one call,
-// before anything expensive happens.
-func (c *Client) CheckToken(ctx context.Context, repo Repo) error {
+// Access describes what a token may do with a repository.
+//
+// Reported rather than judged: what counts as sufficient depends on the
+// operation, and how to obtain it depends on where the token came from.
+// Both are the caller's business.
+type Access struct {
+	// CanPush reports write access as the API describes it.
+	CanPush bool
+
+	// Archived repositories accept no writes at all.
+	Archived bool
+}
+
+// CheckAccess reads what this token may do with the repository, in one call.
+func (c *Client) CheckAccess(ctx context.Context, repo Repo) (Access, error) {
 	var result struct {
 		Permissions struct {
 			Push bool `json:"push"`
@@ -246,17 +258,14 @@ func (c *Client) CheckToken(ctx context.Context, repo Repo) error {
 	url := fmt.Sprintf("%s/repos/%s", c.api, repo)
 	if err := c.do(ctx, http.MethodGet, url, nil, "", &result); err != nil {
 		if NotFound(err) {
-			return fmt.Errorf("github: %s is not visible to this token; it may be private, renamed, or the token may lack the repo scope", repo)
+			return Access{}, fmt.Errorf(
+				"github: %s is not visible to this token; it may be private, renamed, or the token may lack access",
+				repo)
 		}
-		return err
+		return Access{}, err
 	}
-	if result.Archived {
-		return fmt.Errorf("github: %s is archived and cannot receive a release", repo)
-	}
-	if !result.Permissions.Push {
-		return fmt.Errorf("github: this token cannot write to %s; a release needs contents:write", repo)
-	}
-	return nil
+
+	return Access{CanPush: result.Permissions.Push, Archived: result.Archived}, nil
 }
 
 func (c *Client) do(ctx context.Context, method, url string, body io.Reader, contentType string, out any) error {
@@ -355,4 +364,142 @@ func urlQueryEscape(s string) string {
 		fmt.Fprintf(&b, "%%%02X", r)
 	}
 	return b.String()
+}
+
+// Tag is a git tag as the API reports it.
+type Tag struct {
+	Name string `json:"name"`
+}
+
+// Tags lists the repository's tags.
+//
+// The API returns them in its own order, which is not version order, so
+// callers must sort rather than take the first.
+func (c *Client) Tags(ctx context.Context, repo Repo, limit int) ([]string, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+
+	var tags []Tag
+	url := fmt.Sprintf("%s/repos/%s/tags?per_page=%d", c.api, repo, limit)
+	if err := c.do(ctx, http.MethodGet, url, nil, "", &tags); err != nil {
+		return nil, err
+	}
+
+	names := make([]string, 0, len(tags))
+	for _, t := range tags {
+		names = append(names, t.Name)
+	}
+	return names, nil
+}
+
+// CommitInfo is one commit from the compare endpoint.
+type CommitInfo struct {
+	SHA    string `json:"sha"`
+	Commit struct {
+		Message string `json:"message"`
+		Author  struct {
+			Name string `json:"name"`
+		} `json:"author"`
+	} `json:"commit"`
+	Author *struct {
+		Login string `json:"login"`
+	} `json:"author"`
+}
+
+// Compare lists the commits between two revisions, oldest first.
+//
+// This is the path taken when the checkout is shallow and the history simply
+// is not present locally. Demanding a full clone instead — the usual advice,
+// and what fetch-depth: 0 exists for — makes every CI run slower forever to
+// serve one step of one job.
+func (c *Client) Compare(ctx context.Context, repo Repo, base, head string) ([]CommitInfo, error) {
+	var result struct {
+		Commits []CommitInfo `json:"commits"`
+	}
+
+	url := fmt.Sprintf("%s/repos/%s/compare/%s...%s", c.api, repo, base, head)
+	if err := c.do(ctx, http.MethodGet, url, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return result.Commits, nil
+}
+
+// maxCommitPages bounds history walks. A hundred commits per page over ten
+// pages is far more than release notes can usefully present, and an unbounded
+// walk over a long-lived repository would spend a rate limit to produce
+// something nobody reads.
+const maxCommitPages = 10
+
+// CommitsUpTo lists the commits reachable from ref, newest first.
+//
+// Used where Compare cannot be: a first release has no earlier tag to compare
+// against, and the compare endpoint requires a base.
+func (c *Client) CommitsUpTo(ctx context.Context, repo Repo, ref string) ([]CommitInfo, error) {
+	var commits []CommitInfo
+
+	for page := 1; page <= maxCommitPages; page++ {
+		var batch []CommitInfo
+		url := fmt.Sprintf("%s/repos/%s/commits?sha=%s&per_page=100&page=%d",
+			c.api, repo, urlQueryEscape(ref), page)
+
+		if err := c.do(ctx, http.MethodGet, url, nil, "", &batch); err != nil {
+			return nil, err
+		}
+		commits = append(commits, batch...)
+
+		if len(batch) < 100 {
+			break
+		}
+	}
+	return commits, nil
+}
+
+// ErrIndeterminate reports that the forge's answer established neither
+// permission nor its absence.
+var ErrIndeterminate = errors.New("github: permission could not be determined")
+
+// CanCreateRelease reports whether this token may create releases in repo.
+//
+// Installation tokens — the kind GitHub Actions provides — cannot be
+// introspected: no endpoint describes what one is permitted to do, and the
+// permissions field on a repository describes the authenticated user, of which
+// an installation token has none. Asking is the only interface available.
+//
+// So it asks, with a request that cannot succeed: a creation missing its tag
+// name. Authorisation is decided before the body is validated, which separates
+// the two answers — 403 for a token that may not create releases, 422 for one
+// that may and simply sent nonsense. Nothing is created either way.
+//
+// The ordering of those two checks is observed behaviour rather than a
+// documented guarantee, so anything else is reported as ErrIndeterminate
+// rather than guessed at.
+func (c *Client) CanCreateRelease(ctx context.Context, repo Repo) (bool, error) {
+	body, err := json.Marshal(ReleaseInput{})
+	if err != nil {
+		return false, fmt.Errorf("github: encoding probe: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/repos/%s/releases", c.api, repo)
+	err = c.do(ctx, http.MethodPost, url, strings.NewReader(string(body)), "application/json", nil)
+
+	// A probe that succeeds has created a release, which it was built not to
+	// do. Report that rather than pretend the answer is clean.
+	if err == nil {
+		return true, fmt.Errorf("github: release-write probe unexpectedly succeeded against %s", repo)
+	}
+
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false, err
+	}
+
+	switch apiErr.StatusCode {
+	case http.StatusForbidden, http.StatusUnauthorized:
+		return false, nil
+	case http.StatusUnprocessableEntity, http.StatusBadRequest:
+		return true, nil
+	default:
+		return false, fmt.Errorf("%w: %s", ErrIndeterminate, apiErr)
+	}
 }
