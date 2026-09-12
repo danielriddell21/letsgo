@@ -21,6 +21,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
+	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
 // ConfigFile is the optional configuration file letsgo reads.
@@ -36,6 +37,13 @@ type Options struct {
 
 	// AllowDirty permits an unclean worktree. Never valid for a real release.
 	AllowDirty bool
+
+	// Publish adds the checks a release needs but a local build does not:
+	// a forge to publish to, and a token permitted to write there.
+	Publish bool
+
+	// Token overrides the token read from the environment.
+	Token string
 }
 
 // Status is the outcome of one check.
@@ -150,7 +158,58 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveFiles()
 	p.resolveArtifacts()
 
+	if opts.Publish {
+		p.checkForge(ctx, opts.Token)
+	}
+
 	return p, nil
+}
+
+// TokenEnvVars are the environment variables consulted for a forge token, in
+// order. GH_TOKEN is what the GitHub CLI sets, so a machine already set up to
+// use gh needs no further configuration.
+var TokenEnvVars = []string{"GITHUB_TOKEN", "GH_TOKEN"}
+
+// Token returns the resolved token, and where it came from.
+func Token(override string) (token, source string) {
+	if override != "" {
+		return override, "--token"
+	}
+	for _, name := range TokenEnvVars {
+		if v := os.Getenv(name); v != "" {
+			return v, name
+		}
+	}
+	return "", ""
+}
+
+// checkForge verifies, before anything is built, that there is somewhere to
+// publish and permission to do it. One API call now is worth more than a
+// perfect set of artifacts and a 401.
+func (p *Plan) checkForge(ctx context.Context, override string) {
+	if !p.HasRepo {
+		p.add("forge", Fail, "no 'origin' remote, so there is nowhere to publish")
+		return
+	}
+	if p.Repo.Host != "github.com" {
+		p.add("forge", Fail, "%s is not supported yet; letsgo publishes to github.com", p.Repo.Host)
+		return
+	}
+
+	token, source := Token(override)
+	if token == "" {
+		p.add("token", Fail, "no token; set %s", strings.Join(TokenEnvVars, " or "))
+		return
+	}
+
+	client := github.New(token)
+	if err := client.CheckToken(ctx, github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}); err != nil {
+		p.add("token", Fail, "%v", err)
+		return
+	}
+
+	p.add("token", Pass, "%s can write to %s", source, p.Repo)
+	p.note("token", source, "environment")
 }
 
 func (p *Plan) loadConfig(moduleDir string) {
