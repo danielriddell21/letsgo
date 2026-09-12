@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/gate"
 )
 
 func commit(sha, subject, body, author string) discover.Commit {
@@ -175,5 +176,38 @@ func TestScopeIsHighlighted(t *testing.T) {
 func TestEmptyRange(t *testing.T) {
 	if got := Build("v1.0.0", "v1.0.1", nil).Markdown(); got != "No changes.\n" {
 		t.Errorf("Markdown() = %q", got)
+	}
+}
+
+// The API diff describes what the code did; the commit messages describe what
+// someone meant. For a library the first is what a reader is deciding on.
+func TestAPIChangesSection(t *testing.T) {
+	c := Build("v1.0.0", "v2.0.0", []discover.Commit{
+		commit("a1111111", "feat: rework the client", "", "Dan"),
+	}).WithAPIChanges([]gate.Change{
+		{Package: "example.com/foo", Kind: gate.Compatible, Text: "WithTimeout: added"},
+		{Package: "example.com/foo", Kind: gate.Incompatible, Text: "(*Client).Do: removed"},
+	})
+
+	md := c.Markdown()
+
+	if !strings.Contains(md, "### API changes") {
+		t.Fatalf("no API section:\n%s", md)
+	}
+	// Breaking first: it is the entry that can cost the reader an afternoon.
+	breaking := strings.Index(md, "(*Client).Do: removed")
+	added := strings.Index(md, "WithTimeout: added")
+	if breaking < 0 || added < 0 || breaking > added {
+		t.Errorf("incompatible changes are not listed first:\n%s", md)
+	}
+	if !strings.Contains(md, "`!`") || !strings.Contains(md, "`+`") {
+		t.Errorf("changes are not marked by consequence:\n%s", md)
+	}
+}
+
+func TestNoAPISectionWithoutChanges(t *testing.T) {
+	md := Build("", "v1.0.0", []discover.Commit{commit("a1111111", "feat: first", "", "Dan")}).Markdown()
+	if strings.Contains(md, "API changes") {
+		t.Errorf("an empty API section was rendered:\n%s", md)
 	}
 }

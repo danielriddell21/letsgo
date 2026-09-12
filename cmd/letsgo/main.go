@@ -171,6 +171,7 @@ func runRelease(args []string) error {
 	snapshot := fs.Bool("snapshot", false, "rehearse the release without publishing anything")
 	appendNotes := fs.Bool("append-notes", false, "add the changelog after an existing release description instead of replacing it")
 	allowVulnerable := fs.Bool("allow-vulnerable", false, "publish despite reachable vulnerabilities, recording which were accepted")
+	allowBreaking := fs.Bool("allow-breaking", false, "publish an incompatible API change without a major version bump")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -182,7 +183,7 @@ func runRelease(args []string) error {
 	// them are not run.
 	p, err := plan.Resolve(ctx, plan.Options{
 		Dir: ".", Publish: !*snapshot, Token: *token, Snapshot: *snapshot,
-		Analyse: true, AllowVulnerable: *allowVulnerable,
+		Analyse: true, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
 	})
 	if err != nil {
 		return err
@@ -392,7 +393,7 @@ func releaseNotes(ctx context.Context, p *plan.Plan, client *github.Client, repo
 	if err != nil {
 		return "", err
 	}
-	return changelog.Build(previous, p.Tag, commits).Markdown(), nil
+	return changelog.Build(previous, p.Tag, commits).WithAPIChanges(p.APIChanges).Markdown(), nil
 }
 
 func sumsFrom(r *release.Result) map[string]string {

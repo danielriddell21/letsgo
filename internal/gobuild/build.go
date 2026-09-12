@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/internal/safeexec"
 )
 
 // Target is a GOOS/GOARCH pair.
@@ -77,7 +79,10 @@ func Build(ctx context.Context, req Request) error {
 
 	gobin := req.GoBin
 	if gobin == "" {
-		gobin = "go"
+		var err error
+		if gobin, err = Toolchain(); err != nil {
+			return err
+		}
 	}
 
 	ldflags := append([]string{"-s", "-w"}, req.LDFlags...)
@@ -158,6 +163,9 @@ func environ(t Target, toolchain string) []string {
 	env := make(map[string]string, len(passthrough)+6)
 
 	for _, key := range passthrough {
+		if strings.EqualFold(key, "PATH") {
+			continue
+		}
 		if v, ok := os.LookupEnv(key); ok {
 			env[key] = v
 		}
@@ -180,6 +188,11 @@ func environ(t Target, toolchain string) []string {
 	// Locale can affect tool output formatting. Pin it for good measure.
 	env["LC_ALL"] = "C"
 
+	// Rebuilt rather than inherited. A subprocess handed the caller's PATH can
+	// be redirected by a writable directory on it, and the toolchain execs
+	// plenty of its own helpers.
+	env["PATH"] = safeexec.FixedPath(toolchainDir())
+
 	if toolchain != "" {
 		env["GOTOOLCHAIN"] = toolchain
 	}
@@ -198,9 +211,15 @@ func environ(t Target, toolchain string) []string {
 // input and belongs in the release manifest.
 func Version(ctx context.Context, goBin string) (string, error) {
 	if goBin == "" {
-		goBin = "go"
+		var err error
+		if goBin, err = Toolchain(); err != nil {
+			return "", err
+		}
 	}
-	out, err := exec.CommandContext(ctx, goBin, "env", "GOVERSION").Output()
+
+	cmd := exec.CommandContext(ctx, goBin, "env", "GOVERSION")
+	cmd.Env = Env(Host(), "")
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("gobuild: reading GOVERSION: %w", err)
 	}

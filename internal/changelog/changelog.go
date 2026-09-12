@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/gate"
 )
 
 // Entry is one change worth listing.
@@ -33,6 +34,20 @@ type Changelog struct {
 	Entries      []Entry
 	Hidden       int
 	Contributors []string
+
+	// APIChanges is the exported API delta, rendered as its own section.
+	APIChanges []gate.Change
+}
+
+// WithAPIChanges attaches an exported API delta to the notes.
+//
+// A commit message is a lossy, optional account of a change, written by
+// someone who already knew what they meant. The API diff is the change. For a
+// library it is also the part a reader is deciding on: whether upgrading will
+// cost them anything.
+func (c *Changelog) WithAPIChanges(changes []gate.Change) *Changelog {
+	c.APIChanges = changes
+	return c
 }
 
 // conventional matches "type(scope)!: subject".
@@ -194,6 +209,8 @@ func (c *Changelog) Markdown() string {
 		b.WriteString("\n")
 	}
 
+	writeAPIChanges(&b, c.APIChanges)
+
 	if c.Hidden > 0 {
 		fmt.Fprintf(&b, "_%s not shown._\n\n", plural(c.Hidden, "maintenance commit"))
 	}
@@ -203,6 +220,30 @@ func (c *Changelog) Markdown() string {
 	}
 
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// writeAPIChanges renders the exported API delta, breaking changes first.
+func writeAPIChanges(b *strings.Builder, changes []gate.Change) {
+	if len(changes) == 0 {
+		return
+	}
+
+	b.WriteString("### API changes\n\n")
+	for _, kind := range []gate.ChangeKind{gate.Incompatible, gate.Compatible} {
+		for _, c := range changes {
+			if c.Kind != kind {
+				continue
+			}
+			// The marker carries the consequence: one of these costs the
+			// reader work, the other does not.
+			marker := "+"
+			if kind == gate.Incompatible {
+				marker = "!"
+			}
+			fmt.Fprintf(b, "- `%s` %s\n", marker, c.String())
+		}
+	}
+	b.WriteString("\n")
 }
 
 func writeEntry(b *strings.Builder, e Entry) {

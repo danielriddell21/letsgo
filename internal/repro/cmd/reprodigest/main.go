@@ -15,6 +15,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/repro"
 )
 
@@ -57,7 +58,18 @@ func run() error {
 		return err
 	}
 
+	// The toolchain is a build input, so it belongs in the record. Without it
+	// a version mismatch between machines shows up only as digests that
+	// differ for no stated reason, which is a slow thing to diagnose.
+	version, err := gobuild.Version(context.Background(), "")
+	if err != nil {
+		return err
+	}
+
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(artifacts)
+	return enc.Encode(struct {
+		Go        string           `json:"go"`
+		Artifacts []repro.Artifact `json:"artifacts"`
+	}{Go: version, Artifacts: artifacts})
 }

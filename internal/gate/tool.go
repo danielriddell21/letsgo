@@ -14,6 +14,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/internal/safeexec"
 )
 
 // ErrToolMissing reports that a check's program is not installed.
@@ -46,25 +48,24 @@ func find(tool, install string) (string, error) {
 	var candidates []string
 
 	if gobin := os.Getenv("GOBIN"); gobin != "" {
-		candidates = append(candidates, filepath.Join(gobin, tool))
+		candidates = append(candidates, gobin)
 	}
 	if gopath := os.Getenv("GOPATH"); gopath != "" {
 		for _, p := range filepath.SplitList(gopath) {
-			candidates = append(candidates, filepath.Join(p, "bin", tool))
+			candidates = append(candidates, filepath.Join(p, "bin"))
 		}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, "go", "bin", tool))
+		candidates = append(candidates, filepath.Join(home, "go", "bin"))
 	}
 
-	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
-			return candidate, nil
-		}
+	if found, err := safeexec.LookIn(candidates, tool); err == nil {
+		return found, nil
 	}
 
+	// PATH last, and made absolute so the choice is not re-made later.
 	if path, err := exec.LookPath(tool); err == nil {
-		return path, nil
+		return filepath.Abs(path)
 	}
 	return "", &MissingToolError{Tool: tool, Install: install}
 }

@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
+
+	"github.com/danielriddell21/letsgo/internal/safeexec"
 )
 
 // Resolving a helper program through the inherited PATH means whoever controls
@@ -27,41 +28,12 @@ import (
 // to avoid.
 const gitEnvOverride = "LETSGO_GIT"
 
-// systemDirs lists directories an ordinary user cannot write to.
-//
-// Deliberately excludes /usr/local/bin and /opt/homebrew/bin. Both are the
-// normal home of user-installed software and are routinely owned by the
-// logged-in user, which is precisely the property that disqualifies them.
-func systemDirs() []string {
-	if runtime.GOOS == "windows" {
-		root := os.Getenv("SystemRoot")
-		if root == "" {
-			root = `C:\Windows`
-		}
-		dirs := []string{
-			filepath.Join(root, "system32"),
-			root,
-		}
-		// Git for Windows installs under Program Files, which is writable only
-		// with elevation.
-		for _, key := range []string{"ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"} {
-			if base := os.Getenv(key); base != "" {
-				dirs = append(dirs,
-					filepath.Join(base, "Git", "cmd"),
-					filepath.Join(base, "Git", "bin"),
-				)
-			}
-		}
-		return dirs
-	}
-
-	return []string{"/usr/bin", "/bin", "/usr/sbin", "/sbin"}
-}
+// systemDirs is where git is looked for. See internal/safeexec for why these
+// and not, say, /usr/local/bin.
+func systemDirs() []string { return safeexec.SystemDirs() }
 
 // fixedPath is systemDirs joined for use as a PATH value.
-func fixedPath() string {
-	return strings.Join(systemDirs(), string(os.PathListSeparator))
-}
+func fixedPath() string { return safeexec.FixedPath() }
 
 var (
 	gitOnce sync.Once
@@ -95,20 +67,12 @@ func resolveGit(override string, dirs []string) (string, error) {
 		}
 	}
 
-	names := []string{"git"}
-	if runtime.GOOS == "windows" {
-		names = []string{"git.exe"}
+	if found, err := safeexec.LookIn(dirs, safeexec.Exe("git")); err == nil {
+		return found, nil
 	}
 
-	for _, dir := range dirs {
-		for _, name := range names {
-			candidate := filepath.Join(dir, name)
-			if isExecutable(candidate) {
-				return candidate, nil
-			}
-		}
-	}
-
+	// Deliberately no PATH fallback: git is invoked on every run, and a
+	// writable directory on PATH would decide which program that is.
 	return "", fmt.Errorf(
 		"discover: git was not found in any system directory (%s)\n"+
 			"  letsgo does not search PATH for git, because a writable directory on PATH\n"+
@@ -117,17 +81,7 @@ func resolveGit(override string, dirs []string) (string, error) {
 		strings.Join(dirs, ", "), gitEnvOverride)
 }
 
-// isExecutable reports whether path is a regular file that can be run.
-func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		return true
-	}
-	return info.Mode().Perm()&0o111 != 0
-}
+func isExecutable(path string) bool { return safeexec.IsExecutable(path) }
 
 // gitEnv returns the environment for a git subprocess: the caller's, with PATH
 // replaced by the fixed one.
@@ -135,22 +89,4 @@ func isExecutable(path string) bool {
 // The rest is preserved deliberately. HOME in particular decides which
 // .gitconfig applies, and dropping it would break repositories that depend on
 // safe.directory — which every GitHub Actions checkout does.
-func gitEnv() []string {
-	parent := os.Environ()
-	out := make([]string, 0, len(parent)+1)
-
-	for _, entry := range parent {
-		key, _, ok := strings.Cut(entry, "=")
-		if !ok {
-			continue
-		}
-		// Windows environment variable names are case-insensitive, so "Path"
-		// and "PATH" must both be replaced rather than one shadowing the other.
-		if strings.EqualFold(key, "PATH") {
-			continue
-		}
-		out = append(out, entry)
-	}
-
-	return append(out, "PATH="+fixedPath())
-}
+func gitEnv() []string { return safeexec.EnvWithFixedPath(os.Environ()) }

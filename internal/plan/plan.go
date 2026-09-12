@@ -25,6 +25,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
 // ConfigFile is the optional configuration file letsgo reads.
@@ -61,6 +62,10 @@ type Options struct {
 	// AllowVulnerable publishes despite reachable vulnerabilities, recording
 	// which were accepted rather than hiding them.
 	AllowVulnerable bool
+
+	// AllowBreaking publishes an incompatible API change without a major
+	// version bump.
+	AllowBreaking bool
 }
 
 // Status is the outcome of one check.
@@ -117,6 +122,11 @@ type Plan struct {
 
 	Checks  []Check
 	Sources []Source
+
+	// APIChanges is the exported API delta against the previous release. It
+	// feeds the changelog as well as the gate: the diff describes what the
+	// code did, where a commit message describes what someone meant.
+	APIChanges []gate.Change
 }
 
 // OK reports whether every check passed.
@@ -180,6 +190,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	}
 	if opts.Analyse {
 		p.checkVulnerabilities(ctx, opts)
+		p.checkAPICompatibility(ctx, opts)
 	}
 
 	return p, nil
@@ -240,6 +251,112 @@ func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 
 	lines = append(lines, "override with --allow-vulnerable")
 	p.add("vulnerabilities", Fail, "%s", strings.Join(lines, "\n"))
+}
+
+// checkAPICompatibility refuses a release whose version promises more
+// compatibility than its API delivers.
+//
+// Within a major version, removing or changing an exported symbol breaks every
+// dependant at compile time. Go's answer is a new major version with a new
+// import path, and nothing enforces it, so the mistake is made quietly and
+// found by other people.
+func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
+	if p.Tag == "" {
+		p.add("api compatibility", Skip, "not a tagged release")
+		return
+	}
+
+	previous, err := discover.PreviousTag(ctx, p.Module.Dir)
+	if err != nil || previous == "" {
+		p.add("api compatibility", Skip, "no earlier release to compare against")
+		return
+	}
+
+	old, cleanup, err := checkoutTag(ctx, p.Module.Dir, previous)
+	if err != nil {
+		p.add("api compatibility", Warn, "could not check out %s: %v", previous, err)
+		return
+	}
+	defer cleanup()
+
+	changes, err := gate.APIDiff(ctx, old, p.Module.Dir)
+	switch {
+	case errors.Is(err, gate.ErrToolMissing):
+		p.add("api compatibility", Skip, "%v", err)
+		return
+	case err != nil:
+		p.add("api compatibility", Warn, "could not be checked: %v", err)
+		return
+	}
+	p.APIChanges = changes
+
+	breaking := gate.Incompatibles(changes)
+	if len(breaking) == 0 {
+		p.add("api compatibility", Pass, "the exported API is backward compatible with %s", previous)
+		return
+	}
+
+	// A major bump is exactly what an incompatible change calls for, so
+	// making one is the correct outcome rather than a problem.
+	if bumpBetween(previous, p.Tag) == "major" {
+		p.add("api compatibility", Pass, "%d incompatible change(s), and %s is a major release",
+			len(breaking), p.Tag)
+		return
+	}
+
+	if opts.AllowBreaking {
+		p.add("api compatibility", Warn, "%s\naccepted with --allow-breaking", describe(breaking))
+		return
+	}
+
+	p.add("api compatibility", Fail,
+		"%s is not a major release, but the API is not backward compatible with %s\n%s\n%s",
+		p.Tag, previous, describe(breaking),
+		"a breaking change needs a major version and a matching /vN module path\noverride with --allow-breaking")
+}
+
+func describe(changes []gate.Change) string {
+	lines := make([]string, 0, len(changes))
+	for _, c := range changes {
+		lines = append(lines, "  "+c.String())
+	}
+	return strings.Join(lines, "\n")
+}
+
+// bumpBetween reports how two versions differ.
+func bumpBetween(previous, current string) string {
+	from, okFrom := semver.Parse(previous)
+	to, okTo := semver.Parse(current)
+	if !okFrom || !okTo {
+		return "unknown"
+	}
+	switch {
+	case to.Major != from.Major:
+		return "major"
+	case to.Minor != from.Minor:
+		return "minor"
+	default:
+		return "patch"
+	}
+}
+
+// checkoutTag puts a tag's tree somewhere it can be compared against.
+func checkoutTag(ctx context.Context, repoDir, tag string) (dir string, cleanup func(), err error) {
+	base, err := os.MkdirTemp("", "letsgo-apidiff-")
+	if err != nil {
+		return "", nil, err
+	}
+
+	dir = filepath.Join(base, "old")
+	if err := discover.AddWorktree(ctx, repoDir, dir, tag); err != nil {
+		os.RemoveAll(base)
+		return "", nil, err
+	}
+
+	return dir, func() {
+		_ = discover.RemoveWorktree(ctx, repoDir, dir)
+		os.RemoveAll(base)
+	}, nil
 }
 
 func underActions() bool { return os.Getenv("GITHUB_ACTIONS") == "true" }
