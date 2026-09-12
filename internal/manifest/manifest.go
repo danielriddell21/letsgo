@@ -42,11 +42,26 @@ type Manifest struct {
 	// against. A rebuild that uses a different value cannot match.
 	SourceDateEpoch int64 `json:"source_date_epoch"`
 
-	Builder   Builder           `json:"builder"`
-	Source    *Source           `json:"source,omitempty"`
-	Modules   Modules           `json:"modules"`
-	Gates     map[string]string `json:"gates,omitempty"`
-	Artifacts []Artifact        `json:"artifacts"`
+	Builder Builder           `json:"builder"`
+	Source  *Source           `json:"source,omitempty"`
+	Modules Modules           `json:"modules"`
+	Gates   map[string]string `json:"gates,omitempty"`
+
+	// APIChanges is the exported API delta against the previous release,
+	// recorded when the gate ran. Kept so that comparing two releases needs
+	// only their manifests: recomputing it would mean two checkouts and a
+	// toolchain, to re-derive something already known at release time.
+	APIChanges []APIChange `json:"api_changes,omitempty"`
+
+	Artifacts []Artifact `json:"artifacts"`
+}
+
+// APIChange is one difference in the exported API.
+type APIChange struct {
+	// Kind is "incompatible" or "compatible".
+	Kind    string `json:"kind"`
+	Package string `json:"package,omitempty"`
+	Text    string `json:"text"`
 }
 
 // Builder records what produced the release. The toolchain is a build input:
@@ -68,6 +83,17 @@ type Source struct {
 type Modules struct {
 	GoSumSHA256 string `json:"go_sum_sha256,omitempty"`
 	Count       int    `json:"count"`
+
+	// List names each module the build resolved. The digest above proves the
+	// graph is unchanged; this says what changed when it is not, which is the
+	// question anyone comparing two releases is actually asking.
+	List []Module `json:"list,omitempty"`
+}
+
+// Module is one resolved dependency.
+type Module struct {
+	Path    string `json:"path"`
+	Version string `json:"version"`
 }
 
 // Artifact is one published archive.
@@ -76,6 +102,11 @@ type Artifact struct {
 	OS   string `json:"os"`
 	Arch string `json:"arch"`
 	Size int64  `json:"size"`
+
+	// BinarySize is the compiled binary's size before archiving. Archive size
+	// moves with the compressor; this is the number that describes what a
+	// user runs, and the one a size budget is written against.
+	BinarySize int64 `json:"binary_size,omitempty"`
 
 	// SHA256 is the archive's digest; BinarySHA256 is the digest of the
 	// binary inside it. Keeping both means a failed verification says whether
@@ -155,8 +186,8 @@ func (m *Manifest) Artifact(name string) (Artifact, bool) {
 	return Artifact{}, false
 }
 
-// SummariseModules reads go.sum and reports its digest and the number of
-// distinct modules it pins.
+// SummariseModules reads go.sum and reports its digest, the number of distinct
+// modules it pins, and their versions.
 //
 // A missing go.sum is not an error: a module with no dependencies has none,
 // and that is a fact about the release rather than a problem with it.
@@ -179,19 +210,34 @@ func SummariseModules(goSumPath string) (Modules, error) {
 
 	// go.sum lists each module twice, once for the archive and once for its
 	// go.mod, so counting lines would double every dependency.
-	seen := map[string]bool{}
+	seen := map[string]Module{}
 	scanner := bufio.NewScanner(&buf)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 2 {
-			seen[fields[0]+" "+strings.TrimSuffix(fields[1], "/go.mod")] = true
+		if len(fields) < 2 {
+			continue
 		}
+		version := strings.TrimSuffix(fields[1], "/go.mod")
+		seen[fields[0]+" "+version] = Module{Path: fields[0], Version: version}
 	}
 	if err := scanner.Err(); err != nil {
 		return Modules{}, fmt.Errorf("manifest: reading %s: %w", goSumPath, err)
 	}
 
-	return Modules{GoSumSHA256: digest, Count: len(seen)}, nil
+	list := make([]Module, 0, len(seen))
+	for _, m := range seen {
+		list = append(list, m)
+	}
+	// Sorted so the manifest is identical between runs regardless of map
+	// iteration order.
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Path != list[j].Path {
+			return list[i].Path < list[j].Path
+		}
+		return list[i].Version < list[j].Version
+	})
+
+	return Modules{GoSumSHA256: digest, Count: len(list), List: list}, nil
 }
 
 // SortArtifacts orders artifacts by name so that two runs produce identical

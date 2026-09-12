@@ -75,6 +75,16 @@ type Release struct {
 	Assets     []Asset `json:"assets"`
 }
 
+// Asset finds a file attached to the release by name.
+func (r *Release) Asset(name string) (Asset, bool) {
+	for _, a := range r.Assets {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return Asset{}, false
+}
+
 // Asset is a file attached to a release.
 type Asset struct {
 	ID   int64  `json:"id"`
