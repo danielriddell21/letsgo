@@ -134,3 +134,26 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// TrackedFiles lists every file git tracks, as slash-separated paths relative
+// to dir.
+//
+// Tracked files are the right definition of "the source" for a release: it is
+// exactly what a clone at this commit contains, with build output, local
+// scratch files and anything else .gitignore covers already excluded.
+func TrackedFiles(ctx context.Context, dir string) ([]string, error) {
+	// -z because filenames may contain newlines, and git would otherwise quote
+	// them into an encoding we would have to undo.
+	out, err := git(ctx, dir, "ls-files", "-z")
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	for _, name := range strings.Split(out, "\x00") {
+		if name != "" {
+			files = append(files, name)
+		}
+	}
+	return files, nil
+}

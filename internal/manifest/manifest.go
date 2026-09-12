@@ -1,0 +1,201 @@
+// Package manifest describes a release in a form a machine can act on.
+//
+// Every release publishes one letsgo.json alongside its artifacts. It records
+// what was built, from what, by which toolchain, and with which digests —
+// enough to rebuild the release and compare, without cloning the repository or
+// scraping a release page.
+//
+// Four things fall out of that one file: verification, release-to-release
+// diffing, an install script that checks what it downloads, and update
+// checkers. None of them need code here; they need the data to exist.
+package manifest
+
+import (
+	"bufio"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strings"
+)
+
+// Schema is the manifest format version. Consumers should refuse a manifest
+// whose schema they do not recognise rather than guess at its shape.
+const Schema = 1
+
+// FileName is the manifest's published name.
+const FileName = "letsgo.json"
+
+// Manifest is a published release.
+type Manifest struct {
+	Schema  int    `json:"schema"`
+	Project string `json:"project"`
+	Version string `json:"version"`
+	Tag     string `json:"tag,omitempty"`
+	Commit  string `json:"commit"`
+
+	// SourceDateEpoch is the commit timestamp every artifact was built
+	// against. A rebuild that uses a different value cannot match.
+	SourceDateEpoch int64 `json:"source_date_epoch"`
+
+	Builder   Builder           `json:"builder"`
+	Source    *Source           `json:"source,omitempty"`
+	Modules   Modules           `json:"modules"`
+	Gates     map[string]string `json:"gates,omitempty"`
+	Artifacts []Artifact        `json:"artifacts"`
+}
+
+// Builder records what produced the release. The toolchain is a build input:
+// two Go versions can emit different code from identical source, so a
+// verifier that ignores this will chase phantom differences.
+type Builder struct {
+	Tool string `json:"tool"`
+	Go   string `json:"go"`
+}
+
+// Source is the deterministic source archive published with the release.
+type Source struct {
+	Archive string `json:"archive"`
+	SHA256  string `json:"sha256"`
+}
+
+// Modules summarises the dependency graph. Recording go.sum's digest lets
+// verification prove the dependencies matched, not merely the output.
+type Modules struct {
+	GoSumSHA256 string `json:"go_sum_sha256,omitempty"`
+	Count       int    `json:"count"`
+}
+
+// Artifact is one published archive.
+type Artifact struct {
+	Name string `json:"name"`
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
+	Size int64  `json:"size"`
+
+	// SHA256 is the archive's digest; BinarySHA256 is the digest of the
+	// binary inside it. Keeping both means a failed verification says whether
+	// the compiler or the packaging differed.
+	SHA256       string `json:"sha256"`
+	BinarySHA256 string `json:"binary_sha256"`
+
+	Build Build `json:"build"`
+}
+
+// Build records exactly how an artifact was produced, so that reproducing it
+// is a matter of replaying recorded inputs rather than guessing at them.
+type Build struct {
+	Flags   []string          `json:"flags"`
+	LDFlags string            `json:"ldflags"`
+	Env     map[string]string `json:"env"`
+}
+
+// Encode renders the manifest as indented JSON.
+//
+// The output is deterministic: fields follow struct order, encoding/json
+// sorts map keys, and callers are expected to supply artifacts already sorted.
+// A manifest that varied between runs would be one more thing verification had
+// to forgive.
+func (m *Manifest) Encode() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(m); err != nil {
+		return nil, fmt.Errorf("manifest: encoding: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// Decode parses a manifest, rejecting schema versions it does not understand.
+func Decode(data []byte) (*Manifest, error) {
+	var m Manifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("manifest: parsing: %w", err)
+	}
+	if m.Schema != Schema {
+		return nil, fmt.Errorf("manifest: schema %d is not supported (this letsgo understands %d)",
+			m.Schema, Schema)
+	}
+	return &m, nil
+}
+
+// Write writes the manifest to path.
+func (m *Manifest) Write(path string) error {
+	data, err := m.Encode()
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("manifest: writing %s: %w", path, err)
+	}
+	return nil
+}
+
+// Read loads a manifest from path.
+func Read(path string) (*Manifest, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("manifest: reading %s: %w", path, err)
+	}
+	return Decode(data)
+}
+
+// Artifact finds a published artifact by name.
+func (m *Manifest) Artifact(name string) (Artifact, bool) {
+	for _, a := range m.Artifacts {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return Artifact{}, false
+}
+
+// SummariseModules reads go.sum and reports its digest and the number of
+// distinct modules it pins.
+//
+// A missing go.sum is not an error: a module with no dependencies has none,
+// and that is a fact about the release rather than a problem with it.
+func SummariseModules(goSumPath string) (Modules, error) {
+	f, err := os.Open(goSumPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Modules{}, nil
+		}
+		return Modules{}, fmt.Errorf("manifest: reading %s: %w", goSumPath, err)
+	}
+	defer f.Close()
+
+	var buf bytes.Buffer
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(h, &buf), f); err != nil {
+		return Modules{}, fmt.Errorf("manifest: reading %s: %w", goSumPath, err)
+	}
+	digest := hex.EncodeToString(h.Sum(nil))
+
+	// go.sum lists each module twice, once for the archive and once for its
+	// go.mod, so counting lines would double every dependency.
+	seen := map[string]bool{}
+	scanner := bufio.NewScanner(&buf)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 2 {
+			seen[fields[0]+" "+strings.TrimSuffix(fields[1], "/go.mod")] = true
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return Modules{}, fmt.Errorf("manifest: reading %s: %w", goSumPath, err)
+	}
+
+	return Modules{GoSumSHA256: digest, Count: len(seen)}, nil
+}
+
+// SortArtifacts orders artifacts by name so that two runs produce identical
+// manifests regardless of the order work finished in.
+func SortArtifacts(artifacts []Artifact) {
+	sort.Slice(artifacts, func(i, j int) bool { return artifacts[i].Name < artifacts[j].Name })
+}

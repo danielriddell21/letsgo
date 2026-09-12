@@ -12,7 +12,9 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/release"
 )
 
 // version is replaced at link time. It is declared exactly the way letsgo
@@ -24,9 +26,9 @@ const usage = `letsgo builds and publishes Go releases.
 
 usage:
   letsgo plan [--explain] [--snapshot]   resolve and check a release without performing one
-  letsgo build [--snapshot] [-o dir]     build, archive and checksum into dist/
+  letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
   letsgo fmt [file]                      format letsgo.mod
-  letsgo version                         print the version
+  letsgo version                         print the version (also --version)
 
 run a command with -h for its options.
 `
@@ -47,7 +49,7 @@ func main() {
 		err = runBuild(args)
 	case "fmt":
 		err = runFmt(args)
-	case "version":
+	case "version", "--version", "-version", "-v":
 		fmt.Println("letsgo", version)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
@@ -122,50 +124,24 @@ func runBuild(args []string) error {
 		return err
 	}
 
-	var artifacts []build.Artifact
-	for _, cmd := range p.Commands {
-		name := p.Project
-		if len(p.Commands) > 1 {
-			name = cmd.BinaryName
-		}
-
-		produced, err := build.Run(ctx, build.Options{
-			ModuleDir: p.Module.Dir,
-			Package:   cmd.RelPath,
-			Name:      name,
-			Version:   p.Version,
-			Commit:    p.Git.ShortCommit,
-
-			// The commit timestamp, never the clock. This is what makes the
-			// same commit produce the same bytes tomorrow.
-			ModTime: p.Git.CommitTime,
-
-			Targets:    p.Targets,
-			ExtraFiles: p.Files,
-			WorkDir:    dir,
-		})
-		if err != nil {
-			return err
-		}
-		artifacts = append(artifacts, produced...)
-	}
-
-	if _, err := build.WriteChecksums(dir, artifacts); err != nil {
+	result, err := release.Build(ctx, p, dir, version, func(format string, args ...any) {
+		fmt.Printf("    ! "+format+"\n", args...)
+	})
+	if err != nil {
 		return err
 	}
 
-	fmt.Printf("\n  built %d artifacts in %s\n", len(artifacts)+1, took(started))
-	for _, a := range artifacts {
+	fmt.Printf("\n  built %d files in %s\n", len(result.Files), took(started))
+	for _, a := range result.Artifacts {
 		fmt.Printf("    %s  %s\n", a.ArchiveSHA256[:12], a.Archive)
 	}
-	fmt.Printf("    %s\n", build.ChecksumFile)
+	fmt.Printf("    %s  %s\n", result.Source.SHA256[:12], result.Source.Name)
+	fmt.Printf("    %-12s  %s\n", "", manifest.FileName)
+	fmt.Printf("    %-12s  %s\n", "", build.ChecksumFile)
 	fmt.Printf("\n  %s\n", dir)
 	return nil
 }
 
-// took formats an elapsed duration at a resolution a person cares about.
-// Rounding everything to tenths of a second reports a plan that finished in
-// forty milliseconds as "0s", which reads like the tool did nothing.
 func took(started time.Time) time.Duration {
 	elapsed := time.Since(started)
 	if elapsed < time.Second {

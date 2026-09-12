@@ -57,15 +57,36 @@ type Options struct {
 
 	// GoBin overrides the toolchain binary.
 	GoBin string
+
+	// ExtraLDFlags are appended after the version-injection flags.
+	ExtraLDFlags []string
+
+	// Smoke, when set, runs the host-platform binary before the rest of the
+	// matrix is built. Skipped automatically when the host is not a target.
+	Smoke *Smoke
+
+	// Warnf reports something worth knowing that does not stop the build.
+	Warnf func(format string, args ...any)
 }
 
 // Artifact is one built and packaged target.
 type Artifact struct {
+	// Size is the archive's size in bytes.
+	Size int64 `json:"size"`
+
+	// LDFlags is the linker flag string exactly as passed, so that a rebuild
+	// replays a recorded input rather than reconstructing one and hoping.
+	LDFlags string `json:"ldflags"`
+
 	// Archive is the archive filename, e.g. "foo_1.0.0_linux_amd64.tar.gz".
 	Archive string `json:"archive"`
 
 	// Target is the GOOS/GOARCH pair, e.g. "linux/amd64".
 	Target string `json:"target"`
+
+	// OS and Arch are the same pair split, for consumers that need the parts.
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
 
 	// BinarySHA256 is the digest of the compiled binary before archiving.
 	BinarySHA256 string `json:"binary_sha256"`
@@ -106,6 +127,13 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 		"-X", "main.commit=" + o.Commit,
 		"-X", "main.date=" + o.ModTime.UTC().Format(time.RFC3339),
 	}
+	ldflags = append(ldflags, o.ExtraLDFlags...)
+	ldflagString := strings.Join(append([]string{"-s", "-w"}, ldflags...), " ")
+
+	// The host target is built first so that the smoke check can run before
+	// anything else is compiled. Discovering that the binary does not start is
+	// worth a few seconds of build time, not the whole matrix.
+	targets = hostFirst(targets)
 
 	out := make([]Artifact, 0, len(targets))
 
@@ -127,6 +155,16 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 		})
 		if err != nil {
 			return nil, err
+		}
+
+		if o.Smoke != nil && target == gobuild.Host() {
+			warning, err := runSmoke(ctx, binPath, *o.Smoke)
+			if err != nil {
+				return nil, err
+			}
+			if warning != "" && o.Warnf != nil {
+				o.Warnf("%s", warning)
+			}
 		}
 
 		binSum, err := sha256File(binPath)
@@ -155,10 +193,18 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 		if err != nil {
 			return nil, err
 		}
+		info, err := os.Stat(archivePath)
+		if err != nil {
+			return nil, fmt.Errorf("build: %w", err)
+		}
 
 		out = append(out, Artifact{
 			Archive:       archiveName,
 			Target:        target.String(),
+			OS:            target.OS,
+			Arch:          target.Arch,
+			Size:          info.Size(),
+			LDFlags:       ldflagString,
 			BinarySHA256:  binSum,
 			ArchiveSHA256: archiveSum,
 		})
@@ -166,6 +212,18 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 
 	slices.SortFunc(out, func(a, b Artifact) int { return strings.Compare(a.Archive, b.Archive) })
 	return out, nil
+}
+
+// hostFirst moves the host target to the front, leaving the rest in order.
+func hostFirst(targets []gobuild.Target) []gobuild.Target {
+	host := gobuild.Host()
+	for i, t := range targets {
+		if t == host {
+			reordered := append([]gobuild.Target{host}, targets[:i]...)
+			return append(reordered, targets[i+1:]...)
+		}
+	}
+	return targets
 }
 
 func entriesFor(binName, binPath, moduleDir string, extra []string) ([]archive.Entry, error) {
