@@ -13,19 +13,19 @@ env:
   GO_VERSION: "1.26.8"
 
 jobs:
-  # Does a machine agree with itself? The suite varies source directory, work
-  # directory, TMPDIR, wall clock and build cache within a single host.
+  # Lint, vet, build and test, on every platform letsgo runs on.
   #
-  # Linux is deliberately absent: ci.yaml already runs the same suite on
-  # ubuntu-latest through the shared workflow, along with lint and vet. What
-  # only this workflow can provide is the same suite on the other two
-  # platforms, which is why they are all that is left here.
+  # The shared reusable workflow is deliberately not used here. It runs on a
+  # single runner, and a release tool has to be correct on all three — the
+  # test suite is also the same-machine reproducibility check, varying source
+  # directory, work directory, TMPDIR, wall clock and build cache within one
+  # host, so it has to run on each of them rather than on Linux alone.
   same-machine:
     name: same machine (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -37,8 +37,29 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           check-latest: false
 
+      - name: lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          args: --config .golangci.yml
+
+      - name: vet
+        run: go vet ./...
+
+      - name: build
+        run: go build ./...
+
       - name: test
-        run: go test ./... -v -timeout 20m
+        run: go test -coverprofile=coverage.txt ./... -v -timeout 20m
+
+      # One upload is enough; three would just be the same lines counted
+      # three times under different runners.
+      - name: coverage
+        if: ${{ matrix.os == 'ubuntu-latest' }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.txt
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   # Do two machines agree with each other? This is the claim a third party
   # relies on when they run letsgo verify on hardware we do not control, and
