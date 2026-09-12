@@ -94,7 +94,8 @@ func TestReproducibleFromColdCache(t *testing.T) {
 
 // Injected version metadata has to actually reach the binary. Checking the
 // symbol exists is a structural test; running the thing is an empirical one,
-// and this is the seed of the smoke-test gate described in DESIGN.md.
+// and this is the seed of the smoke-test gate described in the wiki's Design
+// page.
 func TestVersionMetadataReachesTheBinary(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "src")
