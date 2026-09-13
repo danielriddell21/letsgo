@@ -38,6 +38,7 @@ letsgo release --snapshot              rehearse a release without publishing
 letsgo verify [tag]                    rebuild a published release and compare it
 letsgo diff <from> [to]                compare two releases: size, dependencies, API
 letsgo tag [--major|--minor|--patch]   work out the next version and tag it
+letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
 letsgo fmt [file]                      format letsgo.mod
 letsgo version                         print the version (also --version)
 ```

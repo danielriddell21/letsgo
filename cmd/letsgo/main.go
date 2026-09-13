@@ -42,6 +42,7 @@ usage:
   letsgo release --snapshot              rehearse a release without publishing
   letsgo verify [tag]                    rebuild a published release and compare it
   letsgo diff <from> [to]                compare two releases: size, dependencies, API
+  letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
   letsgo tag [--major|--minor|--patch]   work out the next version and tag it
   letsgo fmt [file]                      format letsgo.mod
   letsgo version                         print the version (also --version)
@@ -69,6 +70,8 @@ func main() {
 		err = runVerify(args)
 	case "diff":
 		err = runDiff(args)
+	case "yank":
+		err = runYank(args)
 	case "tag":
 		err = runTag(args)
 	case "fmt":
@@ -94,10 +97,55 @@ func main() {
 // and an error out of the flag package reaching the user unprefixed would not
 // say which tool produced it.
 func parseFlags(fs *flag.FlagSet, args []string) error {
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(permute(fs, args)); err != nil {
 		return fmt.Errorf("letsgo %s: %w", fs.Name(), err)
 	}
 	return nil
+}
+
+// permute moves flags ahead of positional arguments.
+//
+// Go's flag package stops at the first non-flag argument, so `letsgo yank
+// v1.2.3 --reason "..."` would treat the flag as another operand. Every one of
+// these commands documents its operand first, and typing it that way should
+// not silently mean something else.
+func permute(fs *flag.FlagSet, args []string) []string {
+	var flags, operands []string
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		switch {
+		// Everything after "--" is an operand by definition, and stays in
+		// order behind the terminator.
+		case arg == "--":
+			operands = append(operands, args[i+1:]...)
+			return append(flags, append([]string{"--"}, operands...)...)
+
+		case len(arg) > 1 && arg[0] == '-':
+			flags = append(flags, arg)
+
+			name := strings.TrimLeft(arg, "-")
+			if strings.Contains(name, "=") {
+				continue // the value is attached
+			}
+			// A non-boolean flag takes the next argument with it, or the
+			// reordering would separate a flag from its value.
+			if f := fs.Lookup(name); f != nil && !boolFlag(f) && i+1 < len(args) {
+				i++
+				flags = append(flags, args[i])
+			}
+
+		default:
+			operands = append(operands, arg)
+		}
+	}
+	return append(flags, operands...)
+}
+
+func boolFlag(f *flag.Flag) bool {
+	b, ok := f.Value.(interface{ IsBoolFlag() bool })
+	return ok && b.IsBoolFlag()
 }
 
 // errPlanFailed marks a failure already reported in full by the plan output,
@@ -442,7 +490,7 @@ func runDiff(args []string) error {
 		return err
 	}
 	if fs.NArg() == 0 || fs.NArg() > 2 {
-		return errors.New("usage: letsgo diff <from> [to]\n" +
+		return errUsage("letsgo diff <from> [to]\n" +
 			"  each side is a tag, or a path to a letsgo.json; to defaults to the latest release")
 	}
 
@@ -640,14 +688,24 @@ func reportProposal(p bump.Proposal, previous string) {
 
 func confirm(version string) bool {
 	fmt.Printf("\n  create tag %s? [y/N] ", version)
+	return readYes()
+}
 
-	reader := bufio.NewReader(os.Stdin)
-	answer, err := reader.ReadString('\n')
+// readYes reads one answer from the terminal. Anything but an explicit yes is
+// a no, including an unreadable stdin: a prompt nobody saw must not be taken
+// as agreement.
+func readYes() bool {
+	answer, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
 		return false
 	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	return answer == "y" || answer == "yes"
+}
+
+// errUsage reports a command invoked with the wrong arguments.
+func errUsage(usage string) error {
+	return fmt.Errorf("usage: %s", usage)
 }
 
 // releaseTag is the tag a release is published under.

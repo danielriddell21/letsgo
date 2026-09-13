@@ -173,7 +173,8 @@ func describe(
 
 	for _, a := range artifacts {
 		m.Artifacts = append(m.Artifacts, manifest.Artifact{
-			Name: a.Archive, OS: a.OS, Arch: a.Arch, Size: a.Size, BinarySize: a.BinarySize,
+			Name: a.Archive, OS: a.OS, Arch: a.Arch, Binary: a.Binary,
+			Size: a.Size, BinarySize: a.BinarySize,
 			SHA256: a.ArchiveSHA256, BinarySHA256: a.BinarySHA256,
 			Build: manifest.Build{
 				Flags:   []string{"-trimpath", "-buildvcs=false"},

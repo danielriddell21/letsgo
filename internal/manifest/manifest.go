@@ -124,6 +124,12 @@ type Artifact struct {
 	Arch string `json:"arch"`
 	Size int64  `json:"size"`
 
+	// Binary is the executable inside the archive. A module with several
+	// commands produces one archive per command per target, and without this
+	// the manifest cannot say which is which — which anything regenerating a
+	// package definition from a published release has to know.
+	Binary string `json:"binary,omitempty"`
+
 	// BinarySize is the compiled binary's size before archiving. Archive size
 	// moves with the compressor; this is the number that describes what a
 	// user runs, and the one a size budget is written against.
