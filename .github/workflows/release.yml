@@ -29,7 +29,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -45,7 +45,7 @@ jobs:
           # for letsgo to identify the version from it.
           fetch-tags: true
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # Read from go.mod, which carries an exact patch version rather than
           # a major.minor. Compiler and linker output can differ between Go
@@ -72,7 +72,7 @@ jobs:
       # Records which workflow built these bytes. Keyed by digest, so it
       # applies equally to the copies already uploaded.
       - name: attest provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             dist/*.tar.gz
@@ -80,7 +80,7 @@ jobs:
 
       # Kept for inspection when a run needs explaining. The artifacts are
       # reproducible, so this is a convenience rather than the only copy.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: dist

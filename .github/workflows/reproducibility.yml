@@ -63,14 +63,14 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # go.mod carries an exact patch version, not a major.minor. Compiler and
       # linker output can legitimately differ between Go releases, so skew
       # between two runners would look like a reproducibility failure. The
       # toolchain is a build input, and the release manifest records it for the
       # same reason — reading it from go.mod keeps one source of truth, shared
       # with the shared workflow above.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: false
@@ -80,7 +80,7 @@ jobs:
 
       - run: cat digests.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: digests-${{ matrix.os }}
           path: digests.json
@@ -90,7 +90,7 @@ jobs:
     needs: cross-machine
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: digests
 
