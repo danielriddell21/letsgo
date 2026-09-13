@@ -223,20 +223,26 @@ back to the GitHub compare API instead of failing.
 
 ### Coming from GoReleaser
 
+Mostly deletion. A typical ninety-line `.goreleaser.yaml` becomes this, in
+full:
+
 ```
-$ letsgo migrate
-
-  read .goreleaser.yaml (94 lines)
-  wrote letsgo.mod (7 lines)
-
-  not migrated
-    dockers:    letsgo does not build container images — use docker buildx
-    announce:   letsgo does not post announcements
+brew you/homebrew-tap
 ```
 
-Most of a GoReleaser config restates defaults we already infer. Anything that
-maps to something we deliberately don't do is reported explicitly, never
-silently dropped.
+Everything else it said — `CGO_ENABLED=0`, `-trimpath`, the target matrix, the
+ldflags, the archive naming, the Windows zip override, the checksum file, the
+changelog filters — is already the behaviour.
+
+There is no `migrate` command. A converter for a config that mostly restates
+defaults earns little, and the parts that would need one are the parts letsgo
+deliberately does not do, where the answer is which tool to use for that
+repository rather than how to translate a key.
+
+[MIGRATING.md](MIGRATING.md) has the full mapping and, more usefully, the
+behaviour changes to expect on the first release — including one worth knowing
+in advance: a wrong `-X main.version` path now fails the release instead of
+silently shipping a binary that reports `dev`.
 
 ---
 
@@ -266,9 +272,8 @@ with no escape hatch gets abandoned. A tool that skips checks silently stops
 being trusted. `--allow-vulnerable` records the accepted advisory IDs in the
 release manifest rather than hiding them.
 
-**Small.** Eight verbs, three direct dependencies, one static binary. This tool
-signs and publishes your releases, so its attack surface is part of its threat
-model.
+**Small.** Eight verbs, no dependencies, one static binary. This tool signs and
+publishes your releases, so its attack surface is part of its threat model.
 
 **Go-only is a feature, not a limitation.** We assume the toolchain, the module
 graph, the vulnerability database, and the conventions. That assumption is where
@@ -321,8 +326,8 @@ Module proxy warm-up. `--snapshot`. `letsgo release`.
 latter.
 
 **M3 · Adoption**
-`letsgo migrate`. Homebrew tap generation. Generated `install.sh`. `letsgo diff`
-and size budgets.
+A migration guide rather than a converter. Homebrew tap generation. Generated
+`install.sh`. `letsgo diff` and size budgets.
 
 *At the end of M3 letsgo can replace GoReleaser for the repos it targets, and
 does several things GoReleaser cannot.*
