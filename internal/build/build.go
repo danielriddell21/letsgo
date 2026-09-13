@@ -165,6 +165,17 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 	ldflags = append(ldflags, o.ExtraLDFlags...)
 	ldflagString := strings.Join(append([]string{"-s", "-w"}, ldflags...), " ")
 
+	// Resolved once, and only when it is going to be used: the cache key has
+	// to name the compiler that produced the entry.
+	goVersion := ""
+	if o.CacheKey != "" && o.Cache != nil {
+		version, err := gobuild.Version(ctx, o.GoBin)
+		if err != nil {
+			return nil, err
+		}
+		goVersion = version
+	}
+
 	// The host target is built first so that the smoke check can run before
 	// anything else is compiled. Discovering that the binary does not start is
 	// worth a few seconds of build time, not the whole matrix.
@@ -182,11 +193,15 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 		}
 
 		// The key covers everything that determines these bytes. A build
-		// reused on a partial key would be a build nobody can account for.
+		// reused on a partial key would be a build nobody can account for —
+		// and the compiler is a build input, so the resolved version has to be
+		// in here. o.Toolchain alone is not enough: it is usually empty, and
+		// an entry compiled by one Go release would then be handed back to
+		// another.
 		var key string
 		if o.CacheKey != "" {
 			key = CacheKey(o.CacheKey, o.Package, target.String(),
-				strings.Join(ldflags, " "), o.Toolchain, binName)
+				strings.Join(ldflags, " "), o.Toolchain, goVersion, binName)
 		}
 
 		if o.Cache.Get(key, binPath) {

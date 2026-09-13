@@ -114,3 +114,17 @@ func TestNilCacheIsUsable(t *testing.T) {
 		t.Error("a nil cache reported a hit")
 	}
 }
+
+// A cached binary must never outlive the compiler that produced it. The
+// toolchain is a build input, and an entry keyed without it would be handed
+// back to a different Go release as though it were the same bytes.
+func TestCacheKeyCoversTheToolchain(t *testing.T) {
+	base := []string{"commit", ".", "linux/amd64", "-s -w", ""}
+
+	first := CacheKey(append(append([]string{}, base...), "go1.26.8", "app")...)
+	second := CacheKey(append(append([]string{}, base...), "go1.27.1", "app")...)
+
+	if first == second {
+		t.Error("two Go versions produced the same cache key")
+	}
+}
