@@ -63,7 +63,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # go.mod carries an exact patch version, not a major.minor. Compiler and
       # linker output can legitimately differ between Go releases, so skew
       # between two runners would look like a reproducibility failure. The
