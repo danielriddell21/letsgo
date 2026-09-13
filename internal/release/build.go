@@ -95,6 +95,10 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 		smoke = nil
 	}
 
+	if err := checkBudgets(artifacts, p.Budgets, warnf); err != nil {
+		return nil, err
+	}
+
 	source, err := build.WriteSource(ctx, build.SourceOptions{
 		ModuleDir: p.Module.Dir,
 		Name:      p.Project,
@@ -122,11 +126,12 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 		Source:          &manifest.Source{Archive: source.Name, SHA256: source.SHA256},
 		Modules:         mods,
 		Gates:           gates(p),
+		APIChanges:      apiChanges(p),
 	}
 
 	for _, a := range artifacts {
 		m.Artifacts = append(m.Artifacts, manifest.Artifact{
-			Name: a.Archive, OS: a.OS, Arch: a.Arch, Size: a.Size,
+			Name: a.Archive, OS: a.OS, Arch: a.Arch, Size: a.Size, BinarySize: a.BinarySize,
 			SHA256: a.ArchiveSHA256, BinarySHA256: a.BinarySHA256,
 			Build: manifest.Build{
 				Flags:   []string{"-trimpath", "-buildvcs=false"},
@@ -146,6 +151,11 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 		return nil, err
 	}
 
+	installer, installerSum, err := writeInstaller(p, artifacts, dir)
+	if err != nil {
+		return nil, err
+	}
+
 	// The checksum file covers everything published except itself, the
 	// manifest included: a consumer who trusts SHA256SUMS can then trust the
 	// manifest, and through it every digest the manifest records.
@@ -153,6 +163,9 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 		build.Sum{Name: source.Name, SHA256: source.SHA256},
 		build.Sum{Name: manifest.FileName, SHA256: manifestSum},
 	)
+	if installer != "" {
+		sums = append(sums, build.Sum{Name: installer, SHA256: installerSum})
+	}
 	if _, err := build.WriteChecksums(dir, sums); err != nil {
 		return nil, err
 	}
@@ -161,9 +174,28 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 	for _, a := range artifacts {
 		files = append(files, a.Archive)
 	}
-	files = append(files, source.Name, manifest.FileName, build.ChecksumFile)
+	files = append(files, source.Name, manifest.FileName)
+	if installer != "" {
+		files = append(files, installer)
+	}
+	files = append(files, build.ChecksumFile)
 
 	return &Result{Dir: dir, Manifest: m, Artifacts: artifacts, Source: source, Files: files}, nil
+}
+
+// apiChanges carries the exported API delta into the manifest, so comparing
+// two releases later needs nothing but the two files.
+func apiChanges(p *plan.Plan) []manifest.APIChange {
+	if len(p.APIChanges) == 0 {
+		return nil
+	}
+	out := make([]manifest.APIChange, 0, len(p.APIChanges))
+	for _, c := range p.APIChanges {
+		out = append(out, manifest.APIChange{
+			Kind: string(c.Kind), Package: c.Package, Text: c.Text,
+		})
+	}
+	return out
 }
 
 // gates records what the release was checked against, so a consumer can see

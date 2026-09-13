@@ -91,6 +91,11 @@ type Artifact struct {
 	// Size is the archive's size in bytes.
 	Size int64 `json:"size"`
 
+	// BinarySize is the compiled binary's size before archiving. It is the
+	// number a size budget is about: compression varies with the compressor,
+	// while what a user actually runs is this.
+	BinarySize int64 `json:"binary_size"`
+
 	// LDFlags is the linker flag string exactly as passed, so that a rebuild
 	// replays a recorded input rather than reconstructing one and hoping.
 	LDFlags string `json:"ldflags"`
@@ -205,6 +210,10 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 		if err != nil {
 			return nil, err
 		}
+		binInfo, err := os.Stat(binPath)
+		if err != nil {
+			return nil, fmt.Errorf("build: %w", err)
+		}
 
 		format := archive.FormatTarGz
 		if target.OS == "windows" {
@@ -238,6 +247,7 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 			OS:            target.OS,
 			Arch:          target.Arch,
 			Size:          info.Size(),
+			BinarySize:    binInfo.Size(),
 			LDFlags:       ldflagString,
 			BinarySHA256:  binSum,
 			ArchiveSHA256: archiveSum,

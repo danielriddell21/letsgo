@@ -16,10 +16,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/archive"
 	"github.com/danielriddell21/letsgo/internal/build"
+	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
@@ -120,6 +122,11 @@ type Plan struct {
 	Files     []string
 	Artifacts []Artifact
 
+	// Budgets caps each target's binary size. Parsed here so that a malformed
+	// size is reported with every other planning problem, rather than after a
+	// full matrix has been compiled.
+	Budgets map[string]bytesize.Size
+
 	Checks  []Check
 	Sources []Source
 
@@ -181,6 +188,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveVersion(ctx)
 	p.checkWorktree(opts)
 	p.resolveTargets(ctx)
+	p.resolveBudgets()
 	p.resolveCommands()
 	p.resolveFiles()
 	p.resolveArtifacts()
@@ -576,6 +584,60 @@ func (p *Plan) resolveTargets(ctx context.Context) {
 		return
 	}
 	p.add("targets", Pass, "%d targets, all buildable by this toolchain", len(p.Targets))
+}
+
+// resolveBudgets parses the configured size caps.
+//
+// A budget naming a target that is not built would silently never apply,
+// which is the failure mode a size budget exists to prevent, so it is a
+// mistake rather than a no-op.
+func (p *Plan) resolveBudgets() {
+	if len(p.Config.Budgets) == 0 {
+		return
+	}
+
+	built := make(map[string]bool, len(p.Targets))
+	for _, t := range p.Targets {
+		built[t.String()] = true
+	}
+
+	budgets := make(map[string]bytesize.Size, len(p.Config.Budgets))
+	var problems []string
+	for _, target := range sortedKeys(p.Config.Budgets) {
+		size, err := bytesize.Parse(p.Config.Budgets[target])
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("budget %s: %v", target, err))
+			continue
+		}
+		if !built[target] {
+			problems = append(problems,
+				fmt.Sprintf("budget names %s, which is not a target this release builds", target))
+			continue
+		}
+		budgets[target] = size
+	}
+
+	if len(problems) > 0 {
+		p.add("budgets", Fail, "%s", strings.Join(problems, "\n"))
+		return
+	}
+	p.Budgets = budgets
+
+	described := make([]string, 0, len(budgets))
+	for _, target := range sortedKeys(budgets) {
+		described = append(described, target+" "+budgets[target].String())
+	}
+	p.note("budgets", strings.Join(described, ", "), ConfigFile)
+	p.add("budgets", Pass, "%d target(s) capped; checked once the binaries exist", len(budgets))
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // versionVars are the conventional linker-injected variables.

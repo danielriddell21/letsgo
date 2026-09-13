@@ -16,6 +16,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/bump"
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/internal/diff"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/manifest"
@@ -39,6 +40,7 @@ usage:
   letsgo release [--draft] [-o dir]      build and publish, resumably
   letsgo release --snapshot              rehearse a release without publishing
   letsgo verify [tag]                    rebuild a published release and compare it
+  letsgo diff <from> [to]                compare two releases: size, dependencies, API
   letsgo tag [--major|--minor|--patch]   work out the next version and tag it
   letsgo fmt [file]                      format letsgo.mod
   letsgo version                         print the version (also --version)
@@ -64,6 +66,8 @@ func main() {
 		err = runRelease(args)
 	case "verify":
 		err = runVerify(args)
+	case "diff":
+		err = runDiff(args)
 	case "tag":
 		err = runTag(args)
 	case "fmt":
@@ -298,7 +302,7 @@ func runVerify(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	repo, dir, err := verifyTarget(ctx, *repoFlag)
+	repo, dir, err := targetRepo(ctx, *repoFlag)
 	if err != nil {
 		return err
 	}
@@ -334,13 +338,13 @@ func runVerify(args []string) error {
 	return nil
 }
 
-// verifyTarget resolves which repository to verify and, where possible, a
-// local checkout to rebuild from.
+// targetRepo resolves which repository a command is asking about and, where
+// possible, a local checkout of it.
 //
-// Verifying someone else's release is the point, so a repository outside the
-// current directory is allowed; it simply cannot be rebuilt from a local
-// checkout, and the report says so.
-func verifyTarget(ctx context.Context, explicit string) (github.Repo, string, error) {
+// Inspecting someone else's release is the point, so a repository outside the
+// current directory is allowed; it simply has no local checkout, and the
+// callers that need one say so.
+func targetRepo(ctx context.Context, explicit string) (github.Repo, string, error) {
 	if explicit != "" {
 		owner, name, ok := strings.Cut(explicit, "/")
 		if !ok || owner == "" || name == "" {
@@ -358,6 +362,75 @@ func verifyTarget(ctx context.Context, explicit string) (github.Repo, string, er
 		return github.Repo{}, "", err
 	}
 	return github.Repo{Owner: found.Owner, Name: found.Name}, module.Dir, nil
+}
+
+// runDiff compares two releases.
+//
+// Both sides are read from manifests rather than from the repository, so this
+// works against releases of projects that are not checked out, and says what
+// the artifacts actually did rather than what the commit messages claimed.
+func runDiff(args []string) error {
+	fs := flag.NewFlagSet("diff", flag.ExitOnError)
+	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
+	repoFlag := fs.String("repo", "", "repository to compare in as owner/name (default: this repository's origin)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() == 0 || fs.NArg() > 2 {
+		return errors.New("usage: letsgo diff <from> [to]\n" +
+			"  each side is a tag, or a path to a letsgo.json; to defaults to the latest release")
+	}
+
+	ctx := context.Background()
+
+	// The forge is only consulted for sides given as tags, so comparing two
+	// local manifests needs neither a network nor a token.
+	var (
+		client *github.Client
+		repo   github.Repo
+	)
+	from, to := fs.Arg(0), fs.Arg(1)
+	if !isManifestPath(from) || !isManifestPath(to) {
+		var err error
+		if repo, _, err = targetRepo(ctx, *repoFlag); err != nil {
+			return err
+		}
+		tokenValue, _ := plan.Token(*token)
+		client = github.New(tokenValue)
+		client.UserAgent = "letsgo/" + version
+	}
+
+	before, err := loadManifest(ctx, client, repo, from)
+	if err != nil {
+		return err
+	}
+	after, err := loadManifest(ctx, client, repo, to)
+	if err != nil {
+		return err
+	}
+
+	fmt.Print(diff.Compare(before, after))
+	return nil
+}
+
+// loadManifest resolves one side of a diff, which is either a file on disk or
+// a tag on the forge. An empty reference means the latest release.
+func loadManifest(ctx context.Context, client *github.Client, repo github.Repo, ref string) (*manifest.Manifest, error) {
+	if isManifestPath(ref) {
+		return manifest.Read(ref)
+	}
+	return diff.Fetch(ctx, client, repo, ref)
+}
+
+// isManifestPath reports whether a reference names a local manifest rather
+// than a tag. Tags do not exist on disk, so the file system decides: this
+// keeps a tag named like a path from being misread, and the reverse.
+func isManifestPath(ref string) bool {
+	if ref == "" {
+		return false
+	}
+	info, err := os.Stat(ref)
+	return err == nil && info.Mode().IsRegular()
 }
 
 func runTag(args []string) error {

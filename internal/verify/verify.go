@@ -172,20 +172,18 @@ func findRelease(ctx context.Context, o Options) (*github.Release, error) {
 }
 
 func fetchManifest(ctx context.Context, o Options, release *github.Release) (*manifest.Manifest, error) {
-	for _, asset := range release.Assets {
-		if asset.Name != manifest.FileName {
-			continue
-		}
-		data, err := o.Client.DownloadAsset(ctx, o.Repo, asset.ID)
-		if err != nil {
-			return nil, err
-		}
-		return manifest.Decode(data)
+	asset, ok := release.Asset(manifest.FileName)
+	if !ok {
+		return nil, fmt.Errorf(
+			"verify: release %s has no %s, so there is nothing describing what it should contain\n"+
+				"  only releases published by letsgo can be verified",
+			release.TagName, manifest.FileName)
 	}
-	return nil, fmt.Errorf(
-		"verify: release %s has no %s, so there is nothing describing what it should contain\n"+
-			"  only releases published by letsgo can be verified",
-		release.TagName, manifest.FileName)
+	data, err := o.Client.DownloadAsset(ctx, o.Repo, asset.ID)
+	if err != nil {
+		return nil, err
+	}
+	return manifest.Decode(data)
 }
 
 // comparePublished checks the assets attached to the release against what the

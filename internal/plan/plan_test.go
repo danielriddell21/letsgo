@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
@@ -292,5 +293,60 @@ func TestExplainNamesEverySource(t *testing.T) {
 		if s.From == "" {
 			t.Errorf("source %q has no origin", s.Field)
 		}
+	}
+}
+
+func TestBudgetsAreParsedAtPlanTime(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\n\nbudget linux/amd64 15MB\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+
+	if !p.OK() {
+		t.Fatalf("plan should pass: %+v", p.Checks)
+	}
+	if got := p.Budgets["linux/amd64"]; got != 15*bytesize.MB {
+		t.Errorf("budget = %v, want 15MB", got)
+	}
+}
+
+// A malformed size would otherwise surface after a full matrix had been
+// compiled, which is the one moment it is least useful.
+func TestBadBudgetSizeFailsThePlan(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\n\nbudget linux/amd64 fifteen\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+
+	if p.OK() {
+		t.Fatal("plan passed with an unparseable budget")
+	}
+	if c := check(t, p, "budgets"); !strings.Contains(c.Detail, "fifteen") {
+		t.Errorf("budget error does not name the value: %q", c.Detail)
+	}
+}
+
+// A budget on a target nobody builds never fires, which defeats the point of
+// writing one down.
+func TestBudgetForAnUnbuiltTargetFailsThePlan(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\n\nbudget linux/arm64 15MB\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+
+	if p.OK() {
+		t.Fatal("plan passed with a budget for a target it does not build")
+	}
+	if c := check(t, p, "budgets"); !strings.Contains(c.Detail, "linux/arm64") {
+		t.Errorf("budget error does not name the target: %q", c.Detail)
 	}
 }

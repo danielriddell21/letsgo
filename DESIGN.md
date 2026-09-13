@@ -95,10 +95,13 @@ the argument.
 
 Stated plainly, because a pitch that will not name its losses is not credible.
 
-- **Packaging breadth** — Docker/ko, nfpm (deb/rpm/apk), snap, scoop, AUR,
-  krew, nix. We do none of it, ever.
+- **Packaging breadth** — nfpm (deb/rpm/apk), snap, scoop, AUR, krew, nix. We
+  do none of it. Container images are the one exception, and only because a
+  static Go binary on `scratch` needs no build system at all (§18).
 - **Announcements** — Slack, Discord, Mastodon, email.
-- **Multi-forge** — GitLab and Gitea work today; for us they are M4 at best.
+- **Multi-forge** — GitLab and Gitea work today; letsgo publishes to GitHub,
+  behind an interface that makes a second forge an addition rather than a
+  rewrite, but nobody should wait for one.
 - **Maturity** — years of accumulated edge cases from a large user base. We
   will ship bugs they fixed in 2021.
 - **Monorepos** — a Pro feature, but it exists. We have deferred it entirely.
@@ -544,6 +547,10 @@ papercut.
   management, nothing to rotate.
 - The manifest records `go.sum`'s digest, so `letsgo verify` proves the
   dependency graph as well as the output.
+- A generated `install.sh` carries every archive's digest inline, so installing
+  verifies against a number recorded by the build rather than one fetched from
+  the same page as the archive. A `curl | sh` installer that downloads its own
+  checksum file proves only that the release page is internally consistent.
 - SBOM generation is deferred to M4. It is table stakes, not a differentiator.
 
 ---
@@ -573,27 +580,49 @@ artifacts rather than commit messages:
 
 ```
 $ letsgo diff v1.2.3 v1.3.0
-  binary size
-    linux/amd64    12.4 MB -> 16.8 MB   (+4.4 MB, +35%)   ⚠ over budget
-    darwin/arm64   12.1 MB -> 16.5 MB   (+4.4 MB, +36%)   ⚠ over budget
-  dependencies
-    + github.com/some/large-dep v1.4.0
-    ~ golang.org/x/net v0.21.0 -> v0.23.0
-  api
-    + func WithTimeout(time.Duration) Option
-  toolchain
-    go1.23.4 -> go1.24.7
+v1.2.3 -> v1.3.0
+
+binary size
+  linux/amd64    12.4 MB -> 16.8 MB   +35%
+  darwin/arm64   12.1 MB -> 16.5 MB   +36%
+
+dependencies
+  + github.com/some/large-dep v1.4.0
+  ~ golang.org/x/net v0.21.0 -> v0.23.0
+
+api
+  + example.com/foo: func WithTimeout(time.Duration) Option
+
+toolchain
+  go1.23.4 -> go1.24.7
 ```
 
-Size and dependency deltas come straight from the two manifests with no
-rebuild, which makes this feature nearly free once §8 exists. Binary size
-regressions are a real and under-tooled problem in Go, and a single added
-dependency is usually the cause — putting both on the same screen makes the
-culprit obvious.
+Every line comes from the two manifests. Nothing is rebuilt and nothing is
+downloaded, which makes this feature nearly free once §8 exists — and means it
+works against a project that is not checked out, or between two releases of
+someone else's. Either side may equally be a local `letsgo.json`, so "what did
+the build I just ran do to the binary" is the same command.
 
-**Size budgets.** Optional config (`budget linux/amd64 15MB`) turns this into a
-§9 gate, failing a release that blows the budget rather than reporting it
-afterwards.
+Binary size regressions are a real and under-tooled problem in Go, and a single
+added dependency is usually the cause — putting both on the same screen makes
+the culprit obvious. The toolchain line is listed last and is often the
+explanation, because a compiler change moves every target at once and no
+dependency accounts for it.
+
+The size compared is the **binary**, not the archive, wherever both manifests
+record one: archive size moves with the compressor as well as with the code.
+Against a release published before letsgo recorded binary size, the comparison
+falls back to archive size and says so rather than mixing the two.
+
+**Size budgets.** Optional config (`budget linux/amd64 15MB`) caps a target's
+binary. The size is parsed at plan time — a malformed one, or a budget naming a
+target the release does not build, fails the plan rather than surfacing after a
+full matrix has been compiled. The cap itself is checked immediately after the
+build, because a binary's size is not knowable before one exists; every target
+is checked before anything is reported, so one run names all five. A binary
+that reaches 90% of its budget is reported as a warning, since a cap that is
+only ever discussed on the day it breaks tends to break on the day of a
+release.
 
 ### `letsgo yank <tag>`
 
@@ -651,19 +680,28 @@ that now fails instead of silently producing a binary reporting `dev`.
 cmd/letsgo/            entry point, subcommand routing (hand-rolled, no framework)
 internal/config/       letsgo.mod parser, formatter, defaults, validation
 internal/discover/     go.mod, git remote, main-package and symbol discovery
-internal/gobuild/      target matrix, build execution, build cache
+internal/safeexec/     resolving external binaries without trusting PATH
+internal/gobuild/      target matrix, toolchain resolution, build execution
 internal/archive/      deterministic tar/gzip/zip writers
-internal/checksum/     SHA256SUMS
-internal/gate/         the release gate: semver, apidiff, govulncheck, smoke, budgets
-internal/changelog/    PR, conventional-commit, and API-derived changelog
+internal/build/        compile, package, smoke, source archive, cache, SHA256SUMS
+internal/bytesize/     one interpretation of "15MB", shared by config and reports
+internal/gate/         apidiff and govulncheck, invoked as external tools
+internal/semver/       version ordering and comparison
+internal/bump/         next version from the API delta and the commits
+internal/changelog/    conventional-commit and API-derived changelog
 internal/manifest/     letsgo.json schema, read and write
+internal/install/      the self-verifying install.sh generator
 internal/publish/      GitHub releases, asset upload, resume logic, proxy warm-up
-internal/brew/         Homebrew formula generation and tap push
+internal/release/      plan to a complete set of publishable files on disk
 internal/verify/       rebuild-and-compare
 internal/diff/         manifest-to-manifest release diffing
-internal/yank/         retraction workflow
-internal/plan/         orchestration and the plan report
+internal/plan/         orchestration, the release gate, and the plan report
+internal/repro/        the cross-machine determinism suite, driving the real pipeline
 ```
+
+Still to come: `internal/brew/` (formula generation and tap push),
+`internal/oci/` (deterministic image layers and the registry client), and
+`internal/yank/` (the retraction workflow).
 
 ### Dependency budget: zero direct dependencies
 
@@ -704,31 +742,52 @@ and `apidiff` gates, plus the API-derived changelog section that falls out of
 the latter.
 
 **M3 — Adoption and afterlife**
-A migration guide (MIGRATING.md) rather than a converter. Homebrew tap
-generation pointed at our own source archive. Generated `install.sh`.
-`letsgo diff` and size budgets.
+A migration guide (MIGRATING.md) rather than a converter. `letsgo diff`, size
+budgets, and a generated `install.sh` that carries its own digests. Homebrew
+tap generation pointed at our own source archive.
 
 *MVP complete. letsgo can now replace GoReleaser across the repos it targets,
 and does several things GoReleaser does not.*
 
-**M4 — Breadth, only if needed**
-`letsgo yank`. SBOM. GitLab and Gitea. A reusable GitHub Action. An embeddable
-`selfupdate` package that consumes the manifest, so any binary released with
-letsgo gets verified self-update for free.
+**M4 — Container images**
+Multi-arch OCI images built from the binaries M0 produced, on `scratch`, with a
+deterministic layer and no daemon: the layer is the same tar writer as §7, the
+config is JSON, and the push is the registry API. The image digest is recorded
+in the manifest, so `letsgo verify` covers the image for the same reason it
+covers an archive. This reverses a non-goal (§18) and is the one place it is
+worth reversing, because "reproducible everywhere except the container" is not
+a claim worth making.
+
+**M5 — Breadth, only if needed**
+`letsgo yank`. SBOM. An embeddable `selfupdate` package that consumes the
+manifest, so any binary released with letsgo gets verified self-update for
+free.
+
+GitLab, Gitea and a reusable GitHub Action are out of scope here. The forge
+interface (§16) exists so a second forge is an addition rather than a
+refactor, and the Action is packaging rather than tooling — it belongs in its
+own repository, where it can version independently of the binary it runs.
 
 ---
 
 ## 18. Non-goals
 
-- **Docker builds.** `docker buildx` is better at this. We will not wrap it.
-- **snap, scoop, AUR, krew, nix.** Not until a repo actually needs one.
+- ~~**Docker builds.**~~ Reversed in M4. The original reasoning was that
+  `docker buildx` is better at building images, which is still true — and
+  irrelevant, because letsgo does not need to build one. The binaries already
+  exist; an image around a static binary on `scratch` is a tar layer and a JSON
+  config, both of which §7's writer already produces deterministically. Wrapping
+  buildx would have been wrong; reaching the registry API directly is a hundred
+  lines, needs no daemon, and keeps the reproducibility claim whole.
+- **deb, rpm, snap, scoop, AUR, krew, nix.** Not until a repo actually needs one.
 - **Announcements** (Slack, Discord, Mastodon, email). Not a release tool's job.
 - **A plugin system.** The moment plugins exist, the config surface reopens.
 - **Non-Go languages.** The entire advantage comes from assuming Go.
 - **Monorepos.** Deferred until there is one to test against.
 
-Each of these is a place where GoReleaser is the better tool. Saying so is part
-of the design.
+Each of these — the reversed one aside — is a place where GoReleaser is the
+better tool. Saying so is part of the design, and so is saying when the
+reasoning stops holding.
 
 ---
 
@@ -745,7 +804,6 @@ of the design.
    opinionated check in §9 and the most likely to annoy. Default-on with
    `--allow-breaking` is proposed, but default-warn is defensible for a first
    release while we learn its false-positive rate.
-5. **M3 scope.** `migrate` was dropped in favour of a guide, which also
-   returns the dependency budget to zero. What remains is Homebrew,
-   `install.sh`, `diff` and size budgets; `diff` is the cheapest to defer,
-   since the manifest makes it easy to add later.
+5. ~~**M3 scope.**~~ Settled. `migrate` was dropped in favour of a guide, which
+   also returns the dependency budget to zero. `diff`, size budgets and
+   `install.sh` are built; Homebrew tap generation is what remains.
