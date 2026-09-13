@@ -55,6 +55,11 @@ type Manifest struct {
 
 	Artifacts []Artifact `json:"artifacts"`
 
+	// SBOM is the published dependency document's filename. Named rather
+	// than assumed: a consumer that has the manifest should not have to guess
+	// at a convention to find it.
+	SBOM string `json:"sbom,omitempty"`
+
 	// Images are the container images the release published. Recording the
 	// index digest is what lets verification ask whether the tag still points
 	// at what was built, which is the one question a mutable tag cannot answer

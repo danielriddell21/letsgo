@@ -86,7 +86,7 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 
 	m := describe(p, toolVersion, goVersion, source, mods, artifacts, images)
 
-	files, err := writeMetadata(p, m, dir, artifacts, source)
+	files, err := writeMetadata(p, m, toolVersion, dir, artifacts, source)
 	if err != nil {
 		return nil, err
 	}
@@ -102,10 +102,18 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 func writeMetadata(
 	p *plan.Plan,
 	m *manifest.Manifest,
-	dir string,
+	toolVersion, dir string,
 	artifacts []build.Artifact,
 	source build.Source,
 ) ([]string, error) {
+	// Generated before the manifest is written, so the manifest can name it
+	// and SHA256SUMS can cover both.
+	document, documentSum, err := writeSBOM(p, m, toolVersion, dir)
+	if err != nil {
+		return nil, err
+	}
+	m.SBOM = document
+
 	manifestPath := filepath.Join(dir, manifest.FileName)
 	if err := m.Write(manifestPath); err != nil {
 		return nil, err
@@ -127,6 +135,7 @@ func writeMetadata(
 		build.Sum{Name: source.Name, SHA256: source.SHA256},
 		build.Sum{Name: manifest.FileName, SHA256: manifestSum},
 	)
+	sums = append(sums, build.Sum{Name: document, SHA256: documentSum})
 	if installer != "" {
 		sums = append(sums, build.Sum{Name: installer, SHA256: installerSum})
 	}
@@ -138,7 +147,7 @@ func writeMetadata(
 	for _, a := range artifacts {
 		files = append(files, a.Archive)
 	}
-	files = append(files, source.Name, manifest.FileName)
+	files = append(files, source.Name, manifest.FileName, document)
 	if installer != "" {
 		files = append(files, installer)
 	}

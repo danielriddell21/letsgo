@@ -8,12 +8,16 @@ package repro
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
+	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/oci"
+	"github.com/danielriddell21/letsgo/internal/sbom"
 )
 
 // Options and Artifact are the pipeline's own types, re-exported so that test
@@ -73,4 +77,34 @@ func ImageDigest(artifacts []Artifact, name string, created time.Time) (string, 
 		return "", err
 	}
 	return string(index.Digest), nil
+}
+
+// SBOMDigest renders the release's dependency document and returns its digest.
+//
+// In the reproducibility record because a generated SBOM is usually the least
+// reproducible file in a release: the conventional generators stamp a wall
+// clock and a random serial into every run. Asserting this one across machines
+// is how that stays true.
+func SBOMDigest(o Options, goVersion string, artifacts []Artifact) (string, error) {
+	files := make([]manifest.Artifact, 0, len(artifacts))
+	for _, a := range artifacts {
+		files = append(files, manifest.Artifact{Name: a.Archive, SHA256: a.ArchiveSHA256})
+	}
+
+	document, err := sbom.Generate(sbom.Options{
+		Project:    o.Name,
+		ModulePath: "example.com/" + o.Name,
+		Version:    o.Version,
+		Commit:     o.Commit,
+		Created:    o.ModTime,
+		Tool:       "test",
+		GoVersion:  goVersion,
+		Artifacts:  files,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	sum := sha256.Sum256(document)
+	return hex.EncodeToString(sum[:]), nil
 }

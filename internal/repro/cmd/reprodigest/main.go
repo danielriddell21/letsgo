@@ -73,14 +73,22 @@ func run() error {
 		return err
 	}
 
+	document, err := repro.SBOMDigest(repro.Options{
+		Name: "fixture", Version: "1.2.3", Commit: "9f2ab1c", ModTime: modTime,
+	}, version, artifacts)
+	if err != nil {
+		return err
+	}
+
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 
 	if err := enc.Encode(struct {
 		Go        string           `json:"go"`
 		Image     string           `json:"image"`
+		SBOM      string           `json:"sbom"`
 		Artifacts []repro.Artifact `json:"artifacts"`
-	}{Go: version, Image: image, Artifacts: artifacts}); err != nil {
+	}{Go: version, Image: image, SBOM: document, Artifacts: artifacts}); err != nil {
 		return fmt.Errorf("reprodigest: %w", err)
 	}
 	return nil

@@ -168,8 +168,23 @@ func compare(t *testing.T, first, second []repro.Artifact) {
 			firstImage, secondImage)
 	}
 
+	// The SBOM too: a generated dependency document is usually the least
+	// reproducible file in a release, because the conventional generators
+	// stamp a wall clock and a random serial into every run.
+	firstSBOM, err := repro.SBOMDigest(options(t, "", ""), "go1.27.1", first)
+	if err != nil {
+		t.Fatalf("generating the first SBOM: %v", err)
+	}
+	secondSBOM, err := repro.SBOMDigest(options(t, "", ""), "go1.27.1", second)
+	if err != nil {
+		t.Fatalf("generating the second SBOM: %v", err)
+	}
+	if firstSBOM != secondSBOM {
+		t.Errorf("the SBOM is not reproducible\n  run 1: %s\n  run 2: %s", firstSBOM, secondSBOM)
+	}
+
 	if !t.Failed() {
-		t.Logf("%d artifacts and the image reproduced byte for byte on %s/%s",
+		t.Logf("%d artifacts, the image and the SBOM reproduced byte for byte on %s/%s",
 			len(first), runtime.GOOS, runtime.GOARCH)
 	}
 }
