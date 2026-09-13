@@ -727,6 +727,8 @@ internal/bump/         next version from the API delta and the commits
 internal/changelog/    conventional-commit and API-derived changelog
 internal/manifest/     letsgo.json schema, read and write
 internal/install/      the self-verifying install.sh generator
+internal/brew/         Homebrew formula generation and tap push
+internal/oci/          deterministic image layers, and a registry client
 internal/publish/      GitHub releases, asset upload, resume logic, proxy warm-up
 internal/release/      plan to a complete set of publishable files on disk
 internal/verify/       rebuild-and-compare
@@ -735,9 +737,7 @@ internal/plan/         orchestration, the release gate, and the plan report
 internal/repro/        the cross-machine determinism suite, driving the real pipeline
 ```
 
-Still to come: `internal/brew/` (formula generation and tap push),
-`internal/oci/` (deterministic image layers and the registry client), and
-`internal/yank/` (the retraction workflow).
+Still to come: `internal/yank/`, the retraction workflow.
 
 ### Dependency budget: zero direct dependencies
 
@@ -786,13 +786,10 @@ tap generation pointed at our own reproducible archives.
 and does several things GoReleaser does not.*
 
 **M4 — Container images**
-Multi-arch OCI images built from the binaries M0 produced, on `scratch`, with a
-deterministic layer and no daemon: the layer is the same tar writer as §7, the
-config is JSON, and the push is the registry API. The image digest is recorded
-in the manifest, so `letsgo verify` covers the image for the same reason it
-covers an archive. This reverses a non-goal (§18) and is the one place it is
-worth reversing, because "reproducible everywhere except the container" is not
-a claim worth making.
+Multi-arch OCI images built from the binaries M0 produced, with a deterministic
+layer and no daemon (§19). This reverses a non-goal (§18) and is the one place
+it is worth reversing, because "reproducible everywhere except the container"
+is not a claim worth making.
 
 **M5 — Breadth, only if needed**
 `letsgo yank`. SBOM. An embeddable `selfupdate` package that consumes the
@@ -808,13 +805,13 @@ own repository, where it can version independently of the binary it runs.
 
 ## 18. Non-goals
 
-- ~~**Docker builds.**~~ Reversed in M4. The original reasoning was that
-  `docker buildx` is better at building images, which is still true — and
-  irrelevant, because letsgo does not need to build one. The binaries already
-  exist; an image around a static binary on `scratch` is a tar layer and a JSON
-  config, both of which §7's writer already produces deterministically. Wrapping
-  buildx would have been wrong; reaching the registry API directly is a hundred
-  lines, needs no daemon, and keeps the reproducibility claim whole.
+- ~~**Docker builds.**~~ Reversed in M4, and built; see §19. The original
+  reasoning was that `docker buildx` is better at building images, which is
+  still true — and irrelevant, because letsgo does not need to build one. The
+  binaries already exist; an image around a static binary is a tar layer and a
+  JSON config, both of which §7's writer already produces deterministically.
+  Wrapping buildx would have been wrong; reaching the registry API directly
+  needs no daemon and keeps the reproducibility claim whole.
 - **deb, rpm, snap, scoop, AUR, krew, nix.** Not until a repo actually needs one.
 - **Announcements** (Slack, Discord, Mastodon, email). Not a release tool's job.
 - **A plugin system.** The moment plugins exist, the config surface reopens.
@@ -827,7 +824,72 @@ reasoning stops holding.
 
 ---
 
-## 19. Open decisions
+## 19. Container images
+
+An image around a static Go binary is not a build problem. The binary already
+exists. What remains is a tar layer, a JSON config, a JSON manifest and four
+HTTP requests — so letsgo does that directly rather than shelling out to a
+build system, a daemon and a cache to produce it.
+
+```
+image                                   # ghcr.io/<owner>/<project>, on scratch
+image ghcr.io/you/thing                 # or name it
+image base gcr.io/distroless/static@sha256:…
+```
+
+Opt-in, because publishing a package to a registry creates something in the
+owner's account that they should have asked for. Everything else is inferred:
+the reference from the repository, the platforms from the Linux subset of the
+build matrix, the tag from the release, the entrypoint from the binary.
+
+### Why not wrap buildx
+
+Wrapping `docker buildx` would import a build system to do work that is a few
+hundred lines of tar and JSON, require a daemon or a rootless shim wherever
+letsgo runs, and — the point that settles it — give up reproducibility. The
+image digest would then depend on the builder's Docker version, which is
+exactly the class of dependency §7 exists to eliminate. Reaching the registry
+API directly keeps the image as reproducible as everything else.
+
+### What makes it deterministic
+
+The layer is written by §7's tar writer: sorted entries, zeroed ownership,
+normalised modes, timestamps from the commit. The config's `created` is the
+commit time. The index's manifests are sorted by platform, so the published
+digest does not depend on which cross-compile finished first. Two machines
+given the same commit produce the same image digest, and CI checks that.
+
+### The base image
+
+`scratch` is the default, and correct for a binary that makes no TLS calls: one
+layer, nothing else, nothing to patch. It is also wrong for anything that talks
+HTTPS, because there are no CA certificates — so a base can be named, and its
+layers are then stacked below ours.
+
+A base is not built, it is copied: the reference is resolved to a per-platform
+manifest, its config's `rootfs` and run settings are inherited, and its layers
+are made available in the target repository with a cross-repository mount,
+which transfers no bytes at all when the base is on the same registry. Only
+when that is refused, or the base lives elsewhere, is anything downloaded.
+
+A base named by tag is a warning rather than a refusal. The digest it resolved
+to is recorded in the manifest either way, so a release always says what it
+actually built on, whatever the config file said.
+
+### Idempotence and verification
+
+Blobs are content-addressed, so re-running a release uploads nothing and
+publishes the same digest. Manifests go up before the tag, and the tag last: a
+failed run leaves blobs behind and no tag pointing at anything incomplete.
+
+The index digest goes into `letsgo.json`, which is what lets `letsgo verify`
+ask the one question a mutable tag cannot answer about itself — whether `1.2.3`
+still resolves to what the release published. `latest` is deliberately not
+checked: a newer release moving it is not a failure.
+
+---
+
+## 20. Open decisions
 
 1. **Config format.** `letsgo.mod` in `go.mod` syntax is the recommendation in
    §5, with alternatives recorded. Reversible now, expensive later.
@@ -840,6 +902,10 @@ reasoning stops holding.
    opinionated check in §9 and the most likely to annoy. Default-on with
    `--allow-breaking` is proposed, but default-warn is defensible for a first
    release while we learn its false-positive rate.
-5. ~~**M3 scope.**~~ Settled and complete. `migrate` was dropped in favour of a
+5. **Private base images.** A base is read anonymously, which covers every
+   public base worth using. A private one would need a second credential, and
+   it is not yet clear whether that belongs in the config, the environment, or
+   nowhere.
+6. ~~**M3 scope.**~~ Settled and complete. `migrate` was dropped in favour of a
    guide, which also returns the dependency budget to zero; `diff`, size
    budgets, `install.sh` and Homebrew tap generation are built.

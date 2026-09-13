@@ -26,6 +26,12 @@ type Format string
 const (
 	FormatTarGz Format = "tar.gz"
 	FormatZip   Format = "zip"
+
+	// FormatTar is an uncompressed tar stream. Release archives are never
+	// published this way; it exists because an OCI layer is digested twice,
+	// once compressed and once not, and both digests have to come from the
+	// same deterministic writer.
+	FormatTar Format = "tar"
 )
 
 // Ext returns the file extension for the format, including the leading dot.
@@ -35,6 +41,8 @@ func (f Format) Ext() string {
 		return ".tar.gz"
 	case FormatZip:
 		return ".zip"
+	case FormatTar:
+		return ".tar"
 	default:
 		return ""
 	}
@@ -57,6 +65,11 @@ type Entry struct {
 	// Executable selects the normalised mode: 0755 when true, 0644 otherwise.
 	Executable bool
 
+	// Dir makes the entry a directory. A release archive has none; an image
+	// layer needs them, because the path a binary lives at may not exist in
+	// the base it is stacked on — and on `scratch` nothing exists at all.
+	Dir bool
+
 	// Size is the number of bytes Open yields.
 	Size int64
 
@@ -65,7 +78,7 @@ type Entry struct {
 }
 
 func (e Entry) mode() fs.FileMode {
-	if e.Executable {
+	if e.Executable || e.Dir {
 		return modeExecutable
 	}
 	return modeRegular
@@ -119,6 +132,8 @@ func Write(w io.Writer, f Format, entries []Entry, modTime time.Time) error {
 	switch f {
 	case FormatTarGz:
 		return writeTarGz(w, normalised, modTime)
+	case FormatTar:
+		return writeTar(w, normalised, modTime)
 	case FormatZip:
 		return writeZip(w, normalised, modTime)
 	default:
@@ -149,13 +164,20 @@ func normalise(entries []Entry) ([]Entry, error) {
 		if e.Path == ".." || strings.HasPrefix(e.Path, "../") {
 			return nil, fmt.Errorf("archive: entry %q escapes the archive root", e.Path)
 		}
-		if e.Open == nil {
-			return nil, fmt.Errorf("archive: entry %q has no Open function", e.Path)
-		}
 		if seen[e.Path] {
 			return nil, fmt.Errorf("archive: duplicate entry %q", e.Path)
 		}
 		seen[e.Path] = true
+
+		if e.Dir {
+			if e.Open != nil || e.Size != 0 {
+				return nil, fmt.Errorf("archive: directory entry %q has content", e.Path)
+			}
+			continue
+		}
+		if e.Open == nil {
+			return nil, fmt.Errorf("archive: entry %q has no Open function", e.Path)
+		}
 	}
 
 	slices.SortFunc(out, func(a, b Entry) int { return strings.Compare(a.Path, b.Path) })

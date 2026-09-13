@@ -38,6 +38,7 @@ Everything in this table is already the behaviour. Deleting it changes nothing.
 | a non-default `goos`/`goarch` list | `build linux/amd64` … |
 | extra `archives.files` | `archive NOTES.md` |
 | `brews.tap` | `brew owner/tap` (the `homebrew-` prefix is added for you) |
+| `dockers` / `docker_manifests` | `image` (see below) |
 | `release.draft: true` | `release draft=true` |
 | `project_name` differing from the module | `project name` |
 
@@ -129,6 +130,14 @@ a single formula. letsgo writes `Formula/<binary>.rb` for each command the
 module builds, because a formula can only name one archive per platform. A
 single-command repository sees no difference; a multi-command one gains a
 formula per binary instead of an error.
+
+**Container images are built, not templated.** GoReleaser's `dockers` block
+runs `docker build` against a Dockerfile you supply, then `docker_manifests`
+stitches the architectures together. letsgo has neither: `image` publishes a
+multi-arch image assembled from the binaries it just built, on `scratch` or on
+a base you name. If your Dockerfile only did `COPY binary /` and set an
+entrypoint, you can delete it. If it installs packages, keep GoReleaser and
+buildx for that repository.
 
 **A tap needs a token that is not the workflow's.** GitHub's default Actions
 token cannot write to another repository, GoReleaser or not. If your tap

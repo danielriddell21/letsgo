@@ -5,8 +5,9 @@ A release tool for Go. Only Go.
 > **Status: early.** letsgo releases itself, and reproducibility is proven
 > across Linux, macOS and Windows on every push. What it does today: `plan`,
 > `build`, `release`, `verify`, `diff`, `tag`, `fmt`, plus a generated
-> `install.sh` and Homebrew tap. Container images are next. The full rationale,
-> including the alternatives we rejected, lives in [DESIGN.md](DESIGN.md).
+> `install.sh`, a Homebrew tap and multi-arch container images. The full
+> rationale, including the alternatives we rejected, lives in
+> [DESIGN.md](DESIGN.md).
 
 ---
 
@@ -174,6 +175,42 @@ nothing changed is a cost somebody else pays.
 > all, so a tap needs a PAT or an App token. `letsgo plan --publish` says so
 > before anything is built.
 
+### Container images
+
+One line turns them on:
+
+```
+image
+```
+
+That publishes `ghcr.io/<owner>/<project>`, multi-arch, tagged with the
+version, built from the binaries the release already produced:
+
+```
+  pushed ghcr.io/you/tool:1.3.0 (8567febc6508) for [linux/amd64 linux/arm64],
+  4 blobs uploaded and 0 already present
+```
+
+No Dockerfile, no daemon, no buildx. An image around a static Go binary is a
+tar layer and a JSON config, and letsgo already has a deterministic tar writer
+— so the image digest is reproducible for the same reason the archives are, and
+it goes into `letsgo.json` where `verify` can check the tag still resolves to
+it.
+
+The base is `scratch` by default: one layer, nothing to patch. That is wrong
+for anything that makes HTTPS calls, since there are no CA certificates, so
+name a base and its layers are stacked below yours:
+
+```
+image ghcr.io/you/tool
+image base gcr.io/distroless/static@sha256:1c2c046bc0…
+```
+
+A base on the same registry is mounted rather than copied, which moves no bytes
+at all. A base named by tag works and warns — the digest it resolved to is
+recorded in the manifest either way, so the release always says what it
+actually built on.
+
 ### Proving a release
 
 Because builds are byte-for-byte reproducible, anyone can rebuild a published
@@ -249,7 +286,9 @@ archive (
 
 budget linux/amd64 15MB
 
-brew danielriddell21/homebrew-tap
+brew danielriddell21/tap
+
+image
 ```
 
 Run `letsgo plan --explain` to see which defaults were inferred and from what
@@ -274,6 +313,7 @@ permissions:
   contents: write
   id-token: write        # provenance attestation
   attestations: write
+  packages: write        # only if you publish a container image
 
 jobs:
   release:
@@ -289,6 +329,11 @@ jobs:
 
 A shallow clone is fine. If the changelog needs history we don't have, we fall
 back to the GitHub compare API instead of failing.
+
+The same `GITHUB_TOKEN` authenticates the image push to `ghcr.io`, so there is
+no second credential to configure. A Homebrew tap is the exception: a workflow
+token cannot write to another repository at all, and needs a PAT or an App
+token instead.
 
 ### Coming from GoReleaser
 
@@ -360,6 +405,8 @@ losses we tolerate; they're what funds the wins.
 ## What this deliberately doesn't do
 
 - **deb, rpm, snap, scoop, AUR, krew, nix.**
+- **Dockerfiles.** We publish images; we don't build from a recipe. If your
+  image needs a package manager, `docker buildx` is the tool for it.
 - **Announcements** to Slack, Discord, Mastodon, email.
 - **A plugin system.** The moment plugins exist, the config surface reopens.
 - **Non-Go languages.**
@@ -402,11 +449,11 @@ generation pointed at our own reproducible archives.
 does several things GoReleaser cannot.*
 
 **M4 · Container images**
-Multi-arch OCI images on `scratch`, built from the binaries we already have:
-a deterministic tar layer, a JSON config, and a push over the registry API. No
-daemon, no buildx, no Dockerfile. The image digest goes in the manifest, so
-`verify` covers it exactly as it covers an archive. This reverses a non-goal,
-which is explained in [DESIGN.md §18](DESIGN.md).
+Multi-arch OCI images built from the binaries we already have: a deterministic
+tar layer, a JSON config, and a push over the registry API. No daemon, no
+buildx, no Dockerfile. The image digest goes in the manifest, so `verify`
+covers it exactly as it covers an archive. This reverses a non-goal, which is
+explained in [DESIGN.md §18](DESIGN.md).
 
 **M5 · Later, if warranted**
 `letsgo yank` — automating Go's `retract` directive, including the part people
@@ -421,8 +468,7 @@ separately from the binary it runs.
 
 ### Questions still open
 
-These are recorded in [DESIGN.md §19](DESIGN.md) and are worth settling before
-the code that depends on them exists:
+These are recorded in [DESIGN.md §20](DESIGN.md):
 
 - **Config format.** `letsgo.mod` in `go.mod` syntax is the recommendation, with
   five alternatives considered and rejected. Cheap to change now, expensive

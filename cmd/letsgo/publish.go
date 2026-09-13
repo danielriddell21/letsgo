@@ -92,3 +92,29 @@ func describeRepo(ctx context.Context, client *github.Client, repo github.Repo) 
 	}
 	return info
 }
+
+// publishImages pushes the container images the build assembled.
+//
+// A rehearsal prints what would be pushed and pushes nothing. It can be
+// specific rather than hand-waving because the digests are already fixed:
+// assembly happened during the build, so the rehearsal names the exact image a
+// real run would publish.
+func publishImages(ctx context.Context, p *plan.Plan, result *release.Result, token string, snapshot bool) error {
+	if len(result.Images) == 0 {
+		return nil
+	}
+
+	if snapshot {
+		fmt.Print("\n  images that would be pushed\n")
+		fmt.Print(release.Describe(result.Images))
+		return nil
+	}
+	if p.Config.Draft {
+		fmt.Println("  ! skipped the container image: a draft release should not publish a public tag")
+		return nil
+	}
+
+	return release.PushImages(ctx, result.Images, token, func(format string, args ...any) {
+		fmt.Printf("  "+format+"\n", args...)
+	})
+}

@@ -54,6 +54,27 @@ type Manifest struct {
 	APIChanges []APIChange `json:"api_changes,omitempty"`
 
 	Artifacts []Artifact `json:"artifacts"`
+
+	// Images are the container images the release published. Recording the
+	// index digest is what lets verification ask whether the tag still points
+	// at what was built, which is the one question a mutable tag cannot answer
+	// on its own.
+	Images []Image `json:"images,omitempty"`
+}
+
+// Image is one published container image.
+type Image struct {
+	Reference string `json:"reference"`
+	Digest    string `json:"digest"`
+
+	// Tags are every tag the index was published under.
+	Tags []string `json:"tags,omitempty"`
+
+	Platforms []string `json:"platforms"`
+
+	// Base is the base image, pinned to the digest that was actually used
+	// rather than the tag that was written down.
+	Base string `json:"base,omitempty"`
 }
 
 // APIChange is one difference in the exported API.

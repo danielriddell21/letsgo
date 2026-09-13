@@ -30,6 +30,11 @@ type Config struct {
 	// Budgets caps binary size per target, e.g. "linux/amd64" -> "15MB".
 	Budgets map[string]string
 
+	// Image describes the container image to publish. Nil means none: a
+	// release that creates a package in a registry should be something the
+	// repository asked for.
+	Image *Image
+
 	// BrewTap is an "owner/repo" Homebrew tap to publish a formula to.
 	BrewTap string
 
@@ -38,6 +43,17 @@ type Config struct {
 
 	// Draft creates the release without publishing it.
 	Draft bool
+}
+
+// Image is the container image a release publishes.
+type Image struct {
+	// Reference overrides the default, which is derived from the repository.
+	Reference string
+
+	// Base is the image to stack on. Empty means scratch, which is the right
+	// answer for a static binary that makes no TLS calls and the wrong one for
+	// anything that does.
+	Base string
 }
 
 // known lists every directive, with its arity described for error messages.
@@ -50,6 +66,7 @@ var known = map[string]string{
 	"ldflags": "ldflags <flag>...",
 	"archive": "archive <file>... or an archive ( ... ) block",
 	"budget":  "budget <goos/goarch> <size>",
+	"image":   "image, image <reference>, or image base <reference>",
 	"brew":    "brew <owner/tap-repo>",
 	"release": "release <key=value>...",
 }
@@ -175,6 +192,34 @@ func apply(cfg *Config, file string, line *Line) error {
 			return errAt(file, line.P, "budget for %s is already set", line.Args[0])
 		}
 		cfg.Budgets[line.Args[0]] = line.Args[1]
+
+	case "image":
+		if cfg.Image == nil {
+			cfg.Image = &Image{}
+		}
+		switch {
+		// A bare `image` asks for the default: a reference derived from the
+		// repository, on scratch.
+		case len(line.Args) == 0:
+
+		case line.Args[0] == "base":
+			if len(line.Args) != 2 {
+				return arity(file, line)
+			}
+			if cfg.Image.Base != "" {
+				return errAt(file, line.P, "image base is already set")
+			}
+			cfg.Image.Base = line.Args[1]
+
+		case len(line.Args) == 1:
+			if cfg.Image.Reference != "" {
+				return errAt(file, line.P, "the image reference is already set")
+			}
+			cfg.Image.Reference = line.Args[0]
+
+		default:
+			return arity(file, line)
+		}
 
 	case "brew":
 		if len(line.Args) != 1 {
