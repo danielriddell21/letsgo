@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,18 +15,27 @@ import (
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/build"
+	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
+// maxSourceFile bounds one entry extracted from a source archive. The archive
+// is input, and a compressed entry that expands without limit would otherwise
+// be answered by filling the disk.
+const maxSourceFile = 256 << 20
+
 // rebuild compiles the release again from source and compares the result.
-func rebuild(ctx context.Context, o Options, result *Result, release *github.Release, m *manifest.Manifest) error {
+// Nothing here returns an error: a rebuild that cannot proceed is a failed
+// check, not a failed verification. Reporting it as an error would abandon the
+// checks already gathered, which are the reason anyone ran this.
+func rebuild(ctx context.Context, o Options, result *Result, release *github.Release, m *manifest.Manifest) {
 	source, from, err := obtainSource(ctx, o, release, m)
 	if err != nil {
 		result.add("source", Fail, "%v", err)
-		return nil
+		return
 	}
 	result.SourceFrom = from
 	result.add("source", Pass, "%s", from)
@@ -35,11 +45,10 @@ func rebuild(ctx context.Context, o Options, result *Result, release *github.Rel
 	commands, err := discover.FindMainPackages(source, m.Project)
 	if err != nil {
 		result.add("rebuild", Fail, "%v", err)
-		return nil
+		return
 	}
 
 	compareRebuilt(ctx, o, result, m, source, commands)
-	return nil
 }
 
 // obtainSource produces a tree to rebuild from.
@@ -76,8 +85,8 @@ func obtainSource(ctx context.Context, o Options, release *github.Release, m *ma
 
 func checkoutCommit(ctx context.Context, o Options, commit string) (string, error) {
 	dir := filepath.Join(o.WorkDir, "checkout")
-	if err := os.MkdirAll(o.WorkDir, 0o755); err != nil {
-		return "", err
+	if err := os.MkdirAll(o.WorkDir, 0o750); err != nil {
+		return "", fmt.Errorf("verify: %w", err)
 	}
 	// Removed first so a re-run is not blocked by a previous attempt.
 	_ = os.RemoveAll(dir)
@@ -256,7 +265,7 @@ func untar(data []byte, dir string) error {
 
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		if err != nil {
@@ -273,19 +282,27 @@ func untar(data []byte, dir string) error {
 			return fmt.Errorf("verify: source archive entry %q escapes the destination", hdr.Name)
 		}
 
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
+		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
+			return fmt.Errorf("verify: %w", err)
 		}
 		f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode).Perm())
 		if err != nil {
-			return err
+			return fmt.Errorf("verify: %w", err)
 		}
-		if _, err := io.Copy(f, tr); err != nil {
-			f.Close()
-			return err
+		// Bounded: the archive is input, and an entry that claims to be
+		// small and decompresses forever would otherwise fill the disk.
+		written, err := io.Copy(f, io.LimitReader(tr, maxSourceFile))
+		if err != nil {
+			_ = f.Close()
+			return fmt.Errorf("verify: extracting %q: %w", hdr.Name, err)
+		}
+		if written == maxSourceFile {
+			_ = f.Close()
+			return fmt.Errorf("verify: source archive entry %q is larger than %s",
+				hdr.Name, bytesize.Size(maxSourceFile))
 		}
 		if err := f.Close(); err != nil {
-			return err
+			return fmt.Errorf("verify: extracting %q: %w", hdr.Name, err)
 		}
 	}
 }

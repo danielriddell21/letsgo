@@ -44,7 +44,7 @@ func WriteChecksums(dir string, sums []Sum) (string, error) {
 	}
 
 	path := filepath.Join(dir, ChecksumFile)
-	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
 		return "", fmt.Errorf("build: writing %s: %w", ChecksumFile, err)
 	}
 	return path, nil

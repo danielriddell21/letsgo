@@ -8,6 +8,7 @@
 package semver
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -66,7 +67,11 @@ func atoi(s string) (int, error) {
 			return 0, strconv.ErrSyntax
 		}
 	}
-	return strconv.Atoi(s)
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("semver: %w", err)
+	}
+	return n, nil
 }
 
 // Compare orders two versions: -1 if a sorts before b, 0 if equal, 1 if after.

@@ -216,9 +216,11 @@ func buildLayer(o ImageOptions) (Blob, Digest, error) {
 // first. A layer that names a file under a directory the base does not have —
 // and `scratch` has none — needs them spelled out.
 func directoriesFor(dir string) []archive.Entry {
-	var entries []archive.Entry
+	parts := splitPath(dir)
+	entries := make([]archive.Entry, 0, len(parts))
+
 	var built string
-	for _, part := range splitPath(dir) {
+	for _, part := range parts {
 		built = path.Join(built, part)
 		entries = append(entries, archive.Entry{Path: built, Dir: true})
 	}

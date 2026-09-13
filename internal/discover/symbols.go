@@ -54,14 +54,9 @@ func (s Symbol) OK() bool { return s.Status == SymbolOK }
 // InspectVars checks whether each named identifier in the package at dir can
 // receive a linker-injected string.
 func InspectVars(dir string, names []string) ([]Symbol, error) {
-	fset := token.NewFileSet()
-
-	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-		// Test files cannot contribute symbols to the linked binary.
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
+	pkgs, err := parseDir(dir, 0)
 	if err != nil {
-		return nil, fmt.Errorf("discover: parsing %s: %w", dir, err)
+		return nil, err
 	}
 	if len(pkgs) == 0 {
 		return nil, fmt.Errorf("discover: no Go package in %s", dir)
@@ -92,49 +87,62 @@ type varInfo struct {
 	init         initKind
 }
 
-func collectDecls(pkgs map[string]*ast.Package) (vars map[string]varInfo, consts map[string]bool, all []string) {
+func collectDecls(pkgs map[string][]*ast.File) (vars map[string]varInfo, consts map[string]bool, all []string) {
 	vars = map[string]varInfo{}
 	consts = map[string]bool{}
 
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
+	for _, files := range pkgs {
+		for _, file := range files {
 			for _, decl := range file.Decls {
 				gen, ok := decl.(*ast.GenDecl)
 				if !ok {
 					continue
 				}
-				for _, spec := range gen.Specs {
-					value, ok := spec.(*ast.ValueSpec)
-					if !ok {
-						continue
-					}
-					for i, ident := range value.Names {
-						all = append(all, ident.Name)
-
-						if gen.Tok == token.CONST {
-							consts[ident.Name] = true
-							continue
-						}
-						if gen.Tok != token.VAR {
-							continue
-						}
-
-						info := varInfo{init: initNone}
-						if id, ok := value.Type.(*ast.Ident); ok {
-							info.declaredType = id.Name
-						}
-						if i < len(value.Values) {
-							info.init = classifyInit(value.Values[i])
-						}
-						vars[ident.Name] = info
-					}
-				}
+				all = append(all, collectGenDecl(gen, vars, consts)...)
 			}
 		}
 	}
 
 	sort.Strings(all)
 	return vars, consts, all
+}
+
+// collectGenDecl records one `var` or `const` declaration, returning the names
+// it introduced.
+func collectGenDecl(gen *ast.GenDecl, vars map[string]varInfo, consts map[string]bool) []string {
+	var names []string
+
+	for _, spec := range gen.Specs {
+		value, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+
+		for i, ident := range value.Names {
+			names = append(names, ident.Name)
+
+			switch gen.Tok {
+			case token.CONST:
+				consts[ident.Name] = true
+			case token.VAR:
+				vars[ident.Name] = describeVar(value, i)
+			}
+		}
+	}
+	return names
+}
+
+// describeVar records what the linker needs to know about one variable: the
+// type it was declared with, if any, and how it is initialised.
+func describeVar(value *ast.ValueSpec, i int) varInfo {
+	info := varInfo{init: initNone}
+	if id, ok := value.Type.(*ast.Ident); ok {
+		info.declaredType = id.Name
+	}
+	if i < len(value.Values) {
+		info.init = classifyInit(value.Values[i])
+	}
+	return info
 }
 
 func classifyInit(expr ast.Expr) initKind {
@@ -314,13 +322,48 @@ func FindMainPackages(moduleDir string, moduleName string) ([]MainPackage, error
 }
 
 func isMainPackage(dir string) bool {
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, parser.PackageClauseOnly)
+	pkgs, err := parseDir(dir, parser.PackageClauseOnly)
 	if err != nil {
 		return false
 	}
 	_, ok := pkgs["main"]
 	return ok
+}
+
+// parseDir parses the non-test Go files in dir, grouped by package name.
+//
+// go/parser.ParseDir is deprecated in favour of golang.org/x/tools/go/packages,
+// which is a dependency, and letsgo has none (DESIGN.md §16). Reading the
+// directory and parsing each file is what ParseDir did anyway. The build tags
+// neither considers are not consulted here either, and deliberately: a
+// linker-injected variable has to exist in the package whichever tags are set,
+// so a declaration hidden behind one is a declaration worth seeing.
+//
+// Test files are skipped throughout: they cannot contribute a symbol to the
+// linked binary, so finding one there would be a false positive.
+func parseDir(dir string, mode parser.Mode) (map[string][]*ast.File, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("discover: reading %s: %w", dir, err)
+	}
+
+	fset := token.NewFileSet()
+	// os.ReadDir sorts by name, so the files of a package are always visited
+	// in the same order and anything derived from that order is stable.
+	pkgs := map[string][]*ast.File{}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+
+		file, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, mode)
+		if err != nil {
+			return nil, fmt.Errorf("discover: parsing %s: %w", filepath.Join(dir, name), err)
+		}
+		pkgName := file.Name.Name
+		pkgs[pkgName] = append(pkgs[pkgName], file)
+	}
+	return pkgs, nil
 }

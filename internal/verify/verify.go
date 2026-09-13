@@ -155,9 +155,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		result.add("rebuild", Skip, "not requested")
 		return result, nil
 	}
-	if err := rebuild(ctx, o, result, release, m); err != nil {
-		return nil, err
-	}
+	rebuild(ctx, o, result, release, m)
 	return result, nil
 }
 

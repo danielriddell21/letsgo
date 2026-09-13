@@ -243,7 +243,11 @@ func main() {}
 var onlyInTests = "should not be found"
 `)
 
-	names := []string{"version", "commit", "buildDate", "retries", "buildID", "missing", "verison", "onlyInTests"}
+	// Deliberately misspelled: this is the input the suggestion logic exists
+	// to recognise, so it must not be "corrected".
+	const typo = "verison" //nolint:misspell // the typo under test
+
+	names := []string{"version", "commit", "buildDate", "retries", "buildID", "missing", typo, "onlyInTests"}
 	got, err := InspectVars(dir, names)
 	if err != nil {
 		t.Fatalf("InspectVars: %v", err)
@@ -261,7 +265,7 @@ var onlyInTests = "should not be found"
 		"retries":     SymbolNotString,
 		"buildID":     SymbolIsConst,
 		"missing":     SymbolMissing,
-		"verison":     SymbolMissing,
+		typo:          SymbolMissing,
 		"onlyInTests": SymbolMissing,
 	}
 
@@ -272,8 +276,8 @@ var onlyInTests = "should not be found"
 	}
 
 	// The overwhelmingly common form of this mistake is a case difference.
-	if s := byName["verison"]; s.Suggestion == "" {
-		t.Error("verison: expected a suggestion")
+	if s := byName[typo]; s.Suggestion == "" {
+		t.Errorf("%s: expected a suggestion", typo)
 	}
 	if s := byName["version"]; !s.OK() {
 		t.Error("version should be usable")

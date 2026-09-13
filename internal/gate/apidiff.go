@@ -120,7 +120,7 @@ func exportedPackages(ctx context.Context, dir string) ([]pkgRef, error) {
 
 	root, err := filepath.Abs(dir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gate: %w", err)
 	}
 
 	var packages []pkgRef
@@ -158,8 +158,8 @@ func comparePackage(ctx context.Context, bin, oldDir, newDir, relDir string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("gate: %w", err)
 	}
-	exported.Close()
-	defer os.Remove(exported.Name())
+	_ = exported.Close()
+	defer func() { _ = os.Remove(exported.Name()) }()
 
 	pattern := "./" + filepath.ToSlash(relDir)
 
@@ -185,10 +185,11 @@ func comparePackage(ctx context.Context, bin, oldDir, newDir, relDir string) ([]
 // The output is two optional sections, each a heading followed by indented
 // lines. Anything outside them is noise.
 func parseAPIDiff(out string) []Change {
-	var changes []Change
+	lines := strings.Split(out, "\n")
+	changes := make([]Change, 0, len(lines))
 	kind := ChangeKind("")
 
-	for _, line := range strings.Split(out, "\n") {
+	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		switch {
 		case trimmed == "":

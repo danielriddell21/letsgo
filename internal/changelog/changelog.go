@@ -8,6 +8,7 @@ package changelog
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -156,58 +157,19 @@ func (c *Changelog) Markdown() string {
 
 	// Breaking changes come first regardless of type: they are the only thing
 	// in a changelog that can cost the reader an afternoon.
-	var breaking []int
-	for i, e := range c.Entries {
-		if e.Breaking {
-			breaking = append(breaking, i)
-		}
-	}
-	if len(breaking) > 0 {
-		b.WriteString("### Breaking changes\n\n")
-		for _, i := range breaking {
-			writeEntry(&b, c.Entries[i])
-			used[i] = true
-		}
-		b.WriteString("\n")
-	}
+	c.writeSection(&b, used, "Breaking changes", c.pick(used, func(e Entry) bool {
+		return e.Breaking
+	}))
 
 	for _, section := range sections {
-		var indices []int
-		for i, e := range c.Entries {
-			if used[i] {
-				continue
-			}
-			for _, t := range section.Types {
-				if e.Type == t {
-					indices = append(indices, i)
-					break
-				}
-			}
-		}
-		if len(indices) == 0 {
-			continue
-		}
-		fmt.Fprintf(&b, "### %s\n\n", section.Heading)
-		for _, i := range indices {
-			writeEntry(&b, c.Entries[i])
-			used[i] = true
-		}
-		b.WriteString("\n")
+		c.writeSection(&b, used, section.Heading, c.pick(used, func(e Entry) bool {
+			return slices.Contains(section.Types, e.Type)
+		}))
 	}
 
-	var rest []int
-	for i := range c.Entries {
-		if !used[i] {
-			rest = append(rest, i)
-		}
-	}
-	if len(rest) > 0 {
-		b.WriteString("### Other changes\n\n")
-		for _, i := range rest {
-			writeEntry(&b, c.Entries[i])
-		}
-		b.WriteString("\n")
-	}
+	// Anything conventionally labelled but not in a section above, plus
+	// anything that carried no label at all.
+	c.writeSection(&b, used, "Other changes", c.pick(used, func(Entry) bool { return true }))
 
 	writeAPIChanges(&b, c.APIChanges)
 
@@ -242,6 +204,32 @@ func writeAPIChanges(b *strings.Builder, changes []gate.Change) {
 			}
 			fmt.Fprintf(b, "- `%s` %s\n", marker, c.String())
 		}
+	}
+	b.WriteString("\n")
+}
+
+// pick selects the entries matching want that no earlier section claimed.
+func (c *Changelog) pick(used map[int]bool, want func(Entry) bool) []int {
+	var indices []int
+	for i, e := range c.Entries {
+		if !used[i] && want(e) {
+			indices = append(indices, i)
+		}
+	}
+	return indices
+}
+
+// writeSection writes one heading and its entries, marking them used so a
+// commit appears once rather than under every heading it could fit.
+func (c *Changelog) writeSection(b *strings.Builder, used map[int]bool, heading string, indices []int) {
+	if len(indices) == 0 {
+		return
+	}
+
+	fmt.Fprintf(b, "### %s\n\n", heading)
+	for _, i := range indices {
+		writeEntry(b, c.Entries[i])
+		used[i] = true
 	}
 	b.WriteString("\n")
 }

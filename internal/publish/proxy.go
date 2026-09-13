@@ -50,7 +50,7 @@ func WarmProxy(ctx context.Context, proxy, modulePath, version string) error {
 	if err != nil {
 		return fmt.Errorf("publish: warming %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {

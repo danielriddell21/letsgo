@@ -90,7 +90,7 @@ func (e Entry) mode() fs.FileMode {
 func FromFile(archivePath, diskPath string) (Entry, error) {
 	info, err := os.Stat(diskPath)
 	if err != nil {
-		return Entry{}, err
+		return Entry{}, fmt.Errorf("archive: %w", err)
 	}
 	if info.IsDir() {
 		return Entry{}, fmt.Errorf("archive: %s is a directory", diskPath)
@@ -141,6 +141,24 @@ func Write(w io.Writer, f Format, entries []Entry, modTime time.Time) error {
 	}
 }
 
+// checkPath rejects anything that could not be written to an archive, or that
+// could be written somewhere an extractor did not intend.
+func checkPath(i int, p string) error {
+	switch {
+	case p == "":
+		return fmt.Errorf("archive: entry %d has an empty path", i)
+	case strings.ContainsRune(p, '\\'):
+		return fmt.Errorf("archive: entry %q must use forward slashes", p)
+	case path.IsAbs(p):
+		return fmt.Errorf("archive: entry %q must be relative", p)
+	case path.Clean(p) != p:
+		return fmt.Errorf("archive: entry %q is not clean (want %q)", p, path.Clean(p))
+	case p == ".." || strings.HasPrefix(p, "../"):
+		return fmt.Errorf("archive: entry %q escapes the archive root", p)
+	}
+	return nil
+}
+
 // normalise validates entry paths and returns them sorted. Sorting is what
 // makes the output independent of the order the caller happened to discover
 // files in, which on a filesystem walk is not guaranteed to be stable.
@@ -149,20 +167,8 @@ func normalise(entries []Entry) ([]Entry, error) {
 	seen := make(map[string]bool, len(out))
 
 	for i, e := range out {
-		if e.Path == "" {
-			return nil, fmt.Errorf("archive: entry %d has an empty path", i)
-		}
-		if strings.ContainsRune(e.Path, '\\') {
-			return nil, fmt.Errorf("archive: entry %q must use forward slashes", e.Path)
-		}
-		if path.IsAbs(e.Path) {
-			return nil, fmt.Errorf("archive: entry %q must be relative", e.Path)
-		}
-		if cleaned := path.Clean(e.Path); cleaned != e.Path {
-			return nil, fmt.Errorf("archive: entry %q is not clean (want %q)", e.Path, cleaned)
-		}
-		if e.Path == ".." || strings.HasPrefix(e.Path, "../") {
-			return nil, fmt.Errorf("archive: entry %q escapes the archive root", e.Path)
+		if err := checkPath(i, e.Path); err != nil {
+			return nil, err
 		}
 		if seen[e.Path] {
 			return nil, fmt.Errorf("archive: duplicate entry %q", e.Path)
@@ -192,7 +198,7 @@ func copyExactly(w io.Writer, e Entry) error {
 	if err != nil {
 		return fmt.Errorf("archive: opening %q: %w", e.Path, err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	n, err := io.Copy(w, rc)
 	if err != nil {

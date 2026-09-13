@@ -22,7 +22,6 @@ func TestCheckBudgetsPasses(t *testing.T) {
 	err := checkBudgets(artifacts, budgets, func(format string, args ...any) {
 		warnings = append(warnings, format)
 	})
-
 	if err != nil {
 		t.Fatalf("checkBudgets: %v", err)
 	}
@@ -68,7 +67,6 @@ func TestCheckBudgetsWarnsWhenClose(t *testing.T) {
 	err := checkBudgets(artifacts, budgets, func(format string, args ...any) {
 		warnings = append(warnings, fmt.Sprintf(format, args...))
 	})
-
 	if err != nil {
 		t.Fatalf("checkBudgets: %v", err)
 	}

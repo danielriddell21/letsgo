@@ -36,7 +36,7 @@ func OpenCache(dir string) *Cache {
 		}
 		dir = filepath.Join(base, "letsgo", "builds")
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil
 	}
 	return &Cache{dir: dir}
@@ -85,10 +85,12 @@ func (c *Cache) Get(key, dest string) bool {
 		return false
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return false
 	}
-	if err := os.WriteFile(dest, data, 0o755); err != nil {
+	// A cached binary has to come back executable, so this cannot be the
+	// 0600 gosec wants: 0700 is as tight as an executable gets.
+	if err := os.WriteFile(dest, data, 0o700); err != nil { //nolint:gosec // an executable must keep its x bit
 		return false
 	}
 	return true
@@ -107,7 +109,7 @@ func (c *Cache) Put(key, src string) {
 	}
 
 	dest := c.path(key)
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return
 	}
 
@@ -117,10 +119,10 @@ func (c *Cache) Put(key, src string) {
 	if err != nil {
 		return
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return
 	}
 	if err := tmp.Close(); err != nil {
@@ -128,7 +130,7 @@ func (c *Cache) Put(key, src string) {
 	}
 
 	sum := sha256.Sum256(data)
-	if err := os.WriteFile(dest+".sha256", []byte(hex.EncodeToString(sum[:])), 0o644); err != nil {
+	if err := os.WriteFile(dest+".sha256", []byte(hex.EncodeToString(sum[:])), 0o600); err != nil {
 		return
 	}
 	_ = os.Rename(tmp.Name(), dest)

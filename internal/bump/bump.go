@@ -71,17 +71,23 @@ type Proposal struct {
 // and an unchanged API says nothing about behaviour.
 func FromAPI(changes []gate.Change, available bool) Signal {
 	if !available {
-		return Signal{Source: "exported API", Level: None,
-			Detail: "not compared; nothing in this module is importable, or apidiff is not installed"}
+		return Signal{
+			Source: "exported API", Level: None,
+			Detail: "not compared; nothing in this module is importable, or apidiff is not installed",
+		}
 	}
 
 	if breaking := gate.Incompatibles(changes); len(breaking) > 0 {
-		return Signal{Source: "exported API", Level: Major,
-			Detail: fmt.Sprintf("%s", plural(len(breaking), "incompatible change"))}
+		return Signal{
+			Source: "exported API", Level: Major,
+			Detail: plural(len(breaking), "incompatible change"),
+		}
 	}
 	if len(changes) > 0 {
-		return Signal{Source: "exported API", Level: Minor,
-			Detail: fmt.Sprintf("%s, all additions", plural(len(changes), "change"))}
+		return Signal{
+			Source: "exported API", Level: Minor,
+			Detail: fmt.Sprintf("%s, all additions", plural(len(changes), "change")),
+		}
 	}
 	return Signal{Source: "exported API", Level: None, Detail: "unchanged"}
 }
@@ -110,8 +116,10 @@ func FromCommits(entries []changelog.Entry) Signal {
 	}
 
 	if level == None {
-		return Signal{Source: "commit messages", Level: None,
-			Detail: "nothing conventionally labelled"}
+		return Signal{
+			Source: "commit messages", Level: None,
+			Detail: "nothing conventionally labelled",
+		}
 	}
 
 	var parts []string
@@ -162,27 +170,30 @@ func Propose(previous, modulePath string, signals ...Signal) (Proposal, error) {
 			"breaking, but v0 makes no compatibility promise, so the minor is bumped instead of reaching v1.0.0")
 	}
 
-	next := from
-	next.Prerelease, next.Build = "", ""
+	// Components rather than a copy of `from`: the next version is a release,
+	// so it carries neither the prerelease nor the build metadata the previous
+	// tag may have had, and clearing them on a copy only to overwrite the rest
+	// says less than not carrying them at all.
+	major, minor, patch := from.Major, from.Minor, from.Patch
 	switch level {
 	case Major:
-		next.Major, next.Minor, next.Patch = from.Major+1, 0, 0
+		major, minor, patch = major+1, 0, 0
 	case Minor:
-		next.Minor, next.Patch = from.Minor+1, 0
+		minor, patch = minor+1, 0
 	default:
-		next.Patch = from.Patch + 1
+		patch++
 	}
 
-	p.Next = fmt.Sprintf("v%d.%d.%d", next.Major, next.Minor, next.Patch)
+	p.Next = fmt.Sprintf("v%d.%d.%d", major, minor, patch)
 
 	// A major version above v1 lives at a different import path. Tagging it
 	// without moving the module first produces a release `go get` resolves
 	// straight past.
-	if next.Major >= 2 && next.Major != from.Major {
-		if !strings.HasSuffix(modulePath, fmt.Sprintf("/v%d", next.Major)) {
+	if major >= 2 && major != from.Major {
+		if !strings.HasSuffix(modulePath, fmt.Sprintf("/v%d", major)) {
 			p.Notes = append(p.Notes, fmt.Sprintf(
 				"%s needs the module path to end /v%d first; change go.mod, commit, then tag",
-				p.Next, next.Major))
+				p.Next, major))
 		}
 	}
 

@@ -88,6 +88,18 @@ func main() {
 	}
 }
 
+// parseFlags parses a command's flags.
+//
+// A wrapper rather than a bare call at each site: every subcommand does this,
+// and an error out of the flag package reaching the user unprefixed would not
+// say which tool produced it.
+func parseFlags(fs *flag.FlagSet, args []string) error {
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("letsgo %s: %w", fs.Name(), err)
+	}
+	return nil
+}
+
 // errPlanFailed marks a failure already reported in full by the plan output,
 // so main does not print a second, vaguer version of the same thing.
 var errPlanFailed = errors.New("plan failed")
@@ -103,7 +115,7 @@ func runPlan(args []string) error {
 	publishGates := fs.Bool("publish", false, "also check the gates a release needs: a forge, and a token that may write to it")
 	analyse := fs.Bool("analyse", false, "also run the slower analysis gates, as a release does")
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 
@@ -132,31 +144,18 @@ func runBuild(args []string) error {
 	snapshot := fs.Bool("snapshot", false, "build an untagged working version")
 	allowDirty := fs.Bool("allow-dirty", false, "permit an unclean worktree")
 	out := fs.String("o", "dist", "output directory")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 
 	ctx := context.Background()
 	started := time.Now()
 
-	p, err := plan.Resolve(ctx, plan.Options{Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty})
-	if err != nil {
-		return err
-	}
-	p.Report(os.Stdout, false)
-
-	if !p.OK() {
-		fmt.Printf("\n  plan failed in %s · nothing was built\n", took(started))
-		return errPlanFailed
-	}
-
-	dir, err := filepath.Abs(*out)
-	if err != nil {
-		return err
-	}
-
-	result, err := release.Build(ctx, p, dir, version, func(format string, args ...any) {
-		fmt.Printf("    ! "+format+"\n", args...)
+	_, dir, result, err := planAndBuild(ctx, planBuildOptions{
+		Out:         *out,
+		Plan:        plan.Options{Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty},
+		FailureNote: "nothing was built",
+		Started:     started,
 	})
 	if err != nil {
 		return err
@@ -191,7 +190,7 @@ func runRelease(args []string) error {
 	appendNotes := fs.Bool("append-notes", false, "add the changelog after an existing release description instead of replacing it")
 	allowVulnerable := fs.Bool("allow-vulnerable", false, "publish despite reachable vulnerabilities, recording which were accepted")
 	allowBreaking := fs.Bool("allow-breaking", false, "publish an incompatible API change without a major version bump")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 
@@ -200,27 +199,14 @@ func runRelease(args []string) error {
 
 	// A rehearsal needs no forge and no token, so the gates that check for
 	// them are not run.
-	p, err := plan.Resolve(ctx, plan.Options{
-		Dir: ".", Publish: !*snapshot, Token: *token, Snapshot: *snapshot,
-		Analyse: true, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
-	})
-	if err != nil {
-		return err
-	}
-	p.Report(os.Stdout, false)
-
-	if !p.OK() {
-		fmt.Printf("\n  plan failed in %s \u00b7 nothing was built or published\n", took(started))
-		return errPlanFailed
-	}
-
-	dir, err := filepath.Abs(*out)
-	if err != nil {
-		return err
-	}
-
-	result, err := release.Build(ctx, p, dir, version, func(format string, args ...any) {
-		fmt.Printf("    ! "+format+"\n", args...)
+	p, dir, result, err := planAndBuild(ctx, planBuildOptions{
+		Out: *out,
+		Plan: plan.Options{
+			Dir: ".", Publish: !*snapshot, Token: *token, Snapshot: *snapshot,
+			Analyse: true, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
+		},
+		FailureNote: "nothing was built or published",
+		Started:     started,
 	})
 	if err != nil {
 		return err
@@ -272,15 +258,7 @@ func runRelease(args []string) error {
 	if err != nil {
 		return err
 	}
-
-	if published.NotesRefused {
-		fmt.Println("  ! the release description could not be updated with this token")
-	}
-	fmt.Printf("  uploaded %d, skipped %d", len(published.Uploaded), len(published.Skipped))
-	if len(published.Replaced) > 0 {
-		fmt.Printf(", replaced %d", len(published.Replaced))
-	}
-	fmt.Println()
+	reportPublished(published)
 
 	// After publication, because a formula names download URLs that only
 	// exist once the assets are attached.
@@ -292,15 +270,8 @@ func runRelease(args []string) error {
 		return err
 	}
 
-	// Best effort, and deliberately after publication: a proxy that is slow
-	// has not broken a release that is already live.
 	if !*skipWarm && !*snapshot && !published.Release.Draft {
-		if err := publish.WarmProxy(ctx, "", p.Module.Path, p.Version); err != nil {
-			fmt.Printf("  ! could not prime the module proxy: %v\n", err)
-			fmt.Printf("    `go install` may fail briefly until the proxy fetches %s\n", p.Tag)
-		} else {
-			fmt.Println("  primed proxy.golang.org")
-		}
+		warmProxy(ctx, p)
 	}
 
 	if *snapshot {
@@ -312,13 +283,83 @@ func runRelease(args []string) error {
 	return nil
 }
 
+// planBuildOptions describes the resolve-report-build sequence both `letsgo
+// build` and `letsgo release` open with.
+type planBuildOptions struct {
+	Plan plan.Options
+	Out  string
+
+	// FailureNote says what did not happen when the plan fails, which differs
+	// between building and releasing.
+	FailureNote string
+
+	Started time.Time
+}
+
+// planAndBuild resolves a plan, prints its report, and builds it.
+//
+// Shared so that what `letsgo build` produces locally is what `letsgo release`
+// uploads, decided by the same code rather than by two sequences that agree
+// today.
+func planAndBuild(ctx context.Context, o planBuildOptions) (*plan.Plan, string, *release.Result, error) {
+	p, err := plan.Resolve(ctx, o.Plan)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("letsgo: %w", err)
+	}
+	p.Report(os.Stdout, false)
+
+	if !p.OK() {
+		fmt.Printf("\n  plan failed in %s \u00b7 %s\n", took(o.Started), o.FailureNote)
+		return nil, "", nil, errPlanFailed
+	}
+
+	dir, err := filepath.Abs(o.Out)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("letsgo: %w", err)
+	}
+
+	result, err := release.Build(ctx, p, dir, version, func(format string, args ...any) {
+		fmt.Printf("    ! "+format+"\n", args...)
+	})
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("letsgo: %w", err)
+	}
+	return p, dir, result, nil
+}
+
+// reportPublished summarises what reached the forge.
+func reportPublished(published *publish.Result) {
+	if published.NotesRefused {
+		fmt.Println("  ! the release description could not be updated with this token")
+	}
+
+	fmt.Printf("  uploaded %d, skipped %d", len(published.Uploaded), len(published.Skipped))
+	if len(published.Replaced) > 0 {
+		fmt.Printf(", replaced %d", len(published.Replaced))
+	}
+	fmt.Println()
+}
+
+// warmProxy primes proxy.golang.org so `go install` works immediately.
+//
+// Best effort, and deliberately after publication: a proxy that is slow has
+// not broken a release that is already live.
+func warmProxy(ctx context.Context, p *plan.Plan) {
+	if err := publish.WarmProxy(ctx, "", p.Module.Path, p.Version); err != nil {
+		fmt.Printf("  ! could not prime the module proxy: %v\n", err)
+		fmt.Printf("    `go install` may fail briefly until the proxy fetches %s\n", p.Tag)
+		return
+	}
+	fmt.Println("  primed proxy.golang.org")
+}
+
 func runVerify(args []string) error {
 	fs := flag.NewFlagSet("verify", flag.ExitOnError)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	repoFlag := fs.String("repo", "", "repository to verify as owner/name (default: this repository's origin)")
 	noRebuild := fs.Bool("no-rebuild", false, "compare published assets against the manifest without rebuilding")
 	work := fs.String("work", "", "scratch directory (default: a temporary one)")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 
@@ -334,9 +375,9 @@ func runVerify(args []string) error {
 	if workDir == "" {
 		workDir, err = os.MkdirTemp("", "letsgo-verify-")
 		if err != nil {
-			return err
+			return fmt.Errorf("letsgo: scratch directory: %w", err)
 		}
-		defer os.RemoveAll(workDir)
+		defer func() { _ = os.RemoveAll(workDir) }()
 	}
 
 	tokenValue, _ := plan.Token(*token)
@@ -397,7 +438,7 @@ func runDiff(args []string) error {
 	fs := flag.NewFlagSet("diff", flag.ExitOnError)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	repoFlag := fs.String("repo", "", "repository to compare in as owner/name (default: this repository's origin)")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() == 0 || fs.NArg() > 2 {
@@ -463,7 +504,7 @@ func runTag(args []string) error {
 	major := fs.Bool("major", false, "force a major bump")
 	minor := fs.Bool("minor", false, "force a minor bump")
 	patch := fs.Bool("patch", false, "force a patch bump")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 
@@ -486,7 +527,7 @@ func runTag(args []string) error {
 		return err
 	}
 
-	proposal, err := proposeVersion(ctx, module, git, previous, forced(*major, *minor, *patch))
+	proposal, err := proposeVersion(ctx, module, previous, forced(*major, *minor, *patch))
 	if err != nil {
 		return err
 	}
@@ -523,7 +564,7 @@ func forced(major, minor, patch bool) bump.Level {
 }
 
 // proposeVersion gathers both signals and combines them.
-func proposeVersion(ctx context.Context, module discover.Module, git discover.Git, previous string, force bump.Level) (bump.Proposal, error) {
+func proposeVersion(ctx context.Context, module discover.Module, previous string, force bump.Level) (bump.Proposal, error) {
 	if force != bump.None {
 		return bump.Propose(previous, module.Path,
 			bump.Signal{Source: "you", Level: force, Detail: "requested on the command line"})
@@ -558,16 +599,16 @@ func proposeVersion(ctx context.Context, module discover.Module, git discover.Gi
 func checkoutForDiff(ctx context.Context, repoDir, tag string) (string, func(), error) {
 	base, err := os.MkdirTemp("", "letsgo-tag-")
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("letsgo: scratch directory: %w", err)
 	}
 	dir := filepath.Join(base, "previous")
 	if err := discover.AddWorktree(ctx, repoDir, dir, tag); err != nil {
-		os.RemoveAll(base)
+		_ = os.RemoveAll(base)
 		return "", nil, err
 	}
 	return dir, func() {
 		_ = discover.RemoveWorktree(ctx, repoDir, dir)
-		os.RemoveAll(base)
+		_ = os.RemoveAll(base)
 	}, nil
 }
 
@@ -684,7 +725,7 @@ func took(started time.Time) time.Duration {
 
 func runFmt(args []string) error {
 	fs := flag.NewFlagSet("fmt", flag.ExitOnError)
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 
@@ -695,7 +736,7 @@ func runFmt(args []string) error {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("letsgo: reading %s: %w", path, err)
 	}
 	file, err := config.Parse(filepath.Base(path), data)
 	if err != nil {
@@ -712,5 +753,8 @@ func runFmt(args []string) error {
 	if string(formatted) == string(data) {
 		return nil
 	}
-	return os.WriteFile(path, formatted, 0o644)
+	if err := os.WriteFile(path, formatted, 0o600); err != nil {
+		return fmt.Errorf("letsgo: writing %s: %w", path, err)
+	}
+	return nil
 }

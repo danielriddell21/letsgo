@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -153,7 +154,7 @@ func TestSyntaxErrorsCarryPositions(t *testing.T) {
 				t.Fatalf("Parse(%q) succeeded, want an error", src)
 			}
 			var syntaxErr *SyntaxError
-			if !errorsAs(err, &syntaxErr) {
+			if !errors.As(err, &syntaxErr) {
 				t.Fatalf("error is %T, want *SyntaxError: %v", err, err)
 			}
 			if syntaxErr.Pos.Line < 1 {
@@ -224,19 +225,4 @@ func TestCarriageReturnsAreHandled(t *testing.T) {
 	if cfg.Project != "foo" || len(cfg.Targets) != 1 {
 		t.Errorf("CRLF input produced %+v", cfg)
 	}
-}
-
-func errorsAs(err error, target **SyntaxError) bool {
-	for err != nil {
-		if e, ok := err.(*SyntaxError); ok {
-			*target = e
-			return true
-		}
-		u, ok := err.(interface{ Unwrap() error })
-		if !ok {
-			return false
-		}
-		err = u.Unwrap()
-	}
-	return false
 }

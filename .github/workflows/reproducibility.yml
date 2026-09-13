@@ -28,7 +28,12 @@ jobs:
 
       # The repro suite rebuilds fixtures repeatedly, so it needs longer than
       # the 10m default.
-      test-command: go test -coverprofile=coverage.txt ./... -timeout 20m
+      #
+      # The coverage flag is quoted because this line is run through pwsh on
+      # the Windows runner, which splits the bare form and hands `go` a stray
+      # `.txt` to resolve as a package. Quoting makes it one token in both
+      # shells; flags go before the pattern for the same reason.
+      test-command: go test '-coverprofile=coverage.txt' -timeout 20m ./...
 
       # One upload is enough; three would be the same lines counted three
       # times under different runners.

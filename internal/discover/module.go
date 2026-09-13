@@ -66,7 +66,7 @@ func modulePath(goModPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("discover: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	inBlock := false

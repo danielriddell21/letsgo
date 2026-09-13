@@ -80,38 +80,47 @@ func Decode(f *File) (*Config, error) {
 		switch s := stmt.(type) {
 		case *Comment:
 			continue
-
 		case *Block:
-			if err := checkKnown(f.Name, s.Keyword, s.P); err != nil {
+			if err := decodeBlock(cfg, f.Name, seen, s); err != nil {
 				return nil, err
 			}
-			if err := checkOnce(f.Name, seen, s.Keyword, s.P); err != nil {
-				return nil, err
-			}
-			for _, line := range s.Lines {
-				if err := apply(cfg, f.Name, line); err != nil {
-					return nil, err
-				}
-			}
-
 		case *Line:
-			if err := checkKnown(f.Name, s.Keyword, s.P); err != nil {
-				return nil, err
-			}
-			// Repeating a scalar directive is ambiguous: one of the two values
-			// would silently win. Repeating a list directive is not.
-			if isScalar(s.Keyword) {
-				if err := checkOnce(f.Name, seen, s.Keyword, s.P); err != nil {
-					return nil, err
-				}
-			}
-			if err := apply(cfg, f.Name, s); err != nil {
+			if err := decodeLine(cfg, f.Name, seen, s); err != nil {
 				return nil, err
 			}
 		}
 	}
 
 	return cfg, nil
+}
+
+func decodeBlock(cfg *Config, file string, seen map[string]Position, b *Block) error {
+	if err := checkKnown(file, b.Keyword, b.P); err != nil {
+		return err
+	}
+	if err := checkOnce(file, seen, b.Keyword, b.P); err != nil {
+		return err
+	}
+	for _, line := range b.Lines {
+		if err := apply(cfg, file, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func decodeLine(cfg *Config, file string, seen map[string]Position, line *Line) error {
+	if err := checkKnown(file, line.Keyword, line.P); err != nil {
+		return err
+	}
+	// Repeating a scalar directive is ambiguous: one of the two values would
+	// silently win. Repeating a list directive is not.
+	if isScalar(line.Keyword) {
+		if err := checkOnce(file, seen, line.Keyword, line.P); err != nil {
+			return err
+		}
+	}
+	return apply(cfg, file, line)
 }
 
 func isScalar(keyword string) bool {
@@ -158,6 +167,9 @@ func checkOnce(file string, seen map[string]Position, keyword string, pos Positi
 	return nil
 }
 
+// apply folds one directive into the config. Each directive gets its own
+// function: the shapes have nothing in common beyond the keyword, and a single
+// switch grew into something nobody could read at a glance.
 func apply(cfg *Config, file string, line *Line) error {
 	switch line.Keyword {
 	case "project":
@@ -185,82 +197,109 @@ func apply(cfg *Config, file string, line *Line) error {
 		cfg.ArchiveFiles = append(cfg.ArchiveFiles, line.Args...)
 
 	case "budget":
+		return applyBudget(cfg, file, line)
+
+	case "image":
+		return applyImage(cfg, file, line)
+
+	case "brew":
+		return applyBrew(cfg, file, line)
+
+	case "release":
+		return applyRelease(cfg, file, line)
+	}
+	return nil
+}
+
+func applyBudget(cfg *Config, file string, line *Line) error {
+	if len(line.Args) != 2 {
+		return arity(file, line)
+	}
+	if _, exists := cfg.Budgets[line.Args[0]]; exists {
+		return errAt(file, line.P, "budget for %s is already set", line.Args[0])
+	}
+	cfg.Budgets[line.Args[0]] = line.Args[1]
+	return nil
+}
+
+func applyImage(cfg *Config, file string, line *Line) error {
+	if cfg.Image == nil {
+		cfg.Image = &Image{}
+	}
+
+	switch {
+	// A bare `image` asks for the default: a reference derived from the
+	// repository, on scratch.
+	case len(line.Args) == 0:
+		return nil
+
+	case line.Args[0] == "base":
 		if len(line.Args) != 2 {
 			return arity(file, line)
 		}
-		if _, exists := cfg.Budgets[line.Args[0]]; exists {
-			return errAt(file, line.P, "budget for %s is already set", line.Args[0])
+		if cfg.Image.Base != "" {
+			return errAt(file, line.P, "image base is already set")
 		}
-		cfg.Budgets[line.Args[0]] = line.Args[1]
+		cfg.Image.Base = line.Args[1]
+		return nil
 
-	case "image":
-		if cfg.Image == nil {
-			cfg.Image = &Image{}
+	case len(line.Args) == 1:
+		if cfg.Image.Reference != "" {
+			return errAt(file, line.P, "the image reference is already set")
 		}
-		switch {
-		// A bare `image` asks for the default: a reference derived from the
-		// repository, on scratch.
-		case len(line.Args) == 0:
+		cfg.Image.Reference = line.Args[0]
+		return nil
 
-		case line.Args[0] == "base":
-			if len(line.Args) != 2 {
-				return arity(file, line)
-			}
-			if cfg.Image.Base != "" {
-				return errAt(file, line.P, "image base is already set")
-			}
-			cfg.Image.Base = line.Args[1]
+	default:
+		return arity(file, line)
+	}
+}
 
-		case len(line.Args) == 1:
-			if cfg.Image.Reference != "" {
-				return errAt(file, line.P, "the image reference is already set")
-			}
-			cfg.Image.Reference = line.Args[0]
+func applyBrew(cfg *Config, file string, line *Line) error {
+	if len(line.Args) != 1 {
+		return arity(file, line)
+	}
+	if _, _, ok := strings.Cut(line.Args[0], "/"); !ok {
+		return errAt(file, line.P, "brew tap %q must be in owner/repo form", line.Args[0])
+	}
+	cfg.BrewTap = line.Args[0]
+	return nil
+}
 
-		default:
-			return arity(file, line)
+func applyRelease(cfg *Config, file string, line *Line) error {
+	if len(line.Args) == 0 {
+		return arity(file, line)
+	}
+
+	for _, arg := range line.Args {
+		key, value, ok := strings.Cut(arg, "=")
+		if !ok {
+			return errAt(file, line.P, "release option %q must be key=value", arg)
 		}
 
-	case "brew":
-		if len(line.Args) != 1 {
-			return arity(file, line)
-		}
-		if _, _, ok := strings.Cut(line.Args[0], "/"); !ok {
-			return errAt(file, line.P, "brew tap %q must be in owner/repo form", line.Args[0])
-		}
-		cfg.BrewTap = line.Args[0]
-
-	case "release":
-		if len(line.Args) == 0 {
-			return arity(file, line)
-		}
-		for _, arg := range line.Args {
-			key, value, ok := strings.Cut(arg, "=")
-			if !ok {
-				return errAt(file, line.P, "release option %q must be key=value", arg)
-			}
-			switch key {
-			case "prerelease":
-				switch value {
-				case "auto", "true", "false":
-					cfg.Prerelease = value
-				default:
-					return errAt(file, line.P,
-						"release prerelease must be auto, true or false, not %q", value)
-				}
-			case "draft":
-				switch value {
-				case "true":
-					cfg.Draft = true
-				case "false":
-					cfg.Draft = false
-				default:
-					return errAt(file, line.P, "release draft must be true or false, not %q", value)
-				}
+		switch key {
+		case "prerelease":
+			switch value {
+			case "auto", "true", "false":
+				cfg.Prerelease = value
 			default:
 				return errAt(file, line.P,
-					"unknown release option %q; valid options are draft, prerelease", key)
+					"release prerelease must be auto, true or false, not %q", value)
 			}
+
+		case "draft":
+			switch value {
+			case "true":
+				cfg.Draft = true
+			case "false":
+				cfg.Draft = false
+			default:
+				return errAt(file, line.P, "release draft must be true or false, not %q", value)
+			}
+
+		default:
+			return errAt(file, line.P,
+				"unknown release option %q; valid options are draft, prerelease", key)
 		}
 	}
 	return nil

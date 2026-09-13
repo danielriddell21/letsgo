@@ -43,16 +43,53 @@ func buildImages(ctx context.Context, p *plan.Plan, artifacts []build.Artifact, 
 		return nil, nil
 	}
 
-	platforms := map[string]bool{}
+	binaries, byBinary := groupForImages(p, artifacts)
+	if len(binaries) == 0 {
+		return nil, fmt.Errorf("release: an image was asked for but no linux binary was built")
+	}
+
+	tags, err := imageTags(p)
+	if err != nil {
+		return nil, err
+	}
+
+	repos := p.Image.Repos(binaries)
+	annotations := oci.Annotations(
+		"https://"+p.Repo.String(), p.Git.Commit, p.Version, p.Project, "", p.Git.CommitTime)
+
+	cache := bases{}
+	out := make([]ImageBuild, 0, len(binaries))
+
+	for _, binary := range binaries {
+		built := ImageBuild{
+			Registry:   p.Image.Registry,
+			APIHost:    p.Image.APIHost,
+			Repository: repos[binary],
+			Tags:       tags,
+		}
+
+		if err := buildOne(ctx, p, &built, binary, byBinary[binary], annotations, cache, warnf); err != nil {
+			return nil, err
+		}
+		out = append(out, built)
+	}
+	return out, nil
+}
+
+// groupForImages collects the artifacts that get an image, keyed by the binary
+// they carry and in the order the commands were built.
+//
+// The grouping is the point: a module with several commands produces several
+// images rather than one that silently contains the last binary compiled.
+func groupForImages(p *plan.Plan, artifacts []build.Artifact) ([]string, map[string][]build.Artifact) {
+	platforms := make(map[string]bool, len(p.Image.Platforms))
 	for _, t := range p.Image.Platforms {
 		platforms[t.String()] = true
 	}
 
-	// Grouped by binary, in the order the commands were built, so a module
-	// with several commands produces several images rather than one that
-	// silently contains the last binary compiled.
 	var binaries []string
 	byBinary := map[string][]build.Artifact{}
+
 	for _, a := range artifacts {
 		if !platforms[a.Target] {
 			continue
@@ -62,60 +99,50 @@ func buildImages(ctx context.Context, p *plan.Plan, artifacts []build.Artifact, 
 		}
 		byBinary[a.Binary] = append(byBinary[a.Binary], a)
 	}
-	if len(binaries) == 0 {
-		return nil, fmt.Errorf("release: an image was asked for but no linux binary was built")
+	return binaries, byBinary
+}
+
+// buildOne assembles every platform's image for one binary, and the index that
+// ties them together.
+func buildOne(
+	ctx context.Context,
+	p *plan.Plan,
+	built *ImageBuild,
+	binary string,
+	artifacts []build.Artifact,
+	annotations map[string]string,
+	cache bases,
+	warnf func(string, ...any),
+) error {
+	for _, a := range artifacts {
+		platform := oci.Platform{OS: a.OS, Architecture: a.Arch}
+
+		base, err := cache.resolve(ctx, p, platform, warnf)
+		if err != nil {
+			return err
+		}
+		built.Base = base
+
+		image, err := oci.BuildImage(oci.ImageOptions{
+			Binary:      a.BinaryPath,
+			Name:        binary,
+			Platform:    platform,
+			Created:     p.Git.CommitTime,
+			Base:        base,
+			Annotations: annotations,
+		})
+		if err != nil {
+			return err
+		}
+		built.Images = append(built.Images, image)
 	}
 
-	repos := p.Image.Repos(binaries)
-	annotations := oci.Annotations(
-		"https://"+p.Repo.String(), p.Git.Commit, p.Version, p.Project, "", p.Git.CommitTime)
-
-	cache := bases{}
-
-	var out []ImageBuild
-	for _, binary := range binaries {
-		tags, err := imageTags(p)
-		if err != nil {
-			return nil, err
-		}
-		built := ImageBuild{
-			Registry:   p.Image.Registry,
-			APIHost:    p.Image.APIHost,
-			Repository: repos[binary],
-			Tags:       tags,
-		}
-
-		for _, a := range byBinary[binary] {
-			platform := oci.Platform{OS: a.OS, Architecture: a.Arch}
-
-			base, err := cache.resolve(ctx, p, platform, warnf)
-			if err != nil {
-				return nil, err
-			}
-			built.Base = base
-
-			image, err := oci.BuildImage(oci.ImageOptions{
-				Binary:      a.BinaryPath,
-				Name:        binary,
-				Platform:    platform,
-				Created:     p.Git.CommitTime,
-				Base:        base,
-				Annotations: annotations,
-			})
-			if err != nil {
-				return nil, err
-			}
-			built.Images = append(built.Images, image)
-		}
-
-		index, err := oci.BuildIndex(built.Images, annotations)
-		if err != nil {
-			return nil, err
-		}
-		built.Index = index
-		out = append(out, built)
+	index, err := oci.BuildIndex(built.Images, annotations)
+	if err != nil {
+		return err
 	}
-	return out, nil
+	built.Index = index
+	return nil
 }
 
 // bases resolves each platform's base image once. A module with three

@@ -65,7 +65,11 @@ func find(tool, install string) (string, error) {
 
 	// PATH last, and made absolute so the choice is not re-made later.
 	if path, err := exec.LookPath(tool); err == nil {
-		return filepath.Abs(path)
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return "", fmt.Errorf("gate: %w", err)
+		}
+		return absolute, nil
 	}
 	return "", &MissingToolError{Tool: tool, Install: install}
 }

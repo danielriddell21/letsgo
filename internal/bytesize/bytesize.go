@@ -31,9 +31,18 @@ var units = []struct {
 	suffix string
 	size   Size
 }{
-	{"kib", KB}, {"mib", MB}, {"gib", GB}, {"tib", TB},
-	{"kb", KB}, {"mb", MB}, {"gb", GB}, {"tb", TB},
-	{"k", KB}, {"m", MB}, {"g", GB}, {"t", TB},
+	{"kib", KB},
+	{"mib", MB},
+	{"gib", GB},
+	{"tib", TB},
+	{"kb", KB},
+	{"mb", MB},
+	{"gb", GB},
+	{"tb", TB},
+	{"k", KB},
+	{"m", MB},
+	{"g", GB},
+	{"t", TB},
 	{"b", B},
 }
 

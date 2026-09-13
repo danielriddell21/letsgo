@@ -35,9 +35,9 @@ func run() error {
 	if workDir == "" {
 		dir, err := os.MkdirTemp("", "reprodigest-")
 		if err != nil {
-			return err
+			return fmt.Errorf("reprodigest: scratch directory: %w", err)
 		}
-		defer os.RemoveAll(dir)
+		defer func() { _ = os.RemoveAll(dir) }()
 		workDir = dir
 	}
 
@@ -75,9 +75,13 @@ func run() error {
 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(struct {
+
+	if err := enc.Encode(struct {
 		Go        string           `json:"go"`
 		Image     string           `json:"image"`
 		Artifacts []repro.Artifact `json:"artifacts"`
-	}{Go: version, Image: image, Artifacts: artifacts})
+	}{Go: version, Image: image, Artifacts: artifacts}); err != nil {
+		return fmt.Errorf("reprodigest: %w", err)
+	}
+	return nil
 }

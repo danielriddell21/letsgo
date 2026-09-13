@@ -182,7 +182,7 @@ func (m *Manifest) Write(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("manifest: writing %s: %w", path, err)
 	}
 	return nil
@@ -220,7 +220,7 @@ func SummariseModules(goSumPath string) (Modules, error) {
 		}
 		return Modules{}, fmt.Errorf("manifest: reading %s: %w", goSumPath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var buf bytes.Buffer
 	h := sha256.New()

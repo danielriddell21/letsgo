@@ -180,55 +180,76 @@ func (r *Result) String() string {
 		return b.String()
 	}
 
-	if len(r.Sizes) > 0 {
-		b.WriteString(r.SizeKind + "\n")
-		width := 0
-		for _, s := range r.Sizes {
-			width = max(width, len(s.Target))
-		}
-		for _, s := range r.Sizes {
-			fmt.Fprintf(&b, "  %-*s  %8s -> %-8s  %+.0f%%\n",
-				width, s.Target, bytesize.Size(s.From), bytesize.Size(s.To), s.Percent())
-		}
-		b.WriteString("\n")
-	}
-
-	if len(r.Dependencies) > 0 {
-		b.WriteString("dependencies\n")
-		for _, d := range r.Dependencies {
-			switch d.Kind {
-			case DepAdded:
-				fmt.Fprintf(&b, "  + %s %s\n", d.Path, d.To)
-			case DepRemoved:
-				fmt.Fprintf(&b, "  - %s %s\n", d.Path, d.From)
-			default:
-				fmt.Fprintf(&b, "  ~ %s %s -> %s\n", d.Path, d.From, d.To)
-			}
-		}
-		b.WriteString("\n")
-	}
-
-	if len(r.API) > 0 {
-		b.WriteString("api\n")
-		for _, c := range r.API {
-			marker := "+"
-			if c.Kind == "incompatible" {
-				marker = "!"
-			}
-			if c.Package != "" {
-				fmt.Fprintf(&b, "  %s %s: %s\n", marker, c.Package, c.Text)
-				continue
-			}
-			fmt.Fprintf(&b, "  %s %s\n", marker, c.Text)
-		}
-		b.WriteString("\n")
-	}
-
-	if r.Toolchain != nil {
-		// Listed last but often the explanation: a compiler change moves every
-		// binary at once, which no dependency accounts for.
-		fmt.Fprintf(&b, "toolchain\n  %s -> %s\n\n", r.Toolchain.From, r.Toolchain.To)
-	}
+	r.writeSizes(&b)
+	r.writeDependencies(&b)
+	r.writeAPI(&b)
+	r.writeToolchain(&b)
 
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+func (r *Result) writeSizes(b *strings.Builder) {
+	if len(r.Sizes) == 0 {
+		return
+	}
+
+	b.WriteString(r.SizeKind + "\n")
+
+	width := 0
+	for _, s := range r.Sizes {
+		width = max(width, len(s.Target))
+	}
+	for _, s := range r.Sizes {
+		fmt.Fprintf(b, "  %-*s  %8s -> %-8s  %+.0f%%\n",
+			width, s.Target, bytesize.Size(s.From), bytesize.Size(s.To), s.Percent())
+	}
+	b.WriteString("\n")
+}
+
+func (r *Result) writeDependencies(b *strings.Builder) {
+	if len(r.Dependencies) == 0 {
+		return
+	}
+
+	b.WriteString("dependencies\n")
+	for _, d := range r.Dependencies {
+		switch d.Kind {
+		case DepAdded:
+			fmt.Fprintf(b, "  + %s %s\n", d.Path, d.To)
+		case DepRemoved:
+			fmt.Fprintf(b, "  - %s %s\n", d.Path, d.From)
+		default:
+			fmt.Fprintf(b, "  ~ %s %s -> %s\n", d.Path, d.From, d.To)
+		}
+	}
+	b.WriteString("\n")
+}
+
+func (r *Result) writeAPI(b *strings.Builder) {
+	if len(r.API) == 0 {
+		return
+	}
+
+	b.WriteString("api\n")
+	for _, c := range r.API {
+		marker := "+"
+		if c.Kind == "incompatible" {
+			marker = "!"
+		}
+		if c.Package != "" {
+			fmt.Fprintf(b, "  %s %s: %s\n", marker, c.Package, c.Text)
+			continue
+		}
+		fmt.Fprintf(b, "  %s %s\n", marker, c.Text)
+	}
+	b.WriteString("\n")
+}
+
+// writeToolchain is listed last but is often the explanation: a compiler
+// change moves every binary at once, which no dependency accounts for.
+func (r *Result) writeToolchain(b *strings.Builder) {
+	if r.Toolchain == nil {
+		return
+	}
+	fmt.Fprintf(b, "toolchain\n  %s -> %s\n\n", r.Toolchain.From, r.Toolchain.To)
 }

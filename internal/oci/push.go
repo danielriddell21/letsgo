@@ -53,14 +53,8 @@ type PushResult struct {
 // makes the operation safely resumable — a failed run leaves blobs behind and
 // no tag pointing at anything incomplete.
 func Push(ctx context.Context, o PushOptions) (*PushResult, error) {
-	if o.Registry == nil || o.Repository == "" {
-		return nil, fmt.Errorf("oci: a registry and a repository are required")
-	}
-	if len(o.Images) == 0 || o.Index.Digest == "" {
-		return nil, fmt.Errorf("oci: nothing to push")
-	}
-	if len(o.Tags) == 0 {
-		return nil, fmt.Errorf("oci: an image needs at least one tag")
+	if err := o.check(); err != nil {
+		return nil, err
 	}
 	logf := o.Logf
 	if logf == nil {
@@ -70,24 +64,7 @@ func Push(ctx context.Context, o PushOptions) (*PushResult, error) {
 	result := &PushResult{}
 
 	for _, img := range o.Images {
-		ours := map[Digest]Blob{img.Layer.Digest: img.Layer}
-
-		for _, layer := range layersOf(img) {
-			if blob, mine := ours[layer.Digest]; mine {
-				if err := o.push(ctx, blob, result); err != nil {
-					return nil, err
-				}
-				continue
-			}
-			if err := o.copyBase(ctx, layer, result); err != nil {
-				return nil, err
-			}
-		}
-
-		if err := o.push(ctx, img.ConfigJS, result); err != nil {
-			return nil, err
-		}
-		if err := o.Registry.PushManifest(ctx, o.Repository, string(img.Descriptor.Digest), img.Manifest); err != nil {
+		if err := o.pushImage(ctx, img, result); err != nil {
 			return nil, err
 		}
 		logf("pushed %s (%s)", img.Platform, img.Descriptor.Digest.Short())
@@ -107,6 +84,45 @@ func Push(ctx context.Context, o PushOptions) (*PushResult, error) {
 	result.Digest = o.Index.Digest
 	result.Tags = o.Tags
 	return result, nil
+}
+
+// check rejects a publication that could not be completed, before any of it
+// reaches the registry.
+func (o PushOptions) check() error {
+	switch {
+	case o.Registry == nil || o.Repository == "":
+		return fmt.Errorf("oci: a registry and a repository are required")
+	case len(o.Images) == 0 || o.Index.Digest == "":
+		return fmt.Errorf("oci: nothing to push")
+	case len(o.Tags) == 0:
+		return fmt.Errorf("oci: an image needs at least one tag")
+	}
+	return nil
+}
+
+// pushImage uploads one platform's layers, config and manifest.
+//
+// The manifest goes up last, because a registry rejects one that names a blob
+// it does not hold.
+func (o PushOptions) pushImage(ctx context.Context, img *Image, result *PushResult) error {
+	ours := map[Digest]Blob{img.Layer.Digest: img.Layer}
+
+	for _, layer := range layersOf(img) {
+		if blob, mine := ours[layer.Digest]; mine {
+			if err := o.push(ctx, blob, result); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := o.copyBase(ctx, layer, result); err != nil {
+			return err
+		}
+	}
+
+	if err := o.push(ctx, img.ConfigJS, result); err != nil {
+		return err
+	}
+	return o.Registry.PushManifest(ctx, o.Repository, string(img.Descriptor.Digest), img.Manifest)
 }
 
 func layersOf(img *Image) []Descriptor {

@@ -104,48 +104,8 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 
 	result := &Result{}
 
-	existing, err := o.Client.ReleaseByTag(ctx, o.Repo, o.Release.TagName)
-	if err != nil {
+	if err := ensureRelease(ctx, o, result, logf); err != nil {
 		return nil, err
-	}
-
-	switch {
-	case existing == nil:
-		created, err := o.Client.CreateRelease(ctx, o.Repo, o.Release)
-		if err != nil {
-			return nil, err
-		}
-		result.Release, result.Created = created, true
-		logf("created release %s", o.Release.TagName)
-
-	default:
-		// The release already exists, which on a re-run is the expected state
-		// rather than a conflict.
-		input := o.Release
-		if o.Notes == NotesAppend && strings.TrimSpace(existing.Body) != "" {
-			input.Body = strings.TrimRight(existing.Body, "\n") + "\n\n" + o.Release.Body
-			result.AppendedNotes = true
-		}
-
-		updated, err := o.Client.UpdateRelease(ctx, o.Repo, existing.ID, input)
-		switch {
-		case err == nil:
-			result.Release = updated
-			logf("release %s already exists; resuming", o.Release.TagName)
-
-		case isRefusal(err):
-			// The description could not be set, but the assets are the
-			// substance of a release. Abandoning an upload we are permitted to
-			// perform, because of a description we are not, would leave the
-			// release emptier than doing the part that is allowed.
-			result.Release = existing
-			result.NotesRefused = true
-			logf("release %s already exists, and its notes cannot be edited with this token", o.Release.TagName)
-			logf("continuing with the assets; the existing description stands")
-
-		default:
-			return nil, err
-		}
 	}
 
 	assets, err := o.Client.Assets(ctx, o.Repo, result.Release.ID)
@@ -224,12 +184,60 @@ func matches(asset github.Asset, wantSHA256 string, size int64) verdict {
 	return mismatch
 }
 
+// ensureRelease creates the release, or adopts the one already there.
+//
+// An existing release is the expected state on a re-run rather than a
+// conflict, which is what makes the whole operation resumable.
+func ensureRelease(ctx context.Context, o Options, result *Result, logf func(string, ...any)) error {
+	existing, err := o.Client.ReleaseByTag(ctx, o.Repo, o.Release.TagName)
+	if err != nil {
+		return err
+	}
+
+	if existing == nil {
+		created, err := o.Client.CreateRelease(ctx, o.Repo, o.Release)
+		if err != nil {
+			return err
+		}
+		result.Release, result.Created = created, true
+		logf("created release %s", o.Release.TagName)
+		return nil
+	}
+
+	input := o.Release
+	if o.Notes == NotesAppend && strings.TrimSpace(existing.Body) != "" {
+		input.Body = strings.TrimRight(existing.Body, "\n") + "\n\n" + o.Release.Body
+		result.AppendedNotes = true
+	}
+
+	updated, err := o.Client.UpdateRelease(ctx, o.Repo, existing.ID, input)
+	switch {
+	case err == nil:
+		result.Release = updated
+		logf("release %s already exists; resuming", o.Release.TagName)
+
+	case isRefusal(err):
+		// The description could not be set, but the assets are the substance
+		// of a release. Abandoning an upload we are permitted to perform,
+		// because of a description we are not, would leave the release
+		// emptier than doing the part that is allowed.
+		result.Release = existing
+		result.NotesRefused = true
+		logf("release %s already exists, and its notes cannot be edited with this token", o.Release.TagName)
+		logf("continuing with the assets; the existing description stands")
+
+	default:
+		return err
+	}
+	return nil
+}
+
 func upload(ctx context.Context, o Options, releaseID int64, name, path string, size int64) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("publish: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	asset, err := o.Client.UploadAsset(ctx, o.Repo, releaseID, name, size, f)
 	if err != nil {

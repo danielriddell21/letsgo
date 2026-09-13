@@ -77,7 +77,7 @@ func WriteSource(ctx context.Context, o SourceOptions) (Source, error) {
 	name := fmt.Sprintf("%s_%s_source%s", o.Name, o.Version, archive.FormatTarGz.Ext())
 	path := filepath.Join(o.WorkDir, name)
 
-	if err := os.MkdirAll(o.WorkDir, 0o755); err != nil {
+	if err := os.MkdirAll(o.WorkDir, 0o750); err != nil {
 		return Source{}, fmt.Errorf("build: %w", err)
 	}
 	if err := writeArchive(path, archive.FormatTarGz, entries, o.ModTime); err != nil {

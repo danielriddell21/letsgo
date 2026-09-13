@@ -76,7 +76,11 @@ func resolveToolchain() (string, error) {
 				"  set %s to its absolute path if it is installed somewhere unusual",
 			ToolchainEnvOverride)
 	}
-	return filepath.Abs(found)
+	absolute, err := filepath.Abs(found)
+	if err != nil {
+		return "", fmt.Errorf("gobuild: %w", err)
+	}
+	return absolute, nil
 }
 
 // toolchainDir is the directory holding the resolved go command, which the

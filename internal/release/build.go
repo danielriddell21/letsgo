@@ -42,7 +42,7 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 	if !p.OK() {
 		return nil, fmt.Errorf("release: refusing to build a plan that did not pass its gates")
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("release: %w", err)
 	}
 
@@ -51,6 +51,144 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 		return nil, err
 	}
 
+	artifacts, err := buildCommands(ctx, p, dir, warnf)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checkBudgets(artifacts, p.Budgets, warnf); err != nil {
+		return nil, err
+	}
+
+	source, err := build.WriteSource(ctx, build.SourceOptions{
+		ModuleDir: p.Module.Dir,
+		Name:      p.Project,
+		Version:   p.Version,
+		ModTime:   p.Git.CommitTime,
+		WorkDir:   dir,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	mods, err := manifest.SummariseModules(filepath.Join(p.Module.Dir, "go.sum"))
+	if err != nil {
+		return nil, err
+	}
+
+	// Assembled here, published later. An image's digest is a pure function of
+	// its inputs, so it is known before anything reaches a registry — which is
+	// the only order in which the manifest can record it.
+	images, err := buildImages(ctx, p, artifacts, warnf)
+	if err != nil {
+		return nil, err
+	}
+
+	m := describe(p, toolVersion, goVersion, source, mods, artifacts, images)
+
+	files, err := writeMetadata(p, m, dir, artifacts, source)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Result{
+		Dir: dir, Manifest: m, Artifacts: artifacts, Source: source,
+		Images: images, Files: files,
+	}, nil
+}
+
+// writeMetadata writes the manifest, the installer and the checksum file, and
+// returns everything to publish in upload order.
+func writeMetadata(
+	p *plan.Plan,
+	m *manifest.Manifest,
+	dir string,
+	artifacts []build.Artifact,
+	source build.Source,
+) ([]string, error) {
+	manifestPath := filepath.Join(dir, manifest.FileName)
+	if err := m.Write(manifestPath); err != nil {
+		return nil, err
+	}
+	manifestSum, err := sha256File(manifestPath)
+	if err != nil {
+		return nil, err
+	}
+
+	installer, installerSum, err := writeInstaller(p, artifacts, dir)
+	if err != nil {
+		return nil, err
+	}
+
+	// The checksum file covers everything published except itself, the
+	// manifest included: a consumer who trusts SHA256SUMS can then trust the
+	// manifest, and through it every digest the manifest records.
+	sums := append(build.SumsFor(artifacts),
+		build.Sum{Name: source.Name, SHA256: source.SHA256},
+		build.Sum{Name: manifest.FileName, SHA256: manifestSum},
+	)
+	if installer != "" {
+		sums = append(sums, build.Sum{Name: installer, SHA256: installerSum})
+	}
+	if _, err := build.WriteChecksums(dir, sums); err != nil {
+		return nil, err
+	}
+
+	files := make([]string, 0, len(sums)+1)
+	for _, a := range artifacts {
+		files = append(files, a.Archive)
+	}
+	files = append(files, source.Name, manifest.FileName)
+	if installer != "" {
+		files = append(files, installer)
+	}
+	return append(files, build.ChecksumFile), nil
+}
+
+// describe assembles the release manifest: everything a consumer needs to
+// rebuild this release and compare, in one file.
+func describe(
+	p *plan.Plan,
+	toolVersion, goVersion string,
+	source build.Source,
+	mods manifest.Modules,
+	artifacts []build.Artifact,
+	images []ImageBuild,
+) *manifest.Manifest {
+	m := &manifest.Manifest{
+		Schema:          manifest.Schema,
+		Project:         p.Project,
+		Version:         p.Version,
+		Tag:             p.Tag,
+		Commit:          p.Git.Commit,
+		SourceDateEpoch: p.Git.CommitTime.Unix(),
+		Builder:         manifest.Builder{Tool: "letsgo " + toolVersion, Go: goVersion},
+		Source:          &manifest.Source{Archive: source.Name, SHA256: source.SHA256},
+		Modules:         mods,
+		Gates:           gates(p),
+		APIChanges:      apiChanges(p),
+		Images:          imageRecords(images),
+		Artifacts:       make([]manifest.Artifact, 0, len(artifacts)),
+	}
+
+	for _, a := range artifacts {
+		m.Artifacts = append(m.Artifacts, manifest.Artifact{
+			Name: a.Archive, OS: a.OS, Arch: a.Arch, Size: a.Size, BinarySize: a.BinarySize,
+			SHA256: a.ArchiveSHA256, BinarySHA256: a.BinarySHA256,
+			Build: manifest.Build{
+				Flags:   []string{"-trimpath", "-buildvcs=false"},
+				LDFlags: a.LDFlags,
+				Env:     map[string]string{"CGO_ENABLED": "0", "GOOS": a.OS, "GOARCH": a.Arch},
+			},
+		})
+	}
+	manifest.SortArtifacts(m.Artifacts)
+
+	return m
+}
+
+// buildCommands compiles and packages every command in the plan.
+func buildCommands(ctx context.Context, p *plan.Plan, dir string, warnf func(string, ...any)) ([]build.Artifact, error) {
 	// The version must actually reach the binary, and the only way to know
 	// that is to run it. Checking the symbol exists proves the linker had
 	// somewhere to write, not that the value survived to main.
@@ -98,105 +236,7 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 		// information.
 		smoke = nil
 	}
-
-	if err := checkBudgets(artifacts, p.Budgets, warnf); err != nil {
-		return nil, err
-	}
-
-	source, err := build.WriteSource(ctx, build.SourceOptions{
-		ModuleDir: p.Module.Dir,
-		Name:      p.Project,
-		Version:   p.Version,
-		ModTime:   p.Git.CommitTime,
-		WorkDir:   dir,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	mods, err := manifest.SummariseModules(filepath.Join(p.Module.Dir, "go.sum"))
-	if err != nil {
-		return nil, err
-	}
-
-	// Assembled here, published later. An image's digest is a pure function of
-	// its inputs, so it is known before anything reaches a registry — which is
-	// the only order in which the manifest can record it.
-	images, err := buildImages(ctx, p, artifacts, warnf)
-	if err != nil {
-		return nil, err
-	}
-
-	m := &manifest.Manifest{
-		Schema:          manifest.Schema,
-		Project:         p.Project,
-		Version:         p.Version,
-		Tag:             p.Tag,
-		Commit:          p.Git.Commit,
-		SourceDateEpoch: p.Git.CommitTime.Unix(),
-		Builder:         manifest.Builder{Tool: "letsgo " + toolVersion, Go: goVersion},
-		Source:          &manifest.Source{Archive: source.Name, SHA256: source.SHA256},
-		Modules:         mods,
-		Gates:           gates(p),
-		APIChanges:      apiChanges(p),
-		Images:          imageRecords(images),
-	}
-
-	for _, a := range artifacts {
-		m.Artifacts = append(m.Artifacts, manifest.Artifact{
-			Name: a.Archive, OS: a.OS, Arch: a.Arch, Size: a.Size, BinarySize: a.BinarySize,
-			SHA256: a.ArchiveSHA256, BinarySHA256: a.BinarySHA256,
-			Build: manifest.Build{
-				Flags:   []string{"-trimpath", "-buildvcs=false"},
-				LDFlags: a.LDFlags,
-				Env:     map[string]string{"CGO_ENABLED": "0", "GOOS": a.OS, "GOARCH": a.Arch},
-			},
-		})
-	}
-	manifest.SortArtifacts(m.Artifacts)
-
-	manifestPath := filepath.Join(dir, manifest.FileName)
-	if err := m.Write(manifestPath); err != nil {
-		return nil, err
-	}
-	manifestSum, err := sha256File(manifestPath)
-	if err != nil {
-		return nil, err
-	}
-
-	installer, installerSum, err := writeInstaller(p, artifacts, dir)
-	if err != nil {
-		return nil, err
-	}
-
-	// The checksum file covers everything published except itself, the
-	// manifest included: a consumer who trusts SHA256SUMS can then trust the
-	// manifest, and through it every digest the manifest records.
-	sums := append(build.SumsFor(artifacts),
-		build.Sum{Name: source.Name, SHA256: source.SHA256},
-		build.Sum{Name: manifest.FileName, SHA256: manifestSum},
-	)
-	if installer != "" {
-		sums = append(sums, build.Sum{Name: installer, SHA256: installerSum})
-	}
-	if _, err := build.WriteChecksums(dir, sums); err != nil {
-		return nil, err
-	}
-
-	files := make([]string, 0, len(sums)+1)
-	for _, a := range artifacts {
-		files = append(files, a.Archive)
-	}
-	files = append(files, source.Name, manifest.FileName)
-	if installer != "" {
-		files = append(files, installer)
-	}
-	files = append(files, build.ChecksumFile)
-
-	return &Result{
-		Dir: dir, Manifest: m, Artifacts: artifacts, Source: source,
-		Images: images, Files: files,
-	}, nil
+	return artifacts, nil
 }
 
 // apiChanges carries the exported API delta into the manifest, so comparing
@@ -229,7 +269,7 @@ func sha256File(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("release: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {

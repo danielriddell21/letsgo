@@ -45,7 +45,9 @@ func writeInstaller(p *plan.Plan, artifacts []build.Artifact, dir string) (strin
 	}
 
 	path := filepath.Join(dir, install.FileName)
-	if err := os.WriteFile(path, script, 0o755); err != nil {
+	// Written executable on purpose: the point of the script is that someone
+	// can run it, and the release attaches it as-is.
+	if err := os.WriteFile(path, script, 0o700); err != nil { //nolint:gosec // an installer must be runnable
 		return "", "", fmt.Errorf("release: writing %s: %w", install.FileName, err)
 	}
 

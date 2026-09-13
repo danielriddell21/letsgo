@@ -90,7 +90,7 @@ func (r *Registry) do(ctx context.Context, req *http.Request, scope string, body
 	}
 
 	challenge := resp.Header.Get("WWW-Authenticate")
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if err := r.authenticate(ctx, challenge, scope); err != nil {
 		return nil, err
@@ -156,15 +156,17 @@ func (r *Registry) authenticate(ctx context.Context, challenge, scope string) er
 	if err != nil {
 		return fmt.Errorf("oci: requesting a token from %s: %w", endpoint.Host, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return fmt.Errorf("oci: reading token response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return &Error{StatusCode: resp.StatusCode, Method: req.Method, URL: endpoint.String(),
-			Body: strings.TrimSpace(string(data))}
+		return &Error{
+			StatusCode: resp.StatusCode, Method: req.Method, URL: endpoint.String(),
+			Body: strings.TrimSpace(string(data)),
+		}
 	}
 
 	var issued struct {
@@ -238,7 +240,7 @@ func pushScope(repo string) string { return "repository:" + repo + ":pull,push" 
 
 // read drains and closes a response body, bounded.
 func read(resp *http.Response) ([]byte, error) {
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBlob))
 	if err != nil {
 		return nil, fmt.Errorf("oci: reading response: %w", err)
@@ -271,10 +273,10 @@ func (r *Registry) HasBlob(ctx context.Context, repo string, digest Digest) (boo
 		return false, err
 	}
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusOK:
 		return true, nil
-	case resp.StatusCode == http.StatusNotFound:
+	case http.StatusNotFound:
 		return false, nil
 	default:
 		return false, errorFrom(req, resp, body)

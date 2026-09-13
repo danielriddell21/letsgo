@@ -304,7 +304,7 @@ func (c *Client) send(req *http.Request, out any) error {
 	if err != nil {
 		return fmt.Errorf("github: %s %s: %w", req.Method, req.URL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Bounded so a hostile or broken endpoint cannot exhaust memory.
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
@@ -510,7 +510,7 @@ func (c *Client) CanCreateRelease(ctx context.Context, repo Repo) (bool, error) 
 	case http.StatusUnprocessableEntity, http.StatusBadRequest:
 		return true, nil
 	default:
-		return false, fmt.Errorf("%w: %s", ErrIndeterminate, apiErr)
+		return false, fmt.Errorf("%w: %w", ErrIndeterminate, apiErr)
 	}
 }
 
@@ -532,7 +532,7 @@ func (c *Client) DownloadAsset(ctx context.Context, repo Repo, assetID int64) ([
 	if err != nil {
 		return nil, fmt.Errorf("github: downloading asset %d: %w", assetID, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {

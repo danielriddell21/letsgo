@@ -31,30 +31,11 @@ func (f *File) Format() []byte {
 			previousBlank = false
 
 		case *Line:
-			b.WriteString(s.Keyword)
-			for _, arg := range s.Args {
-				b.WriteString(" " + quoteIfNeeded(arg))
-			}
-			writeComment(&b, s.Comment)
-			b.WriteString("\n")
+			writeLine(&b, s)
 			previousBlank = false
 
 		case *Block:
-			b.WriteString(s.Keyword + " (")
-			writeComment(&b, s.Comment)
-			b.WriteString("\n")
-			for _, line := range s.Lines {
-				b.WriteString("\t")
-				for i, arg := range line.Args {
-					if i > 0 {
-						b.WriteString(" ")
-					}
-					b.WriteString(quoteIfNeeded(arg))
-				}
-				writeComment(&b, line.Comment)
-				b.WriteString("\n")
-			}
-			b.WriteString(")\n")
+			writeBlock(&b, s)
 			previousBlank = false
 		}
 	}
@@ -64,6 +45,34 @@ func (f *File) Format() []byte {
 		return nil
 	}
 	return []byte(out + "\n")
+}
+
+func writeLine(b *strings.Builder, line *Line) {
+	b.WriteString(line.Keyword)
+	for _, arg := range line.Args {
+		b.WriteString(" " + quoteIfNeeded(arg))
+	}
+	writeComment(b, line.Comment)
+	b.WriteString("\n")
+}
+
+func writeBlock(b *strings.Builder, block *Block) {
+	b.WriteString(block.Keyword + " (")
+	writeComment(b, block.Comment)
+	b.WriteString("\n")
+
+	for _, line := range block.Lines {
+		b.WriteString("\t")
+		for i, arg := range line.Args {
+			if i > 0 {
+				b.WriteString(" ")
+			}
+			b.WriteString(quoteIfNeeded(arg))
+		}
+		writeComment(b, line.Comment)
+		b.WriteString("\n")
+	}
+	b.WriteString(")\n")
 }
 
 func writeComment(b *strings.Builder, comment string) {

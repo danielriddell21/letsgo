@@ -400,18 +400,18 @@ func bumpBetween(previous, current string) string {
 func checkoutTag(ctx context.Context, repoDir, tag string) (dir string, cleanup func(), err error) {
 	base, err := os.MkdirTemp("", "letsgo-apidiff-")
 	if err != nil {
-		return "", nil, err
+		return "", nil, fmt.Errorf("plan: scratch directory: %w", err)
 	}
 
 	dir = filepath.Join(base, "old")
 	if err := discover.AddWorktree(ctx, repoDir, dir, tag); err != nil {
-		os.RemoveAll(base)
+		_ = os.RemoveAll(base)
 		return "", nil, err
 	}
 
 	return dir, func() {
 		_ = discover.RemoveWorktree(ctx, repoDir, dir)
-		os.RemoveAll(base)
+		_ = os.RemoveAll(base)
 	}, nil
 }
 
@@ -848,9 +848,7 @@ func (p *Plan) resolveLDFlags() {
 
 	for _, cmd := range p.Commands {
 		names := make([]string, len(versionVars))
-		for i, v := range versionVars {
-			names[i] = v
-		}
+		copy(names, versionVars)
 
 		symbols, err := discover.InspectVars(cmd.Dir, names)
 		if err != nil {

@@ -26,6 +26,7 @@ func binary(t *testing.T, content string) string {
 }
 
 func options(t *testing.T) oci.ImageOptions {
+	t.Helper()
 	return oci.ImageOptions{
 		Binary:   binary(t, "ELF-ish bytes"),
 		Name:     "tool",

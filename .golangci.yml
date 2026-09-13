@@ -38,6 +38,14 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+    wrapcheck:
+      # Errors from letsgo's own packages already carry their package name
+      # ("build: ...", "oci: ..."), so wrapping one again at the call site
+      # produces "release: build: ..." and says nothing new. Errors crossing
+      # in from outside the module still have to be wrapped.
+      ignore-package-globs:
+        - github.com/danielriddell21/letsgo/*
+
     gosec:
       excludes:
         - G107

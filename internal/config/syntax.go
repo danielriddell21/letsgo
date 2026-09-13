@@ -78,6 +78,115 @@ func (e *SyntaxError) Error() string {
 	return fmt.Sprintf("%s:%s: %s", e.File, e.Pos, e.Msg)
 }
 
+// parseLine folds one line into the file, returning the block left open after
+// it — nil when none is.
+func parseLine(file *File, name string, lineNo int, text string, open *Block) (*Block, error) {
+	tokens, comment, err := tokenise(name, lineNo, text)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(tokens) == 0 {
+		// A comment inside a block is dropped rather than misplaced. Blocks
+		// hold argument lines, and inventing a place to hang a free-floating
+		// comment would mean the formatter could move it somewhere the author
+		// did not put it.
+		if open == nil {
+			file.Stmts = append(file.Stmts,
+				&Comment{Text: comment, Blank: comment == "", P: Position{lineNo, 1}})
+		}
+		return open, nil
+	}
+
+	if open != nil {
+		closed, err := parseInBlock(name, lineNo, open, tokens, comment)
+		if err != nil {
+			return nil, err
+		}
+		if closed {
+			return nil, nil
+		}
+		return open, nil
+	}
+
+	stmt, err := parseStatement(name, lineNo, tokens, comment)
+	if err != nil {
+		return nil, err
+	}
+	file.Stmts = append(file.Stmts, stmt)
+
+	if block, ok := stmt.(*Block); ok {
+		return block, nil
+	}
+	return nil, nil
+}
+
+// parseInBlock handles one line inside an open block, reporting whether the
+// block closed.
+func parseInBlock(name string, lineNo int, open *Block, tokens []token, comment string) (bool, error) {
+	if tokens[0].text == ")" {
+		if len(tokens) > 1 {
+			return false, errAt(name, tokens[1].pos,
+				"unexpected %q after closing parenthesis", tokens[1].text)
+		}
+		return true, nil
+	}
+
+	args := make([]string, 0, len(tokens))
+	for _, tok := range tokens {
+		if tok.text == "(" {
+			return false, errAt(name, tok.pos, "nested blocks are not supported")
+		}
+		args = append(args, tok.text)
+	}
+
+	open.Lines = append(open.Lines, &Line{
+		Keyword: open.Keyword,
+		Args:    args,
+		Comment: comment,
+		P:       Position{lineNo, tokens[0].pos.Col},
+	})
+	return false, nil
+}
+
+// parseStatement reads one top-level statement: a directive, or the opening of
+// a block.
+func parseStatement(name string, lineNo int, tokens []token, comment string) (Stmt, error) {
+	switch tokens[0].text {
+	case ")":
+		return nil, errAt(name, tokens[0].pos, "unexpected closing parenthesis")
+	case "(":
+		return nil, errAt(name, tokens[0].pos, "block must be introduced by a keyword")
+	}
+
+	keyword := tokens[0].text
+	rest := tokens[1:]
+
+	if len(rest) > 0 && rest[len(rest)-1].text == "(" {
+		if len(rest) > 1 {
+			return nil, errAt(name, rest[0].pos,
+				"%s ( must open a block on its own line; move %q inside the block",
+				keyword, rest[0].text)
+		}
+		return &Block{Keyword: keyword, Comment: comment, P: Position{lineNo, tokens[0].pos.Col}}, nil
+	}
+
+	args := make([]string, 0, len(rest))
+	for _, tok := range rest {
+		if tok.text == "(" || tok.text == ")" {
+			return nil, errAt(name, tok.pos, "unexpected %q", tok.text)
+		}
+		args = append(args, tok.text)
+	}
+
+	return &Line{
+		Keyword: keyword,
+		Args:    args,
+		Comment: comment,
+		P:       Position{lineNo, tokens[0].pos.Col},
+	}, nil
+}
+
 // Parse reads a configuration file.
 func Parse(name string, data []byte) (*File, error) {
 	file := &File{Name: name}
@@ -94,82 +203,11 @@ func Parse(name string, data []byte) (*File, error) {
 			break
 		}
 
-		tokens, comment, err := tokenise(name, lineNo, text)
+		next, err := parseLine(file, name, lineNo, text, open)
 		if err != nil {
 			return nil, err
 		}
-
-		if len(tokens) == 0 {
-			stmt := &Comment{Text: comment, Blank: comment == "", P: Position{lineNo, 1}}
-			if open != nil {
-				// A comment inside a block is dropped rather than misplaced.
-				// Blocks hold argument lines, and inventing a place to hang a
-				// free-floating comment would mean the formatter could move it
-				// somewhere the author did not put it.
-				continue
-			}
-			file.Stmts = append(file.Stmts, stmt)
-			continue
-		}
-
-		if open != nil {
-			if tokens[0].text == ")" {
-				if len(tokens) > 1 {
-					return nil, errAt(name, tokens[1].pos, "unexpected %q after closing parenthesis", tokens[1].text)
-				}
-				open = nil
-				continue
-			}
-			args := make([]string, 0, len(tokens))
-			for _, tok := range tokens {
-				if tok.text == "(" {
-					return nil, errAt(name, tok.pos, "nested blocks are not supported")
-				}
-				args = append(args, tok.text)
-			}
-			open.Lines = append(open.Lines, &Line{
-				Keyword: open.Keyword,
-				Args:    args,
-				Comment: comment,
-				P:       Position{lineNo, tokens[0].pos.Col},
-			})
-			continue
-		}
-
-		if tokens[0].text == ")" {
-			return nil, errAt(name, tokens[0].pos, "unexpected closing parenthesis")
-		}
-		if tokens[0].text == "(" {
-			return nil, errAt(name, tokens[0].pos, "block must be introduced by a keyword")
-		}
-
-		keyword := tokens[0].text
-		rest := tokens[1:]
-
-		if len(rest) > 0 && rest[len(rest)-1].text == "(" {
-			if len(rest) > 1 {
-				return nil, errAt(name, rest[0].pos,
-					"%s ( must open a block on its own line; move %q inside the block",
-					keyword, rest[0].text)
-			}
-			open = &Block{Keyword: keyword, Comment: comment, P: Position{lineNo, tokens[0].pos.Col}}
-			file.Stmts = append(file.Stmts, open)
-			continue
-		}
-
-		args := make([]string, 0, len(rest))
-		for _, tok := range rest {
-			if tok.text == "(" || tok.text == ")" {
-				return nil, errAt(name, tok.pos, "unexpected %q", tok.text)
-			}
-			args = append(args, tok.text)
-		}
-		file.Stmts = append(file.Stmts, &Line{
-			Keyword: keyword,
-			Args:    args,
-			Comment: comment,
-			P:       Position{lineNo, tokens[0].pos.Col},
-		})
+		open = next
 	}
 
 	if open != nil {
@@ -213,38 +251,58 @@ func tokenise(file string, lineNo int, text string) ([]token, string, error) {
 		}
 
 		if runes[i] == '"' {
-			i++
-			for i < len(runes) && runes[i] != '"' {
-				if runes[i] == '\\' && i+1 < len(runes) {
-					i++
-				}
-				i++
-			}
-			if i >= len(runes) {
-				return nil, "", errAt(file, Position{lineNo, col}, "unterminated quoted string")
-			}
-			i++ // closing quote
-			unquoted, err := strconv.Unquote(string(runes[start:i]))
+			text, next, err := readQuoted(file, lineNo, col, runes, i)
 			if err != nil {
-				return nil, "", errAt(file, Position{lineNo, col}, "invalid quoted string: %v", err)
+				return nil, "", err
 			}
-			tokens = append(tokens, token{text: unquoted, pos: Position{lineNo, col}})
+			tokens = append(tokens, token{text: text, pos: Position{lineNo, col}})
+			i = next
 			continue
 		}
 
-		for i < len(runes) && runes[i] != ' ' && runes[i] != '\t' {
-			if runes[i] == '/' && i+1 < len(runes) && runes[i+1] == '/' {
-				break
-			}
-			if runes[i] == '(' || runes[i] == ')' {
-				break
-			}
-			i++
-		}
+		i = endOfBareToken(runes, i)
 		tokens = append(tokens, token{text: string(runes[start:i]), pos: Position{lineNo, col}})
 	}
 
 	return tokens, "", nil
+}
+
+// readQuoted consumes a double-quoted token starting at start, returning its
+// unquoted text and the index just past the closing quote.
+func readQuoted(file string, lineNo, col int, runes []rune, start int) (string, int, error) {
+	i := start + 1
+	for i < len(runes) && runes[i] != '"' {
+		// A backslash escapes whatever follows, the closing quote included.
+		if runes[i] == '\\' && i+1 < len(runes) {
+			i++
+		}
+		i++
+	}
+	if i >= len(runes) {
+		return "", 0, errAt(file, Position{lineNo, col}, "unterminated quoted string")
+	}
+	i++ // closing quote
+
+	unquoted, err := strconv.Unquote(string(runes[start:i]))
+	if err != nil {
+		return "", 0, errAt(file, Position{lineNo, col}, "invalid quoted string: %v", err)
+	}
+	return unquoted, i, nil
+}
+
+// endOfBareToken finds where an unquoted token ends: at whitespace, at a
+// comment, or at a self-delimiting parenthesis.
+func endOfBareToken(runes []rune, i int) int {
+	for i < len(runes) && runes[i] != ' ' && runes[i] != '\t' {
+		if runes[i] == '/' && i+1 < len(runes) && runes[i+1] == '/' {
+			break
+		}
+		if runes[i] == '(' || runes[i] == ')' {
+			break
+		}
+		i++
+	}
+	return i
 }
 
 func errAt(file string, pos Position, format string, args ...any) error {

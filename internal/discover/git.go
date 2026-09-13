@@ -104,7 +104,7 @@ func PreviousTag(ctx context.Context, dir string) (string, error) {
 	if err != nil {
 		// git describe exits non-zero when no tag exists. That is an ordinary
 		// state, not a failure.
-		return "", nil
+		return "", nil //nolint:nilerr // "no tag yet" is an answer, not an error
 	}
 	return out, nil
 }

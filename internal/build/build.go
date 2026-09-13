@@ -130,39 +130,15 @@ type Artifact struct {
 // Run compiles and packages every target, returning the artifacts sorted by
 // archive name so that two invocations are directly comparable.
 func Run(ctx context.Context, o Options) ([]Artifact, error) {
-	if o.WorkDir == "" {
-		return nil, fmt.Errorf("build: WorkDir is required")
-	}
-	if o.ModuleDir == "" {
-		return nil, fmt.Errorf("build: ModuleDir is required")
-	}
-	if o.Package == "" {
-		o.Package = "."
-	}
-	if o.Name == "" {
-		o.Name = "app"
-	}
-	targets := o.Targets
-	if len(targets) == 0 {
-		return nil, fmt.Errorf("build: no targets")
+	if err := o.normalise(); err != nil {
+		return nil, err
 	}
 
-	if err := os.MkdirAll(o.WorkDir, 0o755); err != nil {
+	if err := os.MkdirAll(o.WorkDir, 0o750); err != nil {
 		return nil, fmt.Errorf("build: creating work dir: %w", err)
 	}
 
-	// The date is part of the linker input, so it has to be derived from
-	// ModTime rather than read from the clock. This is the single most common
-	// way a release pipeline quietly stops being reproducible.
-	ldflags := []string{
-		"-X", "main.version=" + o.Version,
-		"-X", "main.commit=" + o.Commit,
-		"-X", "main.date=" + o.ModTime.UTC().Format(time.RFC3339),
-	}
-	if len(o.ExactLDFlags) > 0 {
-		ldflags = o.ExactLDFlags
-	}
-	ldflags = append(ldflags, o.ExtraLDFlags...)
+	ldflags := o.linkerFlags()
 	ldflagString := strings.Join(append([]string{"-s", "-w"}, ldflags...), " ")
 
 	// Resolved once, and only when it is going to be used: the cache key has
@@ -179,7 +155,7 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 	// The host target is built first so that the smoke check can run before
 	// anything else is compiled. Discovering that the binary does not start is
 	// worth a few seconds of build time, not the whole matrix.
-	targets = hostFirst(targets)
+	targets := hostFirst(o.Targets)
 
 	out := make([]Artifact, 0, len(targets))
 	cached := 0
@@ -187,10 +163,6 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 	for _, target := range targets {
 		binName := o.Name + target.Ext()
 		binPath := filepath.Join(o.WorkDir, fmt.Sprintf("%s_%s_%s", o.Name, target.OS, target.Arch), binName)
-
-		if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
-			return nil, fmt.Errorf("build: %w", err)
-		}
 
 		// The key covers everything that determines these bytes. A build
 		// reused on a partial key would be a build nobody can account for —
@@ -204,81 +176,19 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 				strings.Join(ldflags, " "), o.Toolchain, goVersion, binName)
 		}
 
-		if o.Cache.Get(key, binPath) {
+		reused, err := o.compile(ctx, target, binPath, key, ldflags)
+		if err != nil {
+			return nil, err
+		}
+		if reused {
 			cached++
-		} else {
-			if err := gobuild.Build(ctx, gobuild.Request{
-				Dir:       o.ModuleDir,
-				Package:   o.Package,
-				Output:    binPath,
-				Target:    target,
-				LDFlags:   ldflags,
-				GoBin:     o.GoBin,
-				Toolchain: o.Toolchain,
-			}); err != nil {
-				return nil, err
-			}
-			o.Cache.Put(key, binPath)
 		}
 
-		if o.Smoke != nil && target == gobuild.Host() {
-			warning, err := runSmoke(ctx, binPath, *o.Smoke)
-			if err != nil {
-				return nil, err
-			}
-			if warning != "" && o.Warnf != nil {
-				o.Warnf("%s", warning)
-			}
-		}
-
-		binSum, err := sha256File(binPath)
+		artifact, err := o.pack(target, binName, binPath, ldflagString)
 		if err != nil {
 			return nil, err
 		}
-		binInfo, err := os.Stat(binPath)
-		if err != nil {
-			return nil, fmt.Errorf("build: %w", err)
-		}
-
-		format := archive.FormatTarGz
-		if target.OS == "windows" {
-			format = archive.FormatZip
-		}
-
-		entries, err := entriesFor(binName, binPath, o.ModuleDir, o.ExtraFiles)
-		if err != nil {
-			return nil, err
-		}
-
-		archiveName := fmt.Sprintf("%s_%s_%s_%s%s", o.Name, o.Version, target.OS, target.Arch, format.Ext())
-		archivePath := filepath.Join(o.WorkDir, archiveName)
-
-		if err := writeArchive(archivePath, format, entries, o.ModTime); err != nil {
-			return nil, err
-		}
-
-		archiveSum, err := sha256File(archivePath)
-		if err != nil {
-			return nil, err
-		}
-		info, err := os.Stat(archivePath)
-		if err != nil {
-			return nil, fmt.Errorf("build: %w", err)
-		}
-
-		out = append(out, Artifact{
-			Archive:       archiveName,
-			Binary:        o.Name,
-			BinaryPath:    binPath,
-			Target:        target.String(),
-			OS:            target.OS,
-			Arch:          target.Arch,
-			Size:          info.Size(),
-			BinarySize:    binInfo.Size(),
-			LDFlags:       ldflagString,
-			BinarySHA256:  binSum,
-			ArchiveSHA256: archiveSum,
-		})
+		out = append(out, artifact)
 	}
 
 	if cached > 0 && o.Warnf != nil {
@@ -287,6 +197,129 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 
 	slices.SortFunc(out, func(a, b Artifact) int { return strings.Compare(a.Archive, b.Archive) })
 	return out, nil
+}
+
+// normalise fills in the defaults and rejects an unbuildable request.
+func (o *Options) normalise() error {
+	switch {
+	case o.WorkDir == "":
+		return fmt.Errorf("build: WorkDir is required")
+	case o.ModuleDir == "":
+		return fmt.Errorf("build: ModuleDir is required")
+	case len(o.Targets) == 0:
+		return fmt.Errorf("build: no targets")
+	}
+	if o.Package == "" {
+		o.Package = "."
+	}
+	if o.Name == "" {
+		o.Name = "app"
+	}
+	return nil
+}
+
+// linkerFlags builds the -X flags that carry the version metadata.
+//
+// The date is derived from ModTime rather than read from the clock. This is
+// the single most common way a release pipeline quietly stops being
+// reproducible.
+func (o Options) linkerFlags() []string {
+	ldflags := []string{
+		"-X", "main.version=" + o.Version,
+		"-X", "main.commit=" + o.Commit,
+		"-X", "main.date=" + o.ModTime.UTC().Format(time.RFC3339),
+	}
+	if len(o.ExactLDFlags) > 0 {
+		ldflags = o.ExactLDFlags
+	}
+	return append(ldflags, o.ExtraLDFlags...)
+}
+
+// compile produces one target's binary, reusing a cached one where the key
+// matches, and reports whether it did.
+func (o Options) compile(ctx context.Context, target gobuild.Target, binPath, key string, ldflags []string) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(binPath), 0o750); err != nil {
+		return false, fmt.Errorf("build: %w", err)
+	}
+
+	reused := o.Cache.Get(key, binPath)
+	if !reused {
+		if err := gobuild.Build(ctx, gobuild.Request{
+			Dir:       o.ModuleDir,
+			Package:   o.Package,
+			Output:    binPath,
+			Target:    target,
+			LDFlags:   ldflags,
+			GoBin:     o.GoBin,
+			Toolchain: o.Toolchain,
+		}); err != nil {
+			return false, err
+		}
+		o.Cache.Put(key, binPath)
+	}
+
+	if o.Smoke != nil && target == gobuild.Host() {
+		warning, err := runSmoke(ctx, binPath, *o.Smoke)
+		if err != nil {
+			return reused, err
+		}
+		if warning != "" && o.Warnf != nil {
+			o.Warnf("%s", warning)
+		}
+	}
+	return reused, nil
+}
+
+// pack wraps one target's binary in its archive and digests both.
+func (o Options) pack(target gobuild.Target, binName, binPath, ldflagString string) (Artifact, error) {
+	binSum, err := sha256File(binPath)
+	if err != nil {
+		return Artifact{}, err
+	}
+	binInfo, err := os.Stat(binPath)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("build: %w", err)
+	}
+
+	format := archive.FormatTarGz
+	if target.OS == "windows" {
+		format = archive.FormatZip
+	}
+
+	entries, err := entriesFor(binName, binPath, o.ModuleDir, o.ExtraFiles)
+	if err != nil {
+		return Artifact{}, err
+	}
+
+	archiveName := fmt.Sprintf("%s_%s_%s_%s%s", o.Name, o.Version, target.OS, target.Arch, format.Ext())
+	archivePath := filepath.Join(o.WorkDir, archiveName)
+
+	if err := writeArchive(archivePath, format, entries, o.ModTime); err != nil {
+		return Artifact{}, err
+	}
+
+	archiveSum, err := sha256File(archivePath)
+	if err != nil {
+		return Artifact{}, err
+	}
+	info, err := os.Stat(archivePath)
+	if err != nil {
+		return Artifact{}, fmt.Errorf("build: %w", err)
+	}
+
+	return Artifact{
+		Archive:       archiveName,
+		Binary:        o.Name,
+		BinaryPath:    binPath,
+		Target:        target.String(),
+		OS:            target.OS,
+		Arch:          target.Arch,
+		Size:          info.Size(),
+		BinarySize:    binInfo.Size(),
+		LDFlags:       ldflagString,
+		BinarySHA256:  binSum,
+		ArchiveSHA256: archiveSum,
+	}, nil
 }
 
 // hostFirst moves the host target to the front, leaving the rest in order.
@@ -330,10 +363,13 @@ func writeArchive(path string, format archive.Format, entries []archive.Entry, m
 		return fmt.Errorf("build: creating archive: %w", err)
 	}
 	if err := archive.Write(f, format, entries, modTime); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
-	return f.Close()
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("build: closing archive: %w", err)
+	}
+	return nil
 }
 
 func sha256File(path string) (string, error) {
@@ -341,7 +377,7 @@ func sha256File(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("build: hashing: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
