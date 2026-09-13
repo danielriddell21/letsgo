@@ -45,7 +45,7 @@ jobs:
           # for letsgo to identify the version from it.
           fetch-tags: true
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # Read from go.mod, which carries an exact patch version rather than
           # a major.minor. Compiler and linker output can differ between Go

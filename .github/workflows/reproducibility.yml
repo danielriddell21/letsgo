@@ -70,7 +70,7 @@ jobs:
       # toolchain is a build input, and the release manifest records it for the
       # same reason — reading it from go.mod keeps one source of truth, shared
       # with the shared workflow above.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: false
