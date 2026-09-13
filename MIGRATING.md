@@ -37,7 +37,7 @@ Everything in this table is already the behaviour. Deleting it changes nothing.
 |---|---|
 | a non-default `goos`/`goarch` list | `build linux/amd64` … |
 | extra `archives.files` | `archive NOTES.md` |
-| `brews.tap` | `brew owner/homebrew-tap` |
+| `brews.tap` | `brew owner/tap` (the `homebrew-` prefix is added for you) |
 | `release.draft: true` | `release draft=true` |
 | `project_name` differing from the module | `project name` |
 
@@ -118,10 +118,23 @@ taken from the commit. That is what makes them reproducible, and it means the
 bytes differ from what GoReleaser produced for the same source. Expect new
 checksums, and re-pin anything that recorded the old ones.
 
-**Two extra assets appear.** A source archive, because a forge's generated
-tarball is not guaranteed to be byte-stable and a Homebrew formula that pins
-its checksum inherits that risk; and `letsgo.json`, the manifest that makes
-`letsgo verify` possible.
+**Three extra assets appear.** A source archive, because a forge's generated
+tarball is not guaranteed to be byte-stable and anything that pins its checksum
+inherits that risk; `letsgo.json`, the manifest that makes `letsgo verify`
+possible; and `install.sh`, which carries each archive's digest inline so that
+installing verifies against a number recorded by the build.
+
+**Your tap gets one formula per command.** GoReleaser's `brews` block produces
+a single formula. letsgo writes `Formula/<binary>.rb` for each command the
+module builds, because a formula can only name one archive per platform. A
+single-command repository sees no difference; a multi-command one gains a
+formula per binary instead of an error.
+
+**A tap needs a token that is not the workflow's.** GitHub's default Actions
+token cannot write to another repository, GoReleaser or not. If your tap
+updates worked before, you already have a PAT or an App token configured —
+letsgo reads the same `GITHUB_TOKEN`. `letsgo plan --publish` reports the
+problem before anything is built rather than after everything is uploaded.
 
 **Version metadata comes from the commit, not the clock.** GoReleaser's
 `{{.Date}}` is when the build ran. letsgo uses the commit timestamp, because a

@@ -4,9 +4,9 @@ A release tool for Go. Only Go.
 
 > **Status: early.** letsgo releases itself, and reproducibility is proven
 > across Linux, macOS and Windows on every push. What it does today: `plan`,
-> `build`, `release`, `verify`, `diff`, `tag`, `fmt`. Homebrew taps and
-> container images are next. The full rationale, including the alternatives we
-> rejected, lives in [DESIGN.md](DESIGN.md).
+> `build`, `release`, `verify`, `diff`, `tag`, `fmt`, plus a generated
+> `install.sh` and Homebrew tap. Container images are next. The full rationale,
+> including the alternatives we rejected, lives in [DESIGN.md](DESIGN.md).
 
 ---
 
@@ -144,6 +144,35 @@ This one carries the digests, so substituting an archive fails:
 It is POSIX `sh`, needs only `tar` plus either `curl` or `wget`, and pins the
 exact version it was generated for — a script fetched from `/latest/` installs
 that release and stays pinned to it.
+
+### Homebrew
+
+Add one line to `letsgo.mod`:
+
+```
+brew danielriddell21/tap
+```
+
+Each release then writes a formula to that tap, one per command, pointing at
+the archives it just published with the digests it just recorded:
+
+```
+  uploaded 8, skipped 0
+  created Formula/letsgo.rb in danielriddell21/homebrew-tap
+```
+
+`desc` and `license` come from the repository's own description, not from more
+config. The generated `test do` block asserts the version the binary reports —
+letsgo has already run it and checked, so the formula can assert the same thing
+instead of merely proving the binary starts.
+
+Re-running a release renders the same bytes and writes nothing. A tap is
+someone else's repository, and filling its history with commits that say
+nothing changed is a cost somebody else pays.
+
+> Inside GitHub Actions the default token cannot write to another repository at
+> all, so a tap needs a PAT or an App token. `letsgo plan --publish` says so
+> before anything is built.
 
 ### Proving a release
 
@@ -365,9 +394,9 @@ Module proxy warm-up. `--snapshot`. `letsgo release`.
 latter.
 
 **M3 · Adoption**
-A migration guide rather than a converter. `letsgo diff`, size budgets, and a
-generated `install.sh` that carries its own digests. Homebrew tap generation
-pointed at our own source archive.
+A migration guide rather than a converter. `letsgo diff`, size budgets, a
+generated `install.sh` that carries its own digests, and Homebrew tap
+generation pointed at our own reproducible archives.
 
 *At the end of M3 letsgo can replace GoReleaser for the repos it targets, and
 does several things GoReleaser cannot.*

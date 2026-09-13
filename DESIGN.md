@@ -565,9 +565,45 @@ formulas among them — is exposed to that.
 
 letsgo therefore publishes its **own** source archive, built with the same
 deterministic writer as every other artifact (§7) and recorded in the manifest.
-Generated Homebrew formulas point at it rather than at the GitHub-generated
-one. The cost is one extra asset; the benefit is that a checksum we publish is
-a checksum we control.
+Anything downstream that needs to pin a source checksum — a distro package, a
+vendoring mirror, a build-from-source formula — can pin ours. The cost is one
+extra asset; the benefit is that a checksum we publish is a checksum we
+control.
+
+### Homebrew formulas
+
+A tap is generated from the release that just happened, one formula per command
+the module builds, each pointing at the prebuilt archives with the digests the
+manifest recorded. `brew install` then unpacks a binary rather than compiling
+one, and the digest it checks came from the build rather than from a checksum
+file served by the same page as the archive.
+
+Three decisions are worth stating:
+
+- **One formula per command.** A formula installs one archive per platform, so
+  a module with `alpha` and `beta` cannot express both in one. Generating
+  `Formula/alpha.rb` beside `Formula/beta.rb` is what a tap is shaped to hold
+  anyway; refusing the repository would have been the lazier answer.
+- **The `test do` block asserts the version.** letsgo has already run the
+  binary and confirmed it reports this version (§9), so the formula can assert
+  the same thing rather than merely proving the binary starts. That catches a
+  formula pointing at the wrong release, which is the failure a tap actually
+  has.
+- **An unchanged formula is not committed.** Rendering is deterministic, so
+  re-running a release — after a failed upload, or a corrected changelog —
+  produces identical bytes and writes nothing. A tap is someone else's
+  repository; filling its history with commits that say nothing happened is a
+  cost paid by whoever reads it later.
+
+`desc` and `license` come from the forge's own description of the repository
+rather than from two new config directives, and are omitted when it has none.
+Inventing either would be worse than leaving them out.
+
+The tap is checked during `plan`, before anything is built: a release that
+succeeds and then cannot write the formula has left the two out of step, which
+is worse than not starting. Inside GitHub Actions the check can only warn — the
+workflow token cannot write to another repository at all, so a tap needs a PAT
+or an App token, and the repository endpoint will not describe either.
 
 ---
 
@@ -743,8 +779,8 @@ the latter.
 
 **M3 — Adoption and afterlife**
 A migration guide (MIGRATING.md) rather than a converter. `letsgo diff`, size
-budgets, and a generated `install.sh` that carries its own digests. Homebrew
-tap generation pointed at our own source archive.
+budgets, a generated `install.sh` that carries its own digests, and Homebrew
+tap generation pointed at our own reproducible archives.
 
 *MVP complete. letsgo can now replace GoReleaser across the repos it targets,
 and does several things GoReleaser does not.*
@@ -804,6 +840,6 @@ reasoning stops holding.
    opinionated check in §9 and the most likely to annoy. Default-on with
    `--allow-breaking` is proposed, but default-warn is defensible for a first
    release while we learn its false-positive rate.
-5. ~~**M3 scope.**~~ Settled. `migrate` was dropped in favour of a guide, which
-   also returns the dependency budget to zero. `diff`, size budgets and
-   `install.sh` are built; Homebrew tap generation is what remains.
+5. ~~**M3 scope.**~~ Settled and complete. `migrate` was dropped in favour of a
+   guide, which also returns the dependency budget to zero; `diff`, size
+   budgets, `install.sh` and Homebrew tap generation are built.

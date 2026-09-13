@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
@@ -22,6 +23,11 @@ type Recorder struct {
 	// Existing is the release the run should believe already exists. Nil means
 	// the release would be created.
 	Existing *github.Release
+
+	// Files are repository files the run should believe are already there,
+	// keyed by path. A rehearsal of a Homebrew formula that is already correct
+	// should report that, not a write.
+	Files map[string][]byte
 
 	out    io.Writer
 	nextID int64
@@ -92,7 +98,7 @@ func (r *Recorder) UploadAsset(_ context.Context, _ github.Repo, releaseID int64
 		return nil, fmt.Errorf("publish: %s declared %d bytes but yielded %d", name, size, n)
 	}
 
-	r.record("POST upload %s (%s)", name, bytes(size))
+	r.record("POST upload %s (%s)", name, bytesize.Size(size))
 	r.nextID++
 	return &github.Asset{ID: r.nextID, Name: name, Size: size}, nil
 }
@@ -124,15 +130,21 @@ func summarise(body string) string {
 	return fmt.Sprintf("%s … (%d lines)", first, len(lines))
 }
 
-func bytes(n int64) string {
-	const unit = 1024
-	if n < unit {
-		return fmt.Sprintf("%d B", n)
+func (r *Recorder) ReadFile(_ context.Context, repo github.Repo, path string) (*github.File, error) {
+	content, ok := r.Files[path]
+	if !ok {
+		r.record("GET  %s/%s -> not found", repo, path)
+		return nil, nil
 	}
-	div, exp := int64(unit), 0
-	for n/div >= unit && exp < 3 {
-		div *= unit
-		exp++
+	r.record("GET  %s/%s -> %s", repo, path, bytesize.Size(len(content)))
+	return &github.File{Path: path, SHA: "recorded", Content: content}, nil
+}
+
+func (r *Recorder) WriteFile(_ context.Context, repo github.Repo, in github.FileInput) error {
+	verb := "create"
+	if in.SHA != "" {
+		verb = "update"
 	}
-	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGT"[exp])
+	r.record("PUT  %s %s/%s (%s) %q", verb, repo, in.Path, bytesize.Size(len(in.Content)), in.Message)
+	return nil
 }
