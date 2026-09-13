@@ -39,6 +39,7 @@ letsgo verify [tag]                    rebuild a published release and compare i
 letsgo diff <from> [to]                compare two releases: size, dependencies, API
 letsgo tag [--major|--minor|--patch]   work out the next version and tag it
 letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
+letsgo update [--check]                update letsgo itself, verified against its manifest
 letsgo fmt [file]                      format letsgo.mod
 letsgo version                         print the version (also --version)
 ```
@@ -56,6 +57,27 @@ letsgo plan            # no side effects; --explain shows where each value came 
 letsgo release         # idempotent, so a failed run resumes rather than restarts
 letsgo verify v1.3.0   # rebuild it and check it against what was published
 ```
+
+## Self-update
+
+Any binary released with letsgo gets verified self-update for the cost of an
+import. The release manifest records each archive's digest and the digest of
+the binary inside it, so the updater checks what it downloaded twice and
+refuses anything that does not match:
+
+```go
+update, err := selfupdate.Check(ctx, selfupdate.Options{
+	Repo:    "you/tool",
+	Current: version,
+})
+if err != nil || update == nil {
+	return err // a nil update means the running binary is current
+}
+return update.Apply(ctx)
+```
+
+Nothing is written until `Apply`, so a program can offer the update rather than
+take it. `letsgo update` is the same package, pointed at letsgo.
 
 ## Documentation
 

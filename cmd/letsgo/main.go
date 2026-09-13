@@ -44,6 +44,7 @@ usage:
   letsgo diff <from> [to]                compare two releases: size, dependencies, API
   letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
   letsgo tag [--major|--minor|--patch]   work out the next version and tag it
+  letsgo update [--check]                update letsgo itself, verified against its manifest
   letsgo fmt [file]                      format letsgo.mod
   letsgo version                         print the version (also --version)
 
@@ -72,6 +73,8 @@ func main() {
 		err = runDiff(args)
 	case "yank":
 		err = runYank(args)
+	case "update":
+		err = runUpdate(args)
 	case "tag":
 		err = runTag(args)
 	case "fmt":
