@@ -35,6 +35,10 @@ type Config struct {
 	// decides what gets built is a build input.
 	Plugins []Plugin
 
+	// CGo enables cgo and names the C toolchain to compile it with. Nil means
+	// off, which is the default and what every pure-Go repository wants.
+	CGo *CGo
+
 	// Tags are build tags. They change the compiled bytes deterministically
 	// and are pinned by the commit like any other config, so they cost the
 	// reproducibility claim nothing.
@@ -68,6 +72,20 @@ type Config struct {
 
 	// Draft creates the release without publishing it.
 	Draft bool
+}
+
+// CGo is the cgo build settings.
+//
+// The compiler is pinned rather than inherited: two C compilers produce
+// different bytes from the same source, so a release built with whatever the
+// machine had could not be reproduced anywhere else.
+type CGo struct {
+	// ZigVersion is the zig release to compile with. Empty means letsgo's
+	// default.
+	ZigVersion string
+
+	// ZigDigest pins a version letsgo ships no digest for.
+	ZigDigest string
 }
 
 // Plugin is one external program invoked at a named hook.
@@ -124,6 +142,7 @@ var known = map[string]string{
 	"module":  "module <dir>",
 	"build":   "build <goos/goarch>... or a build ( ... ) block",
 	"tags":    "tags <tag>...",
+	"cgo":     "cgo on, or cgo zig <version> [sha256:<digest>]",
 	"plugin":  "plugin <hook> <command> <version> sha256:<digest>",
 	"ldflags": "ldflags <flag>...",
 	"version": "version <symbol>, or version commit|date <symbol>",
@@ -140,6 +159,7 @@ var handlers = map[string]func(cfg *Config, file string, line *Line) error{
 	"module":  applyModule,
 	"build":   applyBuild,
 	"tags":    applyTags,
+	"cgo":     applyCGo,
 	"plugin":  applyPlugin,
 	"ldflags": applyLDFlags,
 	"version": applyVersion,
@@ -299,7 +319,7 @@ func applyPlugin(cfg *Config, file string, line *Line) error {
 			return errAt(file, line.P, "a plugin for the %s hook is already set", hook)
 		}
 	}
-	if !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
+	if !isSHA256(digest) {
 		return errAt(file, line.P, "plugin %s: %q is not a sha256 digest", command, digest)
 	}
 
@@ -307,6 +327,52 @@ func applyPlugin(cfg *Config, file string, line *Line) error {
 		Hook: hook, Command: command, Version: version, Digest: digest,
 	})
 	return nil
+}
+
+// isSHA256 reports whether s is a "sha256:" digest of the right length.
+//
+// Both the plugin and cgo directives pin an artifact this way, and a pin that
+// parsed loosely in one of them would be a pin in name only.
+func isSHA256(s string) bool {
+	const prefix = "sha256:"
+	return strings.HasPrefix(s, prefix) && len(s) == len(prefix)+64
+}
+
+// applyCGo reads the cgo settings.
+//
+// `cgo on` is the whole of it for most repositories: letsgo picks the compiler
+// and records which one it used. Naming a version is for a repository that
+// needs a particular zig, and a digest for one letsgo does not ship a pin for.
+func applyCGo(cfg *Config, file string, line *Line) error {
+	if cfg.CGo != nil {
+		return errAt(file, line.P, "cgo is already set")
+	}
+
+	switch {
+	case len(line.Args) == 1 && line.Args[0] == "on":
+		cfg.CGo = &CGo{}
+		return nil
+
+	case len(line.Args) >= 2 && line.Args[0] == "zig":
+		settings := &CGo{ZigVersion: line.Args[1]}
+		switch len(line.Args) {
+		case 2:
+		case 3:
+			digest := line.Args[2]
+			if !isSHA256(digest) {
+				return errAt(file, line.P, "cgo zig %s: %q is not a sha256 digest",
+					settings.ZigVersion, digest)
+			}
+			settings.ZigDigest = digest
+		default:
+			return arity(file, line)
+		}
+		cfg.CGo = settings
+		return nil
+
+	default:
+		return arity(file, line)
+	}
 }
 
 func applyLDFlags(cfg *Config, file string, line *Line) error {

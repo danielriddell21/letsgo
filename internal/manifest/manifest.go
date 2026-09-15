@@ -106,6 +106,12 @@ type Builder struct {
 	Tool string `json:"tool"`
 	Go   string `json:"go"`
 
+	// CC is the C toolchain a cgo release compiled with, absent when cgo was
+	// off. Recorded for the same reason Go is: two C compilers emit different
+	// code from identical source, so reproducing the release means using the
+	// one it names.
+	CC *CCompiler `json:"cc,omitempty"`
+
 	// Plugins are the external programs that took part, pinned to the exact
 	// executables that ran.
 	//
@@ -114,6 +120,26 @@ type Builder struct {
 	// verification replays the result and never runs a plugin. This is what
 	// says one took part at all.
 	Plugins []BuilderPlugin `json:"plugins,omitempty"`
+}
+
+// CCompiler identifies the C toolchain, pinned to the artifact it came from.
+type CCompiler struct {
+	// Name is the toolchain, e.g. "zig".
+	Name    string `json:"name"`
+	Version string `json:"version"`
+
+	// Digest is the SHA-256 of the published archive it was obtained from, so
+	// a verifier fetches the same compiler rather than a same-numbered one.
+	Digest string `json:"digest"`
+
+	// Host is the platform the compiler ran on, as GOOS/GOARCH.
+	//
+	// Recorded because it is an input the compiler does not remove: the same
+	// pinned zig, compiling the same C for the same target, emits different
+	// objects on a Linux host than on a macOS one. A cgo artifact therefore
+	// reproduces on a host like the one that built it, and this says which
+	// that was. Pure-Go artifacts are unaffected and reproduce anywhere.
+	Host string `json:"host"`
 }
 
 // BuilderPlugin is one plugin that ran during a release.

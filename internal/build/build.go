@@ -25,6 +25,7 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/archive"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
+	"github.com/danielriddell21/letsgo/internal/zig"
 )
 
 // Options describes a set of artifacts to produce.
@@ -80,6 +81,9 @@ type Options struct {
 
 	// Tags are build tags passed to the compiler.
 	Tags []string
+
+	// CGo is the C toolchain to compile cgo with. Zero means cgo stays off.
+	CGo zig.Toolchain
 
 	// Symbols names the variables the version metadata is injected into.
 	// Zero means main.version, main.commit and main.date.
@@ -245,6 +249,17 @@ func (o *Options) normalise() error {
 	return nil
 }
 
+// compilers returns the C and C++ commands for a target, or empty strings when
+// cgo is off.
+func (o Options) compilers(target gobuild.Target) (cc, cxx string) {
+	if o.CGo.Path == "" {
+		return "", ""
+	}
+	cc, _ = o.CGo.CC(target)
+	cxx, _ = o.CGo.CXX(target)
+	return cc, cxx
+}
+
 // VersionSymbols names the variables the version metadata is injected into,
 // fully qualified as the linker writes them.
 type VersionSymbols struct {
@@ -300,6 +315,8 @@ func (o Options) compile(
 		return false, fmt.Errorf("build: %w", err)
 	}
 
+	cc, cxx := o.compilers(target)
+
 	reused := o.Cache.Get(key, binPath)
 	if !reused {
 		if err := gobuild.Build(ctx, gobuild.Request{
@@ -307,6 +324,8 @@ func (o Options) compile(
 			Package:   pkg,
 			Output:    binPath,
 			Tags:      o.Tags,
+			CC:        cc,
+			CXX:       cxx,
 			Target:    target,
 			LDFlags:   ldflags,
 			GoBin:     o.GoBin,
@@ -362,8 +381,12 @@ func (o Options) compileAll(
 		// another.
 		var key string
 		if o.CacheKey != "" {
+			// The C toolchain is in here for the same reason the Go one is: it
+			// determines the bytes, so an entry compiled by one compiler must
+			// never be handed back for a build using another.
 			key = CacheKey(o.CacheKey, cmd.Package, target.String(),
-				strings.Join(ldflags, " "), o.Toolchain, goVersion, binName)
+				strings.Join(ldflags, " "), strings.Join(o.Tags, ","),
+				o.Toolchain, goVersion, o.CGo.Digest, binName)
 		}
 
 		reused, err := o.compile(ctx, cmd.Package, target, binPath, key, ldflags)

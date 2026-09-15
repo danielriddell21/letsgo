@@ -33,6 +33,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/semver"
+	"github.com/danielriddell21/letsgo/internal/zig"
 )
 
 // ConfigFile is the optional configuration file letsgo reads.
@@ -472,6 +473,10 @@ type Plan struct {
 
 	// Tags are build tags passed to the compiler.
 	Tags []string
+
+	// CGo is the C toolchain a cgo release compiles with. Zero means cgo is
+	// off, which is the default.
+	CGo zig.Toolchain
 
 	// Symbols names the variables the version metadata is injected into,
 	// fully qualified. It defaults to the conventional main.version,
@@ -1167,6 +1172,72 @@ func (p *Plan) resolveTargets(ctx context.Context) {
 	p.add("targets", Pass, "%d targets, all buildable by this toolchain", len(p.Targets))
 
 	p.resolveTags()
+	p.resolveCGo(ctx)
+}
+
+// resolveCGo obtains the C toolchain, and establishes that every target can
+// actually be built with it.
+//
+// §7 says CGO_ENABLED=0 "unless explicitly overridden in config". This is that
+// override, and what makes it bearable is that the compiler is obtained rather
+// than inherited: a pinned zig, not whatever cc the machine happens to carry.
+//
+// It does not make cgo hermetic. The pin fixes the compiler; it does not fix
+// the machine the compiler runs on, and zig's code generation depends on that
+// — demonstrated in CI by compiling one C file with nothing but the pinned
+// compiler and finding the objects differ on every runner. So a cgo release
+// reproduces byte for byte on a host like the one that built it, the manifest
+// records which that was, and `verify` reports rather than requires a match
+// elsewhere. Pure-Go releases keep the unqualified claim.
+func (p *Plan) resolveCGo(ctx context.Context) {
+	if p.Config.CGo == nil {
+		return
+	}
+
+	// Named before it is fetched, so a plan that cannot proceed still says
+	// which targets were the problem rather than failing on a download first.
+	var unsupported []string
+	for _, target := range p.Targets {
+		if _, ok := zig.Target(target); !ok {
+			unsupported = append(unsupported, target.String())
+		}
+	}
+	if len(unsupported) > 0 {
+		p.add("cgo", Fail,
+			"cgo cannot be cross-compiled to %s from here\n"+
+				"  zig carries a libc for macOS but not Apple's frameworks, and Go's darwin\n"+
+				"  runtime links CoreFoundation, so those targets need a macOS host",
+			strings.Join(unsupported, ", "))
+		return
+	}
+
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		p.add("cgo", Fail, "cgo: %v", err)
+		return
+	}
+
+	toolchain, err := zig.Ensure(ctx,
+		p.Config.CGo.ZigVersion, p.Config.CGo.ZigDigest, filepath.Join(cache, "letsgo"))
+	if err != nil {
+		p.add("cgo", Fail, "%v", err)
+		return
+	}
+
+	p.CGo = toolchain
+	p.note("c toolchain", "zig "+toolchain.Version, ConfigFile)
+	p.add("cgo", Pass, "enabled, compiling with zig %s (%s)\n"+
+		"  these artifacts reproduce on a %s host; the manifest records it, because\n"+
+		"  zig generates host-dependent code and a verifier elsewhere cannot match them",
+		toolchain.Version, short(toolchain.Digest), gobuild.Host())
+}
+
+// short abbreviates a digest for a human-readable line.
+func short(digest string) string {
+	if trimmed, ok := strings.CutPrefix(digest, "sha256:"); ok && len(trimmed) >= 12 {
+		return trimmed[:12]
+	}
+	return digest
 }
 
 // resolveTags reads the build tags.

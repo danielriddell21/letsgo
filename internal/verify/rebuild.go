@@ -20,6 +20,15 @@ import (
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/zig"
+)
+
+// cToolchain and cToolchainHost name the two checks that describe the C
+// compiler: which one it was, and what it ran on. Both are inputs, and the
+// second is one the compiler does not remove.
+const (
+	cToolchain     = "c toolchain"
+	cToolchainHost = "c toolchain host"
 )
 
 // maxSourceFile bounds one entry extracted from a source archive. The archive
@@ -42,6 +51,11 @@ func rebuild(ctx context.Context, o Options, result *Result, release *github.Rel
 
 	checkToolchain(ctx, result, m)
 
+	cgo, ok := obtainCCompiler(ctx, result, m)
+	if !ok {
+		return
+	}
+
 	moduleDir := filepath.Join(source, filepath.FromSlash(m.ModuleDir))
 
 	commands, err := discover.FindMainPackages(moduleDir, m.Project)
@@ -50,7 +64,35 @@ func rebuild(ctx context.Context, o Options, result *Result, release *github.Rel
 		return
 	}
 
-	compareRebuilt(ctx, o, result, m, source, moduleDir, commands)
+	compareRebuilt(ctx, o, result, rebuildInputs{
+		m:         m,
+		source:    source,
+		moduleDir: moduleDir,
+		cgo:       cgo,
+		sameHost:  sameCCompilerHost(result, m),
+		commands:  commands,
+	})
+}
+
+// rebuildInputs is what a rebuild needs: the release being checked, the tree it
+// is checked against, and the compilers that do it.
+type rebuildInputs struct {
+	m         *manifest.Manifest
+	source    string
+	moduleDir string
+	cgo       zig.Toolchain
+
+	// sameHost says whether cgo artifacts may be held to their digests, which
+	// they may only on a host like the one that built them.
+	sameHost bool
+
+	commands []discover.MainPackage
+}
+
+// hostBound reports whether an artifact's digest depends on the host that
+// compiled it, and so cannot be required to match on this one.
+func (in rebuildInputs) hostBound(a manifest.Artifact) bool {
+	return !in.sameHost && a.Build.Env["CGO_ENABLED"] == "1"
 }
 
 // obtainSource produces a tree to rebuild from.
@@ -132,78 +174,176 @@ func checkToolchain(ctx context.Context, result *Result, m *manifest.Manifest) {
 		local, m.Builder.Go)
 }
 
-func compareRebuilt(
+// obtainCCompiler fetches the C toolchain the release recorded.
+//
+// The same compiler, not merely the same version: the manifest pins the
+// archive it came from, so a verifier gets the bytes the release was built
+// with rather than whatever now carries that version number. Without this a
+// cgo release could not be checked at all, which is the whole reason the
+// manifest records it.
+func obtainCCompiler(
 	ctx context.Context,
-	o Options,
 	result *Result,
 	m *manifest.Manifest,
-	source, moduleDir string,
-	commands []discover.MainPackage,
-) {
-	groups, err := rebuildGroups(m, commands)
+) (zig.Toolchain, bool) {
+	cc := m.Builder.CC
+	if cc == nil {
+		return zig.Toolchain{}, true
+	}
+	if cc.Name != "zig" {
+		result.add(cToolchain, Fail,
+			"the release was built with %q, which this letsgo cannot obtain", cc.Name)
+		return zig.Toolchain{}, false
+	}
+
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		result.add(cToolchain, Fail, "%v", err)
+		return zig.Toolchain{}, false
+	}
+
+	toolchain, err := zig.Ensure(ctx, cc.Version, cc.Digest, filepath.Join(cache, "letsgo"))
+	if err != nil {
+		result.add(cToolchain, Fail, "%v", err)
+		return zig.Toolchain{}, false
+	}
+
+	result.add(cToolchain, Pass, "zig %s, as recorded", toolchain.Version)
+	return toolchain, true
+}
+
+// sameCCompilerHost reports whether this machine is the kind of machine the
+// release's cgo artifacts were compiled on.
+//
+// It matters because the C toolchain is pinned but not hermetic: the same zig,
+// compiling the same source for the same target, emits different objects on a
+// Linux host than on a macOS one. Verified in CI by compiling a bare C file
+// with nothing but the pinned compiler and comparing the objects, which differ
+// on all three runners.
+//
+// So a cgo release reproduces byte for byte on a host like the one that built
+// it, and elsewhere reproduces only its pure-Go artifacts. Saying so up front
+// is the difference between a narrower claim and a broken one.
+func sameCCompilerHost(result *Result, m *manifest.Manifest) bool {
+	cc := m.Builder.CC
+	if cc == nil {
+		return true
+	}
+
+	local := gobuild.Host().String()
+	switch cc.Host {
+	case "":
+		result.add(cToolchainHost, Warn,
+			"the release does not record the host it was built on, so its cgo artifacts cannot be held to a digest here")
+		return false
+	case local:
+		result.add(cToolchainHost, Pass, "%s, as recorded", local)
+		return true
+	default:
+		result.add(cToolchainHost, Warn,
+			"built on %s, verifying on %s; zig generates host-dependent code, so cgo artifacts are\n"+
+				"reported but not required to match — rebuild on %s to hold them to a digest",
+			cc.Host, local, cc.Host)
+		return false
+	}
+}
+
+func compareRebuilt(ctx context.Context, o Options, result *Result, in rebuildInputs) {
+	groups, err := rebuildGroups(in.m, in.commands)
 	if err != nil {
 		result.add("rebuild", Fail, "%v", err)
 		return
 	}
 
-	var problems []string
-	matched := 0
-
+	var tally comparison
 	for _, group := range groups {
 		produced, err := build.Run(ctx, build.Options{
-			ModuleDir:    moduleDir,
-			FilesDir:     source,
+			ModuleDir:    in.moduleDir,
+			FilesDir:     in.source,
 			Commands:     group.commands,
 			Name:         group.name,
-			Version:      m.Version,
-			ModTime:      sourceDate(m),
+			Version:      in.m.Version,
+			ModTime:      sourceDate(in.m),
 			Targets:      group.targets,
-			ExtraFiles:   build.FindDocumentation(source),
+			ExtraFiles:   build.FindDocumentation(in.source),
 			ExactLDFlags: exactFlags(group.artifacts),
 			Tags:         recordedTags(group.artifacts),
-			Toolchain:    m.Builder.Go,
+			CGo:          in.cgo,
+			Toolchain:    in.m.Builder.Go,
 			WorkDir:      filepath.Join(o.WorkDir, "rebuild"),
 		})
 		if err != nil {
 			result.add("rebuild", Fail, "%v", err)
 			return
 		}
+		tally.collect(in, produced)
+	}
+	tally.report(result, in.m)
+}
 
-		for _, got := range produced {
-			want, ok := m.Artifact(got.Archive)
-			if !ok {
-				continue
-			}
-			switch differing := differingBinaries(got, want); {
-			case len(differing) > 0:
-				// Reported first: if the binaries differ, nothing downstream
-				// of the compiler is worth investigating yet.
-				problems = append(problems,
-					fmt.Sprintf("%s: %s", got.Target, strings.Join(differing, "; ")))
-			case got.ArchiveSHA256 != want.SHA256:
-				problems = append(problems, fmt.Sprintf(
-					"%s: binaries match but the archive does not (%s vs %s)",
-					got.Target, short(got.ArchiveSHA256), short(want.SHA256)))
-			default:
-				matched++
-			}
+// comparison is what rebuilding established, artifact by artifact.
+//
+// Differences are kept in two piles rather than one, because they do not mean
+// the same thing: a pure-Go artifact that does not reproduce is a failure,
+// while a cgo artifact rebuilt on a host unlike the one that built it was never
+// claimed to.
+type comparison struct {
+	matched   int
+	problems  []string
+	hostBound []string
+}
+
+// collect compares one group's rebuilt artifacts against the manifest.
+func (c *comparison) collect(in rebuildInputs, produced []build.Artifact) {
+	for _, got := range produced {
+		want, ok := in.m.Artifact(got.Archive)
+		if !ok {
+			continue
 		}
+
+		var detail string
+		switch differing := differingBinaries(got, want); {
+		case len(differing) > 0:
+			// Reported first: if the binaries differ, nothing downstream of
+			// the compiler is worth investigating yet.
+			detail = fmt.Sprintf("%s: %s", got.Target, strings.Join(differing, "; "))
+		case got.ArchiveSHA256 != want.SHA256:
+			detail = fmt.Sprintf("%s: binaries match but the archive does not (%s vs %s)",
+				got.Target, short(got.ArchiveSHA256), short(want.SHA256))
+		default:
+			c.matched++
+			continue
+		}
+
+		if in.hostBound(want) {
+			c.hostBound = append(c.hostBound, detail)
+		} else {
+			c.problems = append(c.problems, detail)
+		}
+	}
+}
+
+// report turns the tally into checks.
+func (c *comparison) report(result *Result, m *manifest.Manifest) {
+	if len(c.hostBound) > 0 {
+		result.add("cgo rebuild", Warn, "%s", strings.Join(append(c.hostBound,
+			"these were compiled on another host, where zig generates different code;",
+			"rebuild on that host to hold them to a digest"), "\n"))
 	}
 
 	switch {
-	case len(problems) > 0:
+	case len(c.problems) > 0:
 		// A mismatch is usually a real difference, but one cause is neither a
 		// defect nor obvious: a repository that does not pin its line endings
 		// checks out differently on Windows, so the same commit yields
 		// different source and therefore different bytes.
-		problems = append(problems,
+		result.add("rebuild", Fail, "%s", strings.Join(append(c.problems,
 			"if this repository has no .gitattributes pinning line endings, a checkout",
-			"on Windows will differ from one on Linux and cannot reproduce either")
-		result.add("rebuild", Fail, "%s", strings.Join(problems, "\n"))
-	case matched == 0:
+			"on Windows will differ from one on Linux and cannot reproduce either"), "\n"))
+	case c.matched == 0 && len(c.hostBound) == 0:
 		result.add("rebuild", Fail, "nothing was rebuilt; the manifest describes artifacts this source does not produce")
 	default:
-		result.add("rebuild", Pass, "%d of %d artifacts reproduce byte for byte", matched, len(m.Artifacts))
+		result.add("rebuild", Pass, "%d of %d artifacts reproduce byte for byte", c.matched, len(m.Artifacts))
 	}
 }
 

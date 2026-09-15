@@ -57,7 +57,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # ubuntu-24.04 is here to be a second linux/amd64 machine, not a second
+        # distribution: cgo digests are only compared within a host platform,
+        # so without a pair of them that comparison would have nothing to
+        # compare and would pass by having nothing to say.
+        os: [ubuntu-latest, ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -94,21 +98,37 @@ jobs:
         with:
           path: digests
 
-      - name: every machine must produce identical artifacts
+      # Two claims, because they are not the same claim.
+      #
+      # Everything letsgo compiles with the Go toolchain alone must be
+      # byte-identical on every runner. That is the claim a third party relies
+      # on, and it is absolute.
+      #
+      # cgo is narrower. zig is pinned by digest, but it is not hermetic: the
+      # same compiler, compiling the same C for the same target, emits
+      # different objects depending on the machine it runs on — which
+      # cc_objects demonstrates directly, with no Go involved. So cgo digests
+      # are compared within a host platform and reported across them, and
+      # letsgo.json records the host so a verifier knows which it has.
+      - name: every machine must produce identical pure-Go artifacts
         run: |
           set -euo pipefail
           reference=""
           failed=0
 
           for file in digests/*/digests.json; do
-            echo "--- $file"
+            shared="${file%.json}.shared.json"
+            jq -S 'del(.host, .cc_objects, .cgo_artifacts)' "$file" > "$shared"
+
+            echo "--- $file (host $(jq -r .host "$file"))"
             cat "$file"
+
             if [ -z "$reference" ]; then
-              reference="$file"
+              reference="$shared"
               continue
             fi
-            if ! diff -u "$reference" "$file"; then
-              echo "::error::artifacts differ between $reference and $file"
+            if ! diff -u "$reference" "$shared"; then
+              echo "::error::artifacts differ between $reference and $shared"
               failed=1
             fi
           done
@@ -117,4 +137,37 @@ jobs:
             echo "::error::builds are not reproducible across machines"
             exit 1
           fi
-          echo "all machines produced byte-identical artifacts"
+          echo "all machines produced byte-identical pure-Go artifacts"
+
+      - name: cgo artifacts must agree within a host platform
+        run: |
+          set -euo pipefail
+          failed=0
+
+          # Group the reports by the platform that produced them. Two runners
+          # of the same platform must agree; two of different platforms are
+          # not being asked to.
+          for host in $(jq -rs 'map(.host) | unique[]' digests/*/digests.json); do
+            reference=""
+            for file in digests/*/digests.json; do
+              [ "$(jq -r .host "$file")" = "$host" ] || continue
+
+              cgo="${file%.json}.cgo.json"
+              jq -S '{cc, cc_objects, cgo_artifacts}' "$file" > "$cgo"
+
+              if [ -z "$reference" ]; then
+                reference="$cgo"
+                continue
+              fi
+              if ! diff -u "$reference" "$cgo"; then
+                echo "::error::cgo artifacts differ between two $host machines"
+                failed=1
+              fi
+            done
+            echo "$host: cgo artifacts agree"
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::cgo builds are not reproducible on a single host platform"
+            exit 1
+          fi

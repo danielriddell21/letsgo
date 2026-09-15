@@ -12,6 +12,7 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/repro"
+	"github.com/danielriddell21/letsgo/internal/zig"
 )
 
 // A fixed instant standing in for a commit timestamp. Nothing in a release may
@@ -76,7 +77,7 @@ func TestReproducibleAcrossRuns(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 
 	second := build(t, "b", false)
-	compare(t, first, second)
+	compare(t, "fixture", first, second)
 }
 
 // The build cache is a plausible hiding place for nondeterminism: a cached
@@ -89,7 +90,7 @@ func TestReproducibleFromColdCache(t *testing.T) {
 	}
 	first := build(t, "cold-a", true)
 	second := build(t, "cold-b", true)
-	compare(t, first, second)
+	compare(t, "fixture", first, second)
 }
 
 // Injected version metadata has to actually reach the binary. Checking the
@@ -124,52 +125,70 @@ func TestVersionMetadataReachesTheBinary(t *testing.T) {
 	}
 }
 
-func compare(t *testing.T, first, second []repro.Artifact) {
+// compare asserts that two runs of the same release agree on everything they
+// publish: the archives, the image assembled from them, and the SBOM.
+func compare(t *testing.T, binary string, first, second []repro.Artifact) {
 	t.Helper()
 
 	if len(first) != len(second) {
 		t.Fatalf("artifact count differs: %d vs %d", len(first), len(second))
 	}
-
 	for i := range first {
-		a, b := first[i], second[i]
-		if a.Archive != b.Archive {
-			t.Errorf("artifact %d name differs: %s vs %s", i, a.Archive, b.Archive)
-			continue
-		}
+		compareArtifact(t, i, first[i], second[i])
+	}
+	compareImage(t, binary, first, second)
+	compareSBOM(t, first, second)
 
-		// Report the binaries first. If they match and the archives do not,
-		// the archive writer is at fault; if they differ, nothing downstream
-		// of the compiler is worth investigating yet.
-		if len(a.Binaries) != len(b.Binaries) {
-			t.Errorf("%s: %d binaries vs %d", a.Target, len(a.Binaries), len(b.Binaries))
-			continue
-		}
-		differed := false
-		for j := range a.Binaries {
-			if a.Binaries[j].SHA256 != b.Binaries[j].SHA256 {
-				t.Errorf("%s: %s is not reproducible\n  run 1: %s\n  run 2: %s",
-					a.Target, a.Binaries[j].Name, a.Binaries[j].SHA256, b.Binaries[j].SHA256)
-				differed = true
-			}
-		}
-		if differed {
-			continue
-		}
-		if a.ArchiveSHA256 != b.ArchiveSHA256 {
-			t.Errorf("%s: binary matches but archive does not — the archive writer is leaking state\n  run 1: %s\n  run 2: %s",
-				a.Target, a.ArchiveSHA256, b.ArchiveSHA256)
-		}
+	if !t.Failed() {
+		t.Logf("%d artifacts, the image and the SBOM reproduced byte for byte on %s/%s",
+			len(first), runtime.GOOS, runtime.GOARCH)
+	}
+}
+
+// compareArtifact reports the binaries before the archive. If they match and
+// the archive does not, the archive writer is at fault; if they differ,
+// nothing downstream of the compiler is worth investigating yet.
+func compareArtifact(t *testing.T, i int, a, b repro.Artifact) {
+	t.Helper()
+
+	if a.Archive != b.Archive {
+		t.Errorf("artifact %d name differs: %s vs %s", i, a.Archive, b.Archive)
+		return
+	}
+	if len(a.Binaries) != len(b.Binaries) {
+		t.Errorf("%s: %d binaries vs %d", a.Target, len(a.Binaries), len(b.Binaries))
+		return
 	}
 
-	// The container image is published with the same promise, and is assembled
-	// from these same binaries — so if it does not reproduce, the fault is in
-	// the layer writer or the config, and that distinction is worth having.
-	firstImage, err := repro.ImageDigest(first, "fixture", commitTime)
+	differed := false
+	for j := range a.Binaries {
+		if a.Binaries[j].SHA256 != b.Binaries[j].SHA256 {
+			t.Errorf("%s: %s is not reproducible\n  run 1: %s\n  run 2: %s",
+				a.Target, a.Binaries[j].Name, a.Binaries[j].SHA256, b.Binaries[j].SHA256)
+			differed = true
+		}
+	}
+	if differed {
+		return
+	}
+	if a.ArchiveSHA256 != b.ArchiveSHA256 {
+		t.Errorf("%s: binary matches but archive does not — the archive writer is leaking state\n  run 1: %s\n  run 2: %s",
+			a.Target, a.ArchiveSHA256, b.ArchiveSHA256)
+	}
+}
+
+// compareImage checks the container image, which is published with the same
+// promise and assembled from these same binaries — so if it does not
+// reproduce, the fault is in the layer writer or the config, and that
+// distinction is worth having.
+func compareImage(t *testing.T, binary string, first, second []repro.Artifact) {
+	t.Helper()
+
+	firstImage, err := repro.ImageDigest(first, binary, commitTime)
 	if err != nil {
 		t.Fatalf("assembling the first image: %v", err)
 	}
-	secondImage, err := repro.ImageDigest(second, "fixture", commitTime)
+	secondImage, err := repro.ImageDigest(second, binary, commitTime)
 	if err != nil {
 		t.Fatalf("assembling the second image: %v", err)
 	}
@@ -177,10 +196,14 @@ func compare(t *testing.T, first, second []repro.Artifact) {
 		t.Errorf("the container image is not reproducible\n  run 1: %s\n  run 2: %s",
 			firstImage, secondImage)
 	}
+}
 
-	// The SBOM too: a generated dependency document is usually the least
-	// reproducible file in a release, because the conventional generators
-	// stamp a wall clock and a random serial into every run.
+// compareSBOM checks the dependency document, usually the least reproducible
+// file in a release: the conventional generators stamp a wall clock and a
+// random serial into every run.
+func compareSBOM(t *testing.T, first, second []repro.Artifact) {
+	t.Helper()
+
 	firstSBOM, err := repro.SBOMDigest(options(t, "", ""), "go1.27.1", first)
 	if err != nil {
 		t.Fatalf("generating the first SBOM: %v", err)
@@ -191,11 +214,6 @@ func compare(t *testing.T, first, second []repro.Artifact) {
 	}
 	if firstSBOM != secondSBOM {
 		t.Errorf("the SBOM is not reproducible\n  run 1: %s\n  run 2: %s", firstSBOM, secondSBOM)
-	}
-
-	if !t.Failed() {
-		t.Logf("%d artifacts, the image and the SBOM reproduced byte for byte on %s/%s",
-			len(first), runtime.GOOS, runtime.GOARCH)
 	}
 }
 
@@ -229,4 +247,55 @@ func copyDir(t *testing.T, src, dst string) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// §7 tier 1 for cgo: one machine must agree with itself across runs that vary
+// the work directory and the build cache.
+//
+// Tier 2 — three machines agreeing with each other — is the cross-machine job
+// in CI, which records these same digests from reprodigest on Linux, macOS and
+// Windows and diffs them. That is the claim that matters, because it is the one
+// a third party relies on; this is the cheaper check that fails first when the
+// C toolchain stops being pinned properly.
+//
+// Gated because it downloads a 50MB toolchain, which is not something every
+// `go test ./...` should do.
+func TestCgoIsReproducibleAcrossRuns(t *testing.T) {
+	if os.Getenv("LETSGO_ZIG_DOWNLOAD") == "" {
+		t.Skip("set LETSGO_ZIG_DOWNLOAD=1 to exercise the cgo build")
+	}
+
+	toolchain, err := zig.Ensure(t.Context(), "", "", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	options := func() repro.Options {
+		return repro.Options{
+			ModuleDir:  "testdata/cgofixture",
+			Commands:   []repro.Command{{Package: ".", Binary: "cgofixture"}},
+			Name:       "cgofixture",
+			Version:    "1.2.3",
+			Commit:     "9f2ab1c",
+			ModTime:    time.Date(2024, 3, 15, 12, 30, 45, 0, time.UTC),
+			Targets:    []gobuild.Target{{OS: "linux", Arch: "amd64"}, {OS: "linux", Arch: "arm64"}},
+			ExtraFiles: []string{"README.md", "LICENSE"},
+			CGo:        toolchain,
+			WorkDir:    t.TempDir(),
+		}
+	}
+
+	first, err := repro.Build(t.Context(), options())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repro.Build(t.Context(), options())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(first) == 0 {
+		t.Fatal("no artifacts were built")
+	}
+	compare(t, "cgofixture", first, second)
 }

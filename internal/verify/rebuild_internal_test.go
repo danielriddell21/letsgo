@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 )
 
@@ -107,5 +108,122 @@ func TestRebuildGroupsRefusesABinaryTheSourceDoesNotBuild(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "no main package") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// A cgo release names the host it was compiled on, because zig's output
+// depends on it. Verifying elsewhere is still worth doing — the pure-Go
+// artifacts are held to their digests either way — so a different host is a
+// warning about what cannot be checked, never a failure.
+func TestCCompilerHostDecidesWhatCGoArtifactsAreHeldTo(t *testing.T) {
+	local := gobuild.Host().String()
+
+	for _, tt := range []struct {
+		name   string
+		cc     *manifest.CCompiler
+		want   Status
+		agrees bool
+	}{
+		{name: "pure go", cc: nil, agrees: true},
+		{
+			name:   "same host",
+			cc:     &manifest.CCompiler{Name: "zig", Host: local},
+			want:   Pass,
+			agrees: true,
+		},
+		{
+			name: "another host",
+			cc:   &manifest.CCompiler{Name: "zig", Host: "plan9/mips"},
+			want: Warn,
+		},
+		{
+			// Every cgo release letsgo publishes records one; a manifest
+			// without it is one letsgo did not write, and guessing would be
+			// worse than saying so.
+			name: "no host recorded",
+			cc:   &manifest.CCompiler{Name: "zig"},
+			want: Warn,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			result := &Result{}
+			got := sameCCompilerHost(result, &manifest.Manifest{
+				Builder: manifest.Builder{CC: tt.cc},
+			})
+
+			if got != tt.agrees {
+				t.Errorf("sameCCompilerHost = %v, want %v", got, tt.agrees)
+			}
+			if tt.cc == nil {
+				if len(result.Checks) != 0 {
+					t.Errorf("a pure-Go release reported %+v", result.Checks)
+				}
+				return
+			}
+			if len(result.Checks) != 1 || result.Checks[0].Status != tt.want {
+				t.Errorf("checks = %+v, want one %s", result.Checks, tt.want)
+			}
+		})
+	}
+}
+
+// The narrowing is bounded: it covers artifacts compiled with cgo, and only
+// while the host differs. A pure-Go artifact that does not reproduce is a
+// failure on any machine, which is the claim the tool exists for.
+func TestOnlyCGoArtifactsAreExcusedByADifferentHost(t *testing.T) {
+	cgo := manifest.Artifact{Build: manifest.Build{Env: map[string]string{"CGO_ENABLED": "1"}}}
+	pure := manifest.Artifact{Build: manifest.Build{Env: map[string]string{"CGO_ENABLED": "0"}}}
+
+	elsewhere := rebuildInputs{sameHost: false}
+	if !elsewhere.hostBound(cgo) {
+		t.Error("a cgo artifact built on another host should not be held to its digest")
+	}
+	if elsewhere.hostBound(pure) {
+		t.Error("a pure-Go artifact is reproducible anywhere and must still be held to its digest")
+	}
+
+	here := rebuildInputs{sameHost: true}
+	if here.hostBound(cgo) {
+		t.Error("on the recorded host a cgo artifact must be held to its digest")
+	}
+}
+
+// Warn does not fail a verification, and Fail does: a mismatch put in the
+// wrong pile would either hide a real difference or invent one.
+func TestHostBoundDifferencesWarnAndOthersFail(t *testing.T) {
+	m := &manifest.Manifest{Artifacts: []manifest.Artifact{{}, {}}}
+
+	warned := &Result{}
+	(&comparison{matched: 1, hostBound: []string{"linux/amd64: cgofixture rebuilt as aaa, published bbb"}}).
+		report(warned, m)
+	if !warned.OK() {
+		t.Errorf("a cgo difference on another host failed verification: %+v", warned.Checks)
+	}
+	if !strings.Contains(warned.Checks[0].Detail, "another host") {
+		t.Errorf("the warning does not say why: %q", warned.Checks[0].Detail)
+	}
+
+	failed := &Result{}
+	(&comparison{matched: 1, problems: []string{"linux/amd64: tool rebuilt as aaa, published bbb"}}).report(failed, m)
+	if failed.OK() {
+		t.Errorf("a pure-Go difference passed verification: %+v", failed.Checks)
+	}
+}
+
+// Nothing rebuilt is a failure, but "nothing matched because every artifact is
+// host-bound" is the narrowed claim working, not the source failing to build.
+func TestNothingMatchingIsNotAFailureWhenEverythingIsHostBound(t *testing.T) {
+	m := &manifest.Manifest{Artifacts: []manifest.Artifact{{}}}
+
+	result := &Result{}
+	(&comparison{hostBound: []string{"linux/amd64: differs"}}).report(result, m)
+	if !result.OK() {
+		t.Errorf("checks = %+v, want no failure", result.Checks)
+	}
+
+	bare := &Result{}
+	(&comparison{}).report(bare, m)
+	if bare.OK() {
+		t.Error("a rebuild that produced nothing at all should fail")
 	}
 }

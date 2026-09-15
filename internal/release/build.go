@@ -192,7 +192,7 @@ func describe(
 			Build: manifest.Build{
 				Flags:   buildFlags(p),
 				LDFlags: a.LDFlags,
-				Env:     map[string]string{"CGO_ENABLED": "0", "GOOS": a.OS, "GOARCH": a.Arch},
+				Env:     buildEnv(p, a),
 			},
 		}
 
@@ -216,10 +216,26 @@ func describe(
 	return m
 }
 
+// buildEnv is the environment an artifact was compiled under, as recorded.
+func buildEnv(p *plan.Plan, a build.Artifact) map[string]string {
+	env := map[string]string{"CGO_ENABLED": "0", "GOOS": a.OS, "GOARCH": a.Arch}
+	if p.CGo.Path != "" {
+		env["CGO_ENABLED"] = "1"
+	}
+	return env
+}
+
 // builder records what produced the release, including any plugin that took
 // part in deciding it.
 func builder(p *plan.Plan, toolVersion, goVersion string) manifest.Builder {
 	b := manifest.Builder{Tool: "letsgo " + toolVersion, Go: goVersion}
+
+	if p.CGo.Path != "" {
+		b.CC = &manifest.CCompiler{
+			Name: "zig", Version: p.CGo.Version, Digest: p.CGo.Digest,
+			Host: gobuild.Host().String(),
+		}
+	}
 
 	hooks := make([]string, 0, len(p.Plugins))
 	for hook := range p.Plugins {
@@ -286,6 +302,7 @@ func buildCommands(ctx context.Context, p *plan.Plan, dir string, warnf func(str
 			ExtraFiles:   p.Files,
 			ExtraLDFlags: p.LDFlags,
 			Tags:         p.Tags,
+			CGo:          p.CGo,
 			Symbols: build.VersionSymbols{
 				Version: p.Symbols.Version, Commit: p.Symbols.Commit, Date: p.Symbols.Date,
 			},

@@ -68,6 +68,15 @@ type Request struct {
 	// output deterministically and belong in the manifest like any other
 	// recorded input.
 	Tags []string
+
+	// CC and CXX are the C and C++ compilers, as full command lines. Both
+	// empty means cgo stays off.
+	//
+	// A command rather than a path because the pinned compiler is invoked with
+	// a target: "…/zig cc -target aarch64-linux-musl". Go passes CC through a
+	// shell-style split, so the arguments travel with it.
+	CC  string
+	CXX string
 }
 
 // Build compiles a single binary.
@@ -121,7 +130,7 @@ func Build(ctx context.Context, req Request) error {
 
 	cmd := exec.CommandContext(ctx, gobin, args...)
 	cmd.Dir = req.Dir
-	cmd.Env = environ(req.Target, req.Toolchain)
+	cmd.Env = environ(req.Target, req.Toolchain, req.CC, req.CXX)
 
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -170,7 +179,7 @@ var passthrough = []string{
 	"NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
 }
 
-func environ(t Target, toolchain string) []string {
+func environ(t Target, toolchain, cc, cxx string) []string {
 	env := make(map[string]string, len(passthrough)+6)
 
 	for _, key := range passthrough {
@@ -185,10 +194,18 @@ func environ(t Target, toolchain string) []string {
 	env["GOOS"] = t.OS
 	env["GOARCH"] = t.Arch
 
-	// Cgo makes the output depend on a C toolchain we neither control nor
-	// record, so it is off unless a future release makes it an explicit,
-	// recorded decision.
+	// Cgo makes the output depend on a C toolchain, so it is off unless the
+	// release supplies one it controls and records. A compiler obtained and
+	// pinned by letsgo is as much a recorded input as the Go toolchain is; the
+	// host's own cc is not, which is why inheriting one is never an option.
 	env["CGO_ENABLED"] = "0"
+	if cc != "" {
+		env["CGO_ENABLED"] = "1"
+		env["CC"] = cc
+		if cxx != "" {
+			env["CXX"] = cxx
+		}
+	}
 
 	// Both of these silently alter compilation. Empty means "the toolchain
 	// default", which is what we want; inheriting means "whatever this shell
@@ -229,7 +246,7 @@ func Version(ctx context.Context, goBin string) (string, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, goBin, "env", "GOVERSION")
-	cmd.Env = Env(Host(), "")
+	cmd.Env = Env(Host(), "", "", "")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("gobuild: reading GOVERSION: %w", err)

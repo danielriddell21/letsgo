@@ -119,12 +119,24 @@ func TestNilCacheIsUsable(t *testing.T) {
 // toolchain is a build input, and an entry keyed without it would be handed
 // back to a different Go release as though it were the same bytes.
 func TestCacheKeyCoversTheToolchain(t *testing.T) {
-	base := []string{"commit", ".", "linux/amd64", "-s -w", ""}
+	base := []string{"commit", ".", "linux/amd64", "-s -w", "", ""}
 
-	first := CacheKey(append(append([]string{}, base...), "go1.26.8", "app")...)
-	second := CacheKey(append(append([]string{}, base...), "go1.27.1", "app")...)
+	first := CacheKey(append(append([]string{}, base...), "go1.26.8", "", "app")...)
+	second := CacheKey(append(append([]string{}, base...), "go1.27.1", "", "app")...)
 
 	if first == second {
 		t.Error("two Go versions produced the same cache key")
+	}
+
+	// The C compiler determines the bytes exactly as the Go one does, so an
+	// entry built with one must never be handed back for a build using another.
+	withZig := CacheKey(append(append([]string{}, base...), "go1.27.1", "sha256:aaa", "app")...)
+	otherZig := CacheKey(append(append([]string{}, base...), "go1.27.1", "sha256:bbb", "app")...)
+
+	if withZig == otherZig {
+		t.Error("two C toolchains produced the same cache key")
+	}
+	if withZig == second {
+		t.Error("a cgo build and a pure-Go build produced the same cache key")
 	}
 }

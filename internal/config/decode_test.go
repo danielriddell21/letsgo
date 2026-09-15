@@ -199,3 +199,40 @@ func TestPluginDirectiveRequiresAPin(t *testing.T) {
 		}
 	}
 }
+
+func TestCGoDirective(t *testing.T) {
+	if cfg := decode(t, "cgo on\n"); cfg.CGo == nil || cfg.CGo.ZigVersion != "" {
+		t.Errorf("cgo on = %+v", cfg.CGo)
+	}
+	if cfg := decode(t, "cgo zig 0.16.0\n"); cfg.CGo == nil || cfg.CGo.ZigVersion != "0.16.0" {
+		t.Errorf("cgo zig = %+v", cfg.CGo)
+	}
+	// No directive means cgo stays off, which is what every pure-Go
+	// repository wants and what §7 specifies as the default.
+	if cfg := decode(t, "project foo\n"); cfg.CGo != nil {
+		t.Errorf("CGo = %+v, want nil", cfg.CGo)
+	}
+
+	digest := "sha256:" + strings.Repeat("b", 64)
+	cfg := decode(t, "cgo zig 0.99.0 "+digest+"\n")
+	if cfg.CGo == nil || cfg.CGo.ZigDigest != digest {
+		t.Errorf("cgo with a pin = %+v", cfg.CGo)
+	}
+}
+
+func TestCGoDirectiveRejects(t *testing.T) {
+	for _, in := range []string{
+		"cgo\n",
+		"cgo yes\n",
+		"cgo off on\n",
+		"cgo zig\n",
+		"cgo zig 0.16.0 deadbeef\n",
+		"cgo zig 0.16.0 sha256:short\n",
+		"cgo zig 0.16.0 " + "sha256:" + strings.Repeat("b", 64) + " extra\n",
+		"cgo on\ncgo on\n",
+	} {
+		if _, err := Decode(parse(t, in)); err == nil {
+			t.Errorf("%q should not have parsed", in)
+		}
+	}
+}

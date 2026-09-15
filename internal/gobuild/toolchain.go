@@ -98,6 +98,9 @@ func toolchainDir() string {
 //
 // Exported so that everything invoking the toolchain — building, listing
 // packages, reading versions — does so under the same conditions.
-func Env(t Target, toolchain string) []string {
-	return environ(t, toolchain)
+//
+// cc and cxx enable cgo when set; both empty keeps it off, which is what every
+// caller other than a cgo build wants.
+func Env(t Target, toolchain, cc, cxx string) []string {
+	return environ(t, toolchain, cc, cxx)
 }

@@ -31,7 +31,7 @@ func TestEnvUsesAFixedPath(t *testing.T) {
 	t.Setenv("PATH", "/tmp/attacker-controlled")
 
 	var paths []string
-	for _, entry := range Env(Host(), "") {
+	for _, entry := range Env(Host(), "", "", "") {
 		if key, value, ok := strings.Cut(entry, "="); ok && strings.EqualFold(key, "PATH") {
 			paths = append(paths, value)
 		}
@@ -124,5 +124,40 @@ func TestToolchainOverrideMustBeAbsoluteAndExecutable(t *testing.T) {
 	t.Setenv(ToolchainEnvOverride, filepath.Join(dir, "absent"))
 	if _, err := resolveToolchain(); err == nil {
 		t.Error("a missing file was accepted as an override")
+	}
+}
+
+// cgo is off unless a compiler is supplied, and supplying one turns it on
+// together with CC. The pair matters: CGO_ENABLED=1 with no CC would fall back
+// to the host's own compiler, which is the unrecorded input the whole design
+// avoids.
+func TestEnvEnablesCgoOnlyWithACompiler(t *testing.T) {
+	off := map[string]string{}
+	for _, entry := range Env(Host(), "", "", "") {
+		if k, v, ok := strings.Cut(entry, "="); ok {
+			off[k] = v
+		}
+	}
+	if off["CGO_ENABLED"] != "0" {
+		t.Errorf("CGO_ENABLED = %q with no compiler, want 0", off["CGO_ENABLED"])
+	}
+	if _, set := off["CC"]; set {
+		t.Error("CC is set with no compiler supplied")
+	}
+
+	on := map[string]string{}
+	for _, entry := range Env(Host(), "", "/zig cc -target x86_64-linux-musl", "/zig c++") {
+		if k, v, ok := strings.Cut(entry, "="); ok {
+			on[k] = v
+		}
+	}
+	if on["CGO_ENABLED"] != "1" {
+		t.Errorf("CGO_ENABLED = %q with a compiler, want 1", on["CGO_ENABLED"])
+	}
+	if on["CC"] != "/zig cc -target x86_64-linux-musl" {
+		t.Errorf("CC = %q", on["CC"])
+	}
+	if on["CXX"] != "/zig c++" {
+		t.Errorf("CXX = %q", on["CXX"])
 	}
 }

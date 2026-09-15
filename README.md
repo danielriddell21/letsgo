@@ -3,7 +3,10 @@
 A release tool for Go. Only Go.
 
 > **Status: early.** letsgo releases itself, and reproducibility is proven
-> across Linux, macOS and Windows on every push.
+> across Linux, macOS and Windows on every push. One narrower case: a release
+> built with `cgo on` reproduces byte for byte on a host like the one that
+> built it, because the pinned C compiler generates host-dependent code.
+> `letsgo.json` records that host, and `verify` says so rather than guessing.
 
 It builds your Go project, refuses to ship it if it's wrong, publishes it
 reproducibly, and lets anyone prove afterwards that the binaries match the

@@ -111,7 +111,7 @@ func exportedPackages(ctx context.Context, dir string) ([]pkgRef, error) {
 
 	cmd := exec.CommandContext(ctx, goBin, "list", "-f", "{{.ImportPath}}\t{{.Name}}\t{{.Dir}}", "./...")
 	cmd.Dir = dir
-	cmd.Env = gobuild.Env(gobuild.Host(), "")
+	cmd.Env = gobuild.Env(gobuild.Host(), "", "", "")
 
 	out, err := output(cmd, false)
 	if err != nil {
