@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/danielriddell21/letsgo/internal/archive"
 	"github.com/danielriddell21/letsgo/internal/brew"
@@ -185,7 +186,7 @@ func (p *Plan) applyLayoutPlugin(ctx context.Context) {
 	}
 
 	var out plugin.ArchiveLayoutOutput
-	if err := plugin.Run(ctx, configured, in, &out); err != nil {
+	if err := plugin.Run(ctx, configured, p.RootDir, in, &out); err != nil {
 		p.add("plugins", Fail, "%v", err)
 		return
 	}
@@ -199,6 +200,116 @@ func (p *Plan) applyLayoutPlugin(ctx context.Context) {
 	p.Groups = groups
 	p.note("archives", describeGroups(groups), configured.Command)
 	p.add("plugins", Pass, "%s laid out %d archive(s)", configured.Command, len(groups))
+}
+
+// applyLDFlagsPlugin asks the ldflags plugin for extra values to compile in.
+//
+// What comes back is appended to the artifact's recorded ldflags, which
+// verification already replays exactly — so a value injected here is
+// reproducible without the plugin, and without the environment it came from.
+//
+// That is also why it is worth saying out loud what has happened: the value is
+// now in the binary and in the manifest, and neither is a place a secret can
+// hide.
+func (p *Plan) applyLDFlagsPlugin(ctx context.Context) {
+	configured, ok := p.Plugins[plugin.HookLDFlags]
+	if !ok {
+		return
+	}
+
+	in := plugin.LDFlagsInput{
+		Project: p.Project,
+		Version: p.Version,
+		Commit:  p.Git.ShortCommit,
+		Date:    p.Git.CommitTime.UTC().Format(time.RFC3339),
+		Module:  p.Module.Path,
+		Targets: make([]string, len(p.Targets)),
+	}
+	for i, t := range p.Targets {
+		in.Targets[i] = t.String()
+	}
+
+	var out plugin.LDFlagsOutput
+	if err := plugin.Run(ctx, configured, p.RootDir, in, &out); err != nil {
+		p.add("plugins", Fail, "%v", err)
+		return
+	}
+
+	symbols, err := injectedSymbols(out.LDFlags)
+	if err != nil {
+		p.add("plugins", Fail, "plugin %s: %v", configured.Command, err)
+		return
+	}
+	if len(symbols) == 0 {
+		return
+	}
+
+	p.LDFlags = append(p.LDFlags, out.LDFlags...)
+	p.note("injected values", strings.Join(symbols, ", "), configured.Command)
+	p.add("plugins", Warn,
+		"%s compiled %d value(s) into the binary: %s\n"+
+			"  they are recoverable with `strings` and recorded in letsgo.json, so they are not secrets",
+		configured.Command, len(symbols), strings.Join(symbols, ", "))
+}
+
+// injectedSymbols checks that a plugin returned only -X assignments, and names
+// the symbols they write to.
+//
+// Only -X: the hook injects values, and a plugin that could pass arbitrary
+// linker flags could change how the binary is linked rather than what is in
+// it. Narrow is what makes the answer safe to record and replay.
+func injectedSymbols(flags []string) ([]string, error) {
+	var symbols []string
+
+	for i := 0; i < len(flags); i++ {
+		flag := flags[i]
+
+		// Both spellings: `-X a.b=c` arrives as two arguments and `-X=a.b=c`
+		// as one, and the linker accepts either.
+		assignment, inline := strings.CutPrefix(flag, "-X=")
+		if !inline {
+			if flag != "-X" {
+				return nil, fmt.Errorf(
+					"it returned %q; the ldflags hook may only return -X assignments", flag)
+			}
+			if i+1 >= len(flags) {
+				return nil, fmt.Errorf("it returned a trailing -X with nothing to assign")
+			}
+			i++
+			assignment = flags[i]
+		}
+
+		symbol, err := injectedSymbol(assignment)
+		if err != nil {
+			return nil, err
+		}
+		symbols = append(symbols, symbol)
+	}
+	return symbols, nil
+}
+
+// injectedSymbol checks one -X assignment and names the symbol it writes to.
+func injectedSymbol(assignment string) (string, error) {
+	symbol, _, ok := strings.Cut(assignment, "=")
+	if !ok || symbol == "" {
+		return "", fmt.Errorf("it returned -X %q, which assigns nothing", assignment)
+	}
+	if _, name, ok := cutSymbol(symbol); !ok || name == "" {
+		return "", fmt.Errorf(
+			"it returned -X %q; the symbol must name a package and a variable", assignment)
+	}
+
+	// The manifest records the linker flags as one space-joined string, and
+	// verification splits that back into fields. A value containing whitespace
+	// would not survive the round trip: the rebuild would use different flags
+	// and report an unreproducible binary, with nothing pointing at the real
+	// cause.
+	if strings.ContainsAny(assignment, " \t\n") {
+		return "", fmt.Errorf(
+			"it returned a value for %s containing whitespace, which cannot be recorded "+
+				"and replayed", symbol)
+	}
+	return symbol, nil
 }
 
 // layoutGroups turns a plugin's answer into groups, refusing one that does not
@@ -446,7 +557,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.checkWorktree(opts)
 	p.resolveTargets(ctx)
 	p.resolveBudgets()
-	p.resolveCommands()
+	p.resolveCommands(ctx)
 	p.resolveFiles(ctx)
 	p.resolveArtifacts(ctx)
 
@@ -1152,7 +1263,7 @@ func sortedKeys[V any](m map[string]V) []string {
 // versionVars are the conventional linker-injected variables.
 var versionVars = []string{"version", "commit", "date"}
 
-func (p *Plan) resolveCommands() {
+func (p *Plan) resolveCommands(ctx context.Context) {
 	commands, err := discover.FindMainPackages(p.Module.Dir, p.Project)
 	if err != nil {
 		p.add("commands", Fail, "%v", err)
@@ -1167,7 +1278,7 @@ func (p *Plan) resolveCommands() {
 	p.note("commands", strings.Join(names, ", "), "./cmd/* or the module root")
 	p.add("commands", Pass, "%d main package(s)", len(commands))
 
-	p.resolveLDFlags()
+	p.resolveLDFlags(ctx)
 }
 
 // resolveLDFlags injects version metadata only into variables that can
@@ -1186,8 +1297,9 @@ type VersionSymbols struct {
 	Date    string
 }
 
-func (p *Plan) resolveLDFlags() {
+func (p *Plan) resolveLDFlags(ctx context.Context) {
 	p.LDFlags = append(p.LDFlags, p.Config.LDFlags...)
+	p.applyLDFlagsPlugin(ctx)
 	p.Symbols = VersionSymbols{Version: "main.version", Commit: "main.commit", Date: "main.date"}
 
 	if p.Config.Version != nil {

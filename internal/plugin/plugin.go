@@ -74,12 +74,16 @@ type Plugin struct {
 // hangs is worse than one that fails.
 const timeout = time.Minute
 
-// Run executes the plugin, sending input as JSON on stdin and decoding its
-// stdout into output.
+// Run executes the plugin in dir, sending input as JSON on stdin and decoding
+// its stdout into output.
 //
 // The executable is hashed and compared against the pin before it runs.
 // Checking afterwards would be checking what we already executed.
-func Run(ctx context.Context, p Plugin, input, output any) error {
+//
+// dir is the repository root, so a plugin needing configuration of its own can
+// keep it in a file beside letsgo.mod. That is deliberate: it is how letsgo's
+// own config stays a closed set while a plugin still takes settings.
+func Run(ctx context.Context, p Plugin, dir string, input, output any) error {
 	path, err := resolve(p)
 	if err != nil {
 		return err
@@ -94,11 +98,14 @@ func Run(ctx context.Context, p Plugin, input, output any) error {
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, path, string(p.Hook))
+	cmd.Dir = dir
 	cmd.Stdin = bytes.NewReader(payload)
 
-	// A plugin's environment is the caller's minus anything that would let it
-	// reach back into the build: it is answering a question, not compiling.
-	cmd.Env = environ()
+	// The caller's environment, whole. Trimming it would be theatre: a plugin
+	// can read files, the clock and the network, so what makes its answer safe
+	// is that the answer is recorded and replayed, not that its inputs were
+	// rationed. One hook exists precisely to read the environment.
+	cmd.Env = os.Environ()
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -153,26 +160,6 @@ func digestOf(path string) (string, error) {
 		return "", fmt.Errorf("plugin: reading %s: %w", path, err)
 	}
 	return "sha256:" + hex.EncodeToString(sum.Sum(nil)), nil
-}
-
-// passthrough names what a plugin genuinely needs: where to find itself and
-// somewhere to write scratch files. Everything else is dropped, so that a
-// plugin's answer depends on its input rather than on the shell it inherited.
-var passthrough = []string{
-	"PATH", "HOME",
-	"TMPDIR", "TMP", "TEMP",
-	"USERPROFILE", "LOCALAPPDATA", "APPDATA",
-	"SystemRoot", "windir", "ComSpec", "PATHEXT",
-}
-
-func environ() []string {
-	out := make([]string, 0, len(passthrough)+1)
-	for _, key := range passthrough {
-		if v, ok := os.LookupEnv(key); ok {
-			out = append(out, key+"="+v)
-		}
-	}
-	return append(out, "LC_ALL=C")
 }
 
 func short(digest string) string {

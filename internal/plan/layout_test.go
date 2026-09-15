@@ -112,3 +112,44 @@ func TestDescribeGroupsNamesEachArchiveAndItsBinaries(t *testing.T) {
 		t.Errorf("describeGroups(nil) = %q, want empty", got)
 	}
 }
+
+// The ldflags hook injects values; it does not configure the linker. A plugin
+// that could pass arbitrary flags could change how a binary is linked rather
+// than what is in it, and that is a wider promise than "the answer is
+// recorded".
+func TestInjectedSymbolsAcceptsOnlyAssignments(t *testing.T) {
+	ok, err := injectedSymbols([]string{
+		"-X", "example.com/m/internal/build.Token=abc",
+		"-X=example.com/m/internal/build.Endpoint=https://example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "example.com/m/internal/build.Token,example.com/m/internal/build.Endpoint"
+	if strings.Join(ok, ",") != want {
+		t.Errorf("symbols = %q, want %q", ok, want)
+	}
+
+	for _, c := range []struct {
+		name, want string
+		flags      []string
+	}{
+		{"a linker flag", "may only return -X assignments", []string{"-linkmode", "external"}},
+		{"a trailing -X", "trailing -X", []string{"-X"}},
+		{"nothing assigned", "assigns nothing", []string{"-X", "example.com/m.Token"}},
+		{"no package", "must name a package", []string{"-X", "Token=abc"}},
+		{
+			"a value with a space",
+			"cannot be recorded",
+			[]string{"-X", "example.com/m/internal/build.Token=two words"},
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := injectedSymbols(c.flags); err == nil {
+				t.Fatalf("%q should have been refused", c.flags)
+			} else if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("error = %q, want it to mention %q", err, c.want)
+			}
+		})
+	}
+}

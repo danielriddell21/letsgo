@@ -45,7 +45,7 @@ func TestRunSendsInputAndDecodesTheAnswer(t *testing.T) {
 		plugin.Plugin{
 			Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digest,
 		},
-		plugin.ArchiveLayoutInput{Project: "tools"}, &out)
+		t.TempDir(), plugin.ArchiveLayoutInput{Project: "tools"}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestRunRefusesAProgramThatDoesNotMatchThePin(t *testing.T) {
 	pinned := "sha256:" + strings.Repeat("0", 64)
 	err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: pinned},
-		plugin.ArchiveLayoutInput{}, &plugin.ArchiveLayoutOutput{})
+		t.TempDir(), plugin.ArchiveLayoutInput{}, &plugin.ArchiveLayoutOutput{})
 
 	if err == nil {
 		t.Fatal("a plugin that does not match its pin should not have run")
@@ -81,7 +81,7 @@ func TestRunReportsWhatThePluginPrintedOnFailure(t *testing.T) {
 
 	err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digest},
-		plugin.ArchiveLayoutInput{}, &plugin.ArchiveLayoutOutput{})
+		t.TempDir(), plugin.ArchiveLayoutInput{}, &plugin.ArchiveLayoutOutput{})
 
 	if err == nil {
 		t.Fatal("a failing plugin should be an error")
@@ -94,7 +94,7 @@ func TestRunReportsWhatThePluginPrintedOnFailure(t *testing.T) {
 func TestRunRejectsAnUnknownHook(t *testing.T) {
 	err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: "not-a-hook", Command: "letsgo-fake", Digest: "sha256:x"},
-		struct{}{}, &struct{}{})
+		t.TempDir(), struct{}{}, &struct{}{})
 	if err == nil || !strings.Contains(err.Error(), "not a hook") {
 		t.Errorf("err = %v", err)
 	}
