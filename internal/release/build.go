@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
@@ -61,7 +62,7 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 	}
 
 	source, err := build.WriteSource(ctx, build.SourceOptions{
-		ModuleDir: p.Module.Dir,
+		ModuleDir: p.RootDir,
 		Name:      p.Project,
 		Version:   p.Version,
 		ModTime:   p.Git.CommitTime,
@@ -171,6 +172,7 @@ func describe(
 		Tag:             p.Tag,
 		Commit:          p.Git.Commit,
 		SourceDateEpoch: p.Git.CommitTime.Unix(),
+		ModuleDir:       p.Config.ModuleDir,
 		Builder:         manifest.Builder{Tool: "letsgo " + toolVersion, Go: goVersion},
 		Source:          &manifest.Source{Archive: source.Name, SHA256: source.SHA256},
 		Modules:         mods,
@@ -186,7 +188,7 @@ func describe(
 			Size: a.Size, BinarySize: a.BinarySize,
 			SHA256: a.ArchiveSHA256, BinarySHA256: a.BinarySHA256,
 			Build: manifest.Build{
-				Flags:   []string{"-trimpath", "-buildvcs=false"},
+				Flags:   buildFlags(p),
 				LDFlags: a.LDFlags,
 				Env:     map[string]string{"CGO_ENABLED": "0", "GOOS": a.OS, "GOARCH": a.Arch},
 			},
@@ -195,6 +197,16 @@ func describe(
 	manifest.SortArtifacts(m.Artifacts)
 
 	return m
+}
+
+// buildFlags are the go build flags an artifact was produced with, recorded so
+// that verification replays them rather than reconstructing them.
+func buildFlags(p *plan.Plan) []string {
+	flags := []string{"-trimpath", "-buildvcs=false"}
+	if len(p.Tags) > 0 {
+		flags = append(flags, "-tags="+strings.Join(p.Tags, ","))
+	}
+	return flags
 }
 
 // buildCommands compiles and packages every command in the plan.
@@ -222,6 +234,7 @@ func buildCommands(ctx context.Context, p *plan.Plan, dir string, warnf func(str
 
 		produced, err := build.Run(ctx, build.Options{
 			ModuleDir:    p.Module.Dir,
+			FilesDir:     p.RootDir,
 			Package:      cmd.RelPath,
 			Name:         name,
 			Version:      p.Version,
@@ -230,11 +243,15 @@ func buildCommands(ctx context.Context, p *plan.Plan, dir string, warnf func(str
 			Targets:      p.Targets,
 			ExtraFiles:   p.Files,
 			ExtraLDFlags: p.LDFlags,
-			WorkDir:      dir,
-			Smoke:        smoke,
-			Warnf:        warnf,
-			CacheKey:     cacheKey,
-			Cache:        cache,
+			Tags:         p.Tags,
+			Symbols: build.VersionSymbols{
+				Version: p.Symbols.Version, Commit: p.Symbols.Commit, Date: p.Symbols.Date,
+			},
+			WorkDir:  dir,
+			Smoke:    smoke,
+			Warnf:    warnf,
+			CacheKey: cacheKey,
+			Cache:    cache,
 		})
 		if err != nil {
 			return nil, err

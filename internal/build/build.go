@@ -49,7 +49,13 @@ type Options struct {
 	// Targets to build. Required.
 	Targets []gobuild.Target
 
-	// ExtraFiles are paths relative to ModuleDir to include in each archive.
+	// FilesDir is what ExtraFiles are relative to. Empty means ModuleDir.
+	//
+	// Separate because a nested module still ships the repository's README and
+	// licence: the build moves, the documentation does not.
+	FilesDir string
+
+	// ExtraFiles are paths relative to FilesDir to include in each archive.
 	ExtraFiles []string
 
 	// WorkDir is scratch space for binaries and archives. Required.
@@ -68,6 +74,13 @@ type Options struct {
 
 	// Toolchain pins the Go version, e.g. "go1.24.7".
 	Toolchain string
+
+	// Tags are build tags passed to the compiler.
+	Tags []string
+
+	// Symbols names the variables the version metadata is injected into.
+	// Zero means main.version, main.commit and main.date.
+	Symbols VersionSymbols
 
 	// CacheKey identifies the source these binaries are built from, enabling
 	// reuse across runs. Empty disables caching, which is correct whenever the
@@ -215,7 +228,34 @@ func (o *Options) normalise() error {
 	if o.Name == "" {
 		o.Name = "app"
 	}
+	if o.FilesDir == "" {
+		o.FilesDir = o.ModuleDir
+	}
 	return nil
+}
+
+// VersionSymbols names the variables the version metadata is injected into,
+// fully qualified as the linker writes them.
+type VersionSymbols struct {
+	Version string
+	Commit  string
+	Date    string
+}
+
+// orDefaults fills in the conventional names. A caller that names none gets
+// the main package's, which is what every repository that has not said
+// otherwise means.
+func (v VersionSymbols) orDefaults() VersionSymbols {
+	if v.Version == "" {
+		v.Version = "main.version"
+	}
+	if v.Commit == "" {
+		v.Commit = "main.commit"
+	}
+	if v.Date == "" {
+		v.Date = "main.date"
+	}
+	return v
 }
 
 // linkerFlags builds the -X flags that carry the version metadata.
@@ -224,10 +264,11 @@ func (o *Options) normalise() error {
 // the single most common way a release pipeline quietly stops being
 // reproducible.
 func (o Options) linkerFlags() []string {
+	symbols := o.Symbols.orDefaults()
 	ldflags := []string{
-		"-X", "main.version=" + o.Version,
-		"-X", "main.commit=" + o.Commit,
-		"-X", "main.date=" + o.ModTime.UTC().Format(time.RFC3339),
+		"-X", symbols.Version + "=" + o.Version,
+		"-X", symbols.Commit + "=" + o.Commit,
+		"-X", symbols.Date + "=" + o.ModTime.UTC().Format(time.RFC3339),
 	}
 	if len(o.ExactLDFlags) > 0 {
 		ldflags = o.ExactLDFlags
@@ -248,6 +289,7 @@ func (o Options) compile(ctx context.Context, target gobuild.Target, binPath, ke
 			Dir:       o.ModuleDir,
 			Package:   o.Package,
 			Output:    binPath,
+			Tags:      o.Tags,
 			Target:    target,
 			LDFlags:   ldflags,
 			GoBin:     o.GoBin,
@@ -286,7 +328,7 @@ func (o Options) pack(target gobuild.Target, binName, binPath, ldflagString stri
 		format = archive.FormatZip
 	}
 
-	entries, err := entriesFor(binName, binPath, o.ModuleDir, o.ExtraFiles)
+	entries, err := entriesFor(binName, binPath, o.FilesDir, o.ExtraFiles)
 	if err != nil {
 		return Artifact{}, err
 	}

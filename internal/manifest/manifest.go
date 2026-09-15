@@ -42,6 +42,15 @@ type Manifest struct {
 	// against. A rebuild that uses a different value cannot match.
 	SourceDateEpoch int64 `json:"source_date_epoch"`
 
+	// ModuleDir is where, relative to the repository root, the module that was
+	// built lives. Empty means the root, which is every repository that has
+	// not said otherwise.
+	//
+	// Recorded because the source archive covers the whole repository: without
+	// it, verification would know what to rebuild but not which directory to
+	// rebuild it in.
+	ModuleDir string `json:"module_dir,omitempty"`
+
 	Builder Builder           `json:"builder"`
 	Source  *Source           `json:"source,omitempty"`
 	Modules Modules           `json:"modules"`

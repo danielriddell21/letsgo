@@ -148,7 +148,23 @@ func (t *ImageTarget) Repos(binaries []string) map[string]string {
 
 // Plan is a fully resolved, unexecuted release.
 type Plan struct {
-	Module     discover.Module
+	// Module is the module that gets built, which the `module` directive can
+	// move into a subdirectory. RootDir is the repository itself: where git
+	// runs, where letsgo.mod lives, what the source archive covers, and what
+	// archive files resolve against.
+	//
+	// They are the same directory in every repository that does not say
+	// otherwise, and the distinction only exists because a nested module is a
+	// fact about the layout rather than a different project: a release of
+	// ./web still ships the repository's README, and still has to publish
+	// source that can rebuild it.
+	Module  discover.Module
+	RootDir string
+
+	// root is the module beside letsgo.mod, kept for the names that describe
+	// the repository rather than the module being built.
+	root discover.Module
+
 	Git        discover.Git
 	Repo       discover.Repo
 	HasRepo    bool
@@ -165,6 +181,14 @@ type Plan struct {
 	LDFlags   []string
 	Files     []string
 	Artifacts []Artifact
+
+	// Tags are build tags passed to the compiler.
+	Tags []string
+
+	// Symbols names the variables the version metadata is injected into,
+	// fully qualified. It defaults to the conventional main.version,
+	// main.commit and main.date.
+	Symbols VersionSymbols
 
 	// Budgets caps each target's binary size. Parsed here so that a malformed
 	// size is reported with every other planning problem, rather than after a
@@ -215,27 +239,30 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 		dir = "."
 	}
 
-	module, err := discover.FindModule(dir)
+	root, err := discover.FindModule(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	git, err := discover.FindGit(ctx, module.Dir)
+	git, err := discover.FindGit(ctx, root.Dir)
 	if err != nil {
 		return nil, err
 	}
 
-	p := &Plan{Module: module, Git: git, Snapshot: opts.Snapshot}
-	p.note("module", module.Path, "go.mod")
+	p := &Plan{Module: root, RootDir: root.Dir, root: root, Git: git, Snapshot: opts.Snapshot}
 	p.note("commit", git.Commit, "git HEAD")
 	p.note("commit time", git.CommitTime.Format("2006-01-02T15:04:05Z"), "git committer timestamp")
 
-	if repo, err := discover.FindRepo(ctx, module.Dir); err == nil {
+	if repo, err := discover.FindRepo(ctx, root.Dir); err == nil {
 		p.Repo, p.HasRepo = repo, true
 		p.note("repository", repo.String(), "git remote origin")
 	}
 
-	p.loadConfig(module.Dir)
+	// The config is read before the module is settled, because it is what can
+	// move it: `module web` says the go.mod to build is not the one beside
+	// letsgo.mod.
+	p.loadConfig(root.Dir)
+	p.resolveModule()
 	p.resolveProject()
 	p.resolveVersion(ctx)
 	p.checkWorktree(opts)
@@ -329,13 +356,13 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 		return
 	}
 
-	previous, err := discover.PreviousTag(ctx, p.Module.Dir)
+	previous, err := discover.PreviousTag(ctx, p.RootDir)
 	if err != nil || previous == "" {
 		p.add("api compatibility", Skip, "no earlier release to compare against")
 		return
 	}
 
-	old, cleanup, err := checkoutTag(ctx, p.Module.Dir, previous)
+	old, cleanup, err := checkoutTag(ctx, p.RootDir, previous)
 	if err != nil {
 		p.add("api compatibility", Warn, "could not check out %s: %v", previous, err)
 		return
@@ -724,12 +751,54 @@ func (p *Plan) loadConfig(moduleDir string) {
 	p.note("config", ConfigFile, "repository root")
 }
 
+// resolveModule settles which module is built.
+//
+// Without the directive that is the module beside letsgo.mod, which is what
+// every single-module repository has. With it, a repository whose binary lives
+// in a second module — a workspace where the renderer is split out so that
+// importing the core does not pull in its dependencies — can release that
+// module while still being one project with one version and one tag.
+func (p *Plan) resolveModule() {
+	if p.Config.ModuleDir == "" {
+		p.note("module", p.Module.Path, "go.mod")
+		return
+	}
+
+	dir := filepath.Join(p.RootDir, filepath.FromSlash(p.Config.ModuleDir))
+	module, err := discover.FindModule(dir)
+	if err != nil {
+		p.add("module", Fail, "module %s: %v", p.Config.ModuleDir, err)
+		return
+	}
+
+	// FindModule walks up, so a directory with no go.mod of its own resolves
+	// to an ancestor's. That is a silent no-op rather than the nested module
+	// that was asked for, and worth saying.
+	if module.Dir != dir {
+		p.add("module", Fail, "module %s: no go.mod in that directory", p.Config.ModuleDir)
+		return
+	}
+
+	p.Module = module
+	p.note("module", module.Path, ConfigFile)
+	p.add("module", Pass, "%s in %s", module.Path, p.Config.ModuleDir)
+}
+
 func (p *Plan) resolveProject() {
 	if p.Config.Project != "" {
 		p.Project = p.Config.Project
 		p.note("project", p.Project, ConfigFile)
 		return
 	}
+	// With a nested module the project is still the repository's: releasing
+	// ./web does not make the project "web", and the archives, the formula and
+	// the image would all be named after a directory.
+	if p.Config.ModuleDir != "" && p.root.Name != "" {
+		p.Project = p.root.Name
+		p.note("project", p.Project, "last element of the repository's module path")
+		return
+	}
+
 	p.Project = p.Module.Name
 	p.note("project", p.Project, "last element of the module path")
 }
@@ -737,7 +806,7 @@ func (p *Plan) resolveProject() {
 func (p *Plan) resolveVersion(ctx context.Context) {
 	if p.Snapshot {
 		base := "0.0.0"
-		if prev, err := discover.PreviousTag(ctx, p.Module.Dir); err == nil && prev != "" {
+		if prev, err := discover.PreviousTag(ctx, p.RootDir); err == nil && prev != "" {
 			base = strings.TrimPrefix(prev, "v")
 		}
 		p.Version = fmt.Sprintf("%s-next+%s", base, p.Git.ShortCommit)
@@ -807,6 +876,45 @@ func (p *Plan) resolveTargets(ctx context.Context) {
 		return
 	}
 	p.add("targets", Pass, "%d targets, all buildable by this toolchain", len(p.Targets))
+
+	p.resolveTags()
+}
+
+// resolveTags reads the build tags.
+//
+// Tags are recorded in the manifest and replayed by verification, so a tagged
+// build is exactly as reproducible as an untagged one: the tag list is config,
+// and config is pinned by the commit.
+func (p *Plan) resolveTags() {
+	if len(p.Config.Tags) == 0 {
+		return
+	}
+	for _, tag := range p.Config.Tags {
+		if !validTag(tag) {
+			p.add("tags", Fail, "%q is not a build tag", tag)
+			return
+		}
+	}
+	p.Tags = p.Config.Tags
+	p.note("tags", strings.Join(p.Tags, ", "), ConfigFile)
+}
+
+// validTag reports whether a build tag is one the toolchain will accept.
+// Checked here because `-tags` takes a comma-separated list, so a tag
+// containing a comma would silently become two.
+func validTag(tag string) bool {
+	if tag == "" {
+		return false
+	}
+	for _, r := range tag {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '_', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // resolveBudgets parses the configured size caps.
@@ -892,9 +1000,138 @@ func (p *Plan) resolveCommands() {
 // Checking first turns that silent failure into a message at plan time, and
 // injecting only what works means a project that does not declare these
 // variables is not handed flags that do nothing.
+// VersionSymbols names the variables the version metadata is injected into,
+// fully qualified as the linker writes them.
+type VersionSymbols struct {
+	Version string
+	Commit  string
+	Date    string
+}
+
 func (p *Plan) resolveLDFlags() {
 	p.LDFlags = append(p.LDFlags, p.Config.LDFlags...)
+	p.Symbols = VersionSymbols{Version: "main.version", Commit: "main.commit", Date: "main.date"}
 
+	if p.Config.Version != nil {
+		p.resolveVersionSymbols()
+		return
+	}
+	p.checkMainVersionVars()
+}
+
+// versionInjection is the check that reports which variables the release will
+// write its version into, whether the config named them or letsgo inferred
+// them from main.
+const versionInjection = "version injection"
+
+// resolveVersionSymbols checks the variables the config named.
+//
+// A configured symbol is checked harder than an inferred one: asking for
+// injection into a variable that does not exist is a mistake, where simply not
+// declaring main.version is a choice. Getting this wrong is exactly the silent
+// failure that ships binaries reporting their compiled-in default.
+func (p *Plan) resolveVersionSymbols() {
+	targets := []struct {
+		label  string
+		symbol string
+		into   *string
+	}{
+		{"version", p.Config.Version.Version, &p.Symbols.Version},
+		{"commit", p.Config.Version.Commit, &p.Symbols.Commit},
+		{"date", p.Config.Version.Date, &p.Symbols.Date},
+	}
+
+	var problems []string
+	checked := 0
+
+	for _, t := range targets {
+		if t.symbol == "" {
+			continue
+		}
+		qualified, dir, err := p.locateSymbol(t.symbol)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("version %s: %v", t.label, err))
+			continue
+		}
+
+		_, name, _ := cutSymbol(qualified)
+		symbols, err := discover.InspectVars(dir, []string{name})
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("version %s: %v", t.label, err))
+			continue
+		}
+
+		sym := symbols[0]
+		if sym.Status != discover.SymbolOK {
+			detail := fmt.Sprintf("version %s: %s: %s", t.label, qualified, sym.Detail)
+			if sym.Status == discover.SymbolMissing {
+				detail = fmt.Sprintf("version %s: %s is not declared", t.label, qualified)
+			}
+			if sym.Suggestion != "" {
+				detail += " (" + sym.Suggestion + ")"
+			}
+			problems = append(problems, detail)
+			continue
+		}
+
+		*t.into = qualified
+		checked++
+	}
+
+	if len(problems) > 0 {
+		p.add(versionInjection, Fail, "%s", strings.Join(problems, "\n"))
+		return
+	}
+	p.add(versionInjection, Pass, "%d symbol(s) verified before injection", checked)
+	p.note("version symbols", strings.Join(p.injectedSymbols(), ", "), ConfigFile)
+}
+
+func (p *Plan) injectedSymbols() []string {
+	return []string{p.Symbols.Version, p.Symbols.Commit, p.Symbols.Date}
+}
+
+// locateSymbol turns a configured symbol into the form the linker needs and
+// the directory holding its package.
+//
+// A package path may be written whole or relative to the module, because a
+// module path is long and repeating it in every entry is noise. Either way the
+// package has to exist in this module: injecting into a variable letsgo cannot
+// see would be the unchecked -X that the gate exists to prevent.
+func (p *Plan) locateSymbol(symbol string) (qualified, dir string, err error) {
+	pkg, name, ok := cutSymbol(symbol)
+	if !ok || name == "" {
+		return "", "", fmt.Errorf("%s must name a package and a variable, as in internal/buildinfo.Version", symbol)
+	}
+
+	rel := ""
+	switch {
+	case pkg == p.Module.Path:
+	case strings.HasPrefix(pkg, p.Module.Path+"/"):
+		rel = strings.TrimPrefix(pkg, p.Module.Path+"/")
+	default:
+		rel, pkg = pkg, p.Module.Path+"/"+pkg
+	}
+
+	dir = filepath.Join(p.Module.Dir, filepath.FromSlash(rel))
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return "", "", fmt.Errorf("%s is not a package in %s", pkg, p.Module.Path)
+	}
+	return pkg + "." + name, dir, nil
+}
+
+// cutSymbol splits a linker symbol at its final dot, which is where the linker
+// splits it: a package path contains dots of its own.
+func cutSymbol(symbol string) (pkg, name string, ok bool) {
+	i := strings.LastIndex(symbol, ".")
+	if i <= 0 {
+		return "", "", false
+	}
+	return symbol[:i], symbol[i+1:], true
+}
+
+// checkMainVersionVars is the inferred path: main.version, main.commit and
+// main.date in each command, injected where they are declared.
+func (p *Plan) checkMainVersionVars() {
 	var problems []string
 	injected := 0
 
@@ -904,7 +1141,7 @@ func (p *Plan) resolveLDFlags() {
 
 		symbols, err := discover.InspectVars(cmd.Dir, names)
 		if err != nil {
-			p.add("version injection", Warn, "%v", err)
+			p.add(versionInjection, Warn, "%v", err)
 			return
 		}
 
@@ -927,11 +1164,12 @@ func (p *Plan) resolveLDFlags() {
 
 	switch {
 	case len(problems) > 0:
-		p.add("version injection", Fail, "%s", strings.Join(problems, "\n"))
+		p.add(versionInjection, Fail, "%s", strings.Join(problems, "\n"))
 	case injected == 0:
-		p.add("version injection", Skip, "no main.version, main.commit or main.date declared")
+		p.add(versionInjection, Skip,
+			"no main.version, main.commit or main.date declared; name one with `version <symbol>`")
 	default:
-		p.add("version injection", Pass, "%d symbol(s) verified before injection", injected)
+		p.add(versionInjection, Pass, "%d symbol(s) verified before injection", injected)
 	}
 }
 
@@ -954,7 +1192,7 @@ func (p *Plan) resolveFiles(ctx context.Context) {
 	// Conventional documentation, included when present. The list lives in
 	// internal/build so verification reaches the same answer from the same
 	// tree rather than keeping a second copy of it.
-	p.Files = build.FindDocumentation(p.Module.Dir)
+	p.Files = build.FindDocumentation(p.RootDir)
 
 	if len(p.Files) > 0 {
 		p.note(archiveFiles, strings.Join(p.Files, ", "), "found in the repository root")
@@ -982,7 +1220,7 @@ func (p *Plan) expandArchiveFiles(ctx context.Context, entries []string) ([]stri
 				"archive %s: archive takes paths, not patterns; name a file or a directory", entry)
 		}
 
-		info, err := os.Stat(filepath.Join(p.Module.Dir, filepath.FromSlash(entry)))
+		info, err := os.Stat(filepath.Join(p.RootDir, filepath.FromSlash(entry)))
 		if err != nil {
 			return nil, fmt.Errorf("archive %s: %w", entry, err)
 		}
@@ -993,7 +1231,7 @@ func (p *Plan) expandArchiveFiles(ctx context.Context, entries []string) ([]stri
 
 		// Read once, and only when a directory is actually named.
 		if tracked == nil {
-			if tracked, err = discover.TrackedFiles(ctx, p.Module.Dir); err != nil {
+			if tracked, err = discover.TrackedFiles(ctx, p.RootDir); err != nil {
 				return nil, fmt.Errorf("archive %s: %w", entry, err)
 			}
 		}

@@ -63,6 +63,11 @@ type Request struct {
 	// build input, so reproducing a release means compiling with the one it
 	// recorded; Go fetches a version it does not have.
 	Toolchain string
+
+	// Tags are build tags. They select which files compile, so they change the
+	// output deterministically and belong in the manifest like any other
+	// recorded input.
+	Tags []string
 }
 
 // Build compiles a single binary.
@@ -102,11 +107,17 @@ func Build(ctx context.Context, req Request) error {
 		// is injected through -X instead, where it is an explicit input we
 		// record rather than an ambient one we hope matches.
 		"-buildvcs=false",
+	}
 
+	if len(req.Tags) > 0 {
+		args = append(args, "-tags="+strings.Join(req.Tags, ","))
+	}
+
+	args = append(args,
 		"-ldflags", strings.Join(ldflags, " "),
 		"-o", req.Output,
 		req.Package,
-	}
+	)
 
 	cmd := exec.CommandContext(ctx, gobin, args...)
 	cmd.Dir = req.Dir

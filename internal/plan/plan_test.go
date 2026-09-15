@@ -504,3 +504,106 @@ func TestArchiveRejectsGlobsAtPlanTime(t *testing.T) {
 		t.Errorf("detail = %q", c.Detail)
 	}
 }
+
+// workspace builds the two-module layout the module directive exists for: a
+// renderer split into its own module so that importing the core does not pull
+// in its dependencies.
+func workspace(t *testing.T, config string) *repo {
+	t.Helper()
+	r := newRepo(t)
+	r.write("go.work", "go 1.24\n\nuse (\n\t.\n\t./web\n)\n")
+	r.write("go.mod", "module github.com/you/merkelbrot\n\ngo 1.24\n")
+	r.write("core.go", "package merkelbrot\n\nfunc Render() string { return \"core\" }\n")
+	r.write("README.md", "# merkelbrot\n")
+	r.write("LICENCE", "MIT\n")
+	r.write("web/go.mod", "module github.com/you/merkelbrot/web\n\ngo 1.24\n")
+	r.write("web/internal/buildinfo/buildinfo.go", "package buildinfo\n\nvar Version = \"dev\"\n")
+	r.write("web/cmd/merkelbrot/main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", config)
+	r.commit("v1.2.3")
+	return r
+}
+
+func TestModuleDirectiveBuildsANestedModule(t *testing.T) {
+	r := workspace(t, "module web\nbuild linux/amd64\n")
+	p := r.resolve(plan.Options{})
+
+	if !p.OK() {
+		t.Fatalf("plan should pass: %+v", p.Checks)
+	}
+	if p.Module.Path != "github.com/you/merkelbrot/web" {
+		t.Errorf("Module.Path = %q", p.Module.Path)
+	}
+	if p.RootDir != r.dir {
+		t.Errorf("RootDir = %q, want the repository root %q", p.RootDir, r.dir)
+	}
+	// Releasing ./web does not rename the project after a directory.
+	if p.Project != "merkelbrot" {
+		t.Errorf("Project = %q, want merkelbrot", p.Project)
+	}
+	// Documentation lives in the repository, not in the module.
+	if strings.Join(p.Files, ",") != "README.md,LICENCE" {
+		t.Errorf("Files = %q, want the repository root's", p.Files)
+	}
+	if len(p.Commands) != 1 || p.Commands[0].RelPath != "./cmd/merkelbrot" {
+		t.Errorf("Commands = %+v", p.Commands)
+	}
+}
+
+// Pointing at a directory with no go.mod would otherwise resolve to an
+// ancestor's, which is a silent no-op rather than the module that was asked for.
+func TestModuleDirectiveRequiresAGoMod(t *testing.T) {
+	r := workspace(t, "module internal\n")
+	r.write("internal/thing.go", "package internal\n")
+	r.commit("")
+
+	c := check(t, r.resolve(plan.Options{}), "module")
+	if c.Status != plan.Fail || !strings.Contains(c.Detail, "no go.mod") {
+		t.Errorf("check = %+v", c)
+	}
+}
+
+func TestVersionDirectiveInjectsIntoANamedSymbol(t *testing.T) {
+	r := workspace(t, "module web\nbuild linux/amd64\nversion internal/buildinfo.Version\n")
+	p := r.resolve(plan.Options{})
+
+	if !p.OK() {
+		t.Fatalf("plan should pass: %+v", p.Checks)
+	}
+	want := "github.com/you/merkelbrot/web/internal/buildinfo.Version"
+	if p.Symbols.Version != want {
+		t.Errorf("Symbols.Version = %q, want %q", p.Symbols.Version, want)
+	}
+	// Only the version was named, so the rest keep the conventional targets.
+	if p.Symbols.Commit != "main.commit" || p.Symbols.Date != "main.date" {
+		t.Errorf("Symbols = %+v", p.Symbols)
+	}
+}
+
+// Asking for injection into a variable that does not exist is a mistake, and
+// shipping binaries that report their compiled-in default is how it shows up.
+func TestVersionDirectiveFailsOnAnUndeclaredSymbol(t *testing.T) {
+	for _, config := range []string{
+		"module web\nversion internal/buildinfo.Missing\n",
+		"module web\nversion internal/nosuchpackage.Version\n",
+	} {
+		c := check(t, workspace(t, config).resolve(plan.Options{}), "version injection")
+		if c.Status != plan.Fail {
+			t.Errorf("%q: status = %s, want fail (%s)", config, c.Status, c.Detail)
+		}
+	}
+}
+
+func TestTagsAreResolvedAndValidated(t *testing.T) {
+	r := workspace(t, "module web\nbuild linux/amd64\ntags netgo osusergo\n")
+	if got := r.resolve(plan.Options{}).Tags; strings.Join(got, ",") != "netgo,osusergo" {
+		t.Errorf("Tags = %q", got)
+	}
+
+	// -tags takes a comma-separated list, so a comma inside one would silently
+	// become two tags.
+	bad := workspace(t, "module web\ntags with,comma\n")
+	if c := check(t, bad.resolve(plan.Options{}), "tags"); c.Status != plan.Fail {
+		t.Errorf("check = %+v", c)
+	}
+}

@@ -42,13 +42,15 @@ func rebuild(ctx context.Context, o Options, result *Result, release *github.Rel
 
 	checkToolchain(ctx, result, m)
 
-	commands, err := discover.FindMainPackages(source, m.Project)
+	moduleDir := filepath.Join(source, filepath.FromSlash(m.ModuleDir))
+
+	commands, err := discover.FindMainPackages(moduleDir, m.Project)
 	if err != nil {
 		result.add("rebuild", Fail, "%v", err)
 		return
 	}
 
-	compareRebuilt(ctx, o, result, m, source, commands)
+	compareRebuilt(ctx, o, result, m, source, moduleDir, commands)
 }
 
 // obtainSource produces a tree to rebuild from.
@@ -130,7 +132,14 @@ func checkToolchain(ctx context.Context, result *Result, m *manifest.Manifest) {
 		local, m.Builder.Go)
 }
 
-func compareRebuilt(ctx context.Context, o Options, result *Result, m *manifest.Manifest, source string, commands []discover.MainPackage) {
+func compareRebuilt(
+	ctx context.Context,
+	o Options,
+	result *Result,
+	m *manifest.Manifest,
+	source, moduleDir string,
+	commands []discover.MainPackage,
+) {
 	var problems []string
 	matched := 0
 
@@ -146,7 +155,8 @@ func compareRebuilt(ctx context.Context, o Options, result *Result, m *manifest.
 		}
 
 		produced, err := build.Run(ctx, build.Options{
-			ModuleDir:    source,
+			ModuleDir:    moduleDir,
+			FilesDir:     source,
 			Package:      cmd.RelPath,
 			Name:         name,
 			Version:      m.Version,
@@ -154,6 +164,7 @@ func compareRebuilt(ctx context.Context, o Options, result *Result, m *manifest.
 			Targets:      targets,
 			ExtraFiles:   build.FindDocumentation(source),
 			ExactLDFlags: exactFlags(wanted),
+			Tags:         recordedTags(wanted),
 			Toolchain:    m.Builder.Go,
 			WorkDir:      filepath.Join(o.WorkDir, "rebuild"),
 		})
@@ -237,6 +248,21 @@ func exactFlags(artifacts []manifest.Artifact) []string {
 		}
 	}
 	return flags
+}
+
+// recordedTags replays the build tags an artifact was compiled with. Tags
+// select which files compile, so a rebuild that drops them is not rebuilding
+// the same program.
+func recordedTags(artifacts []manifest.Artifact) []string {
+	if len(artifacts) == 0 {
+		return nil
+	}
+	for _, flag := range artifacts[0].Build.Flags {
+		if rest, ok := strings.CutPrefix(flag, "-tags="); ok && rest != "" {
+			return strings.Split(rest, ",")
+		}
+	}
+	return nil
 }
 
 func sourceDate(m *manifest.Manifest) time.Time {

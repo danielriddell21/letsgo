@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +17,23 @@ import (
 type Config struct {
 	// Project overrides the project name derived from the module path.
 	Project string
+
+	// ModuleDir is the directory, relative to the repository root, holding the
+	// go.mod to build. Empty means the repository root itself.
+	//
+	// Only the build moves: the repository is still what the source archive
+	// covers and what archive files are resolved against, because a nested
+	// module is a detail of the layout rather than a different project.
+	ModuleDir string
+
+	// Version names the variables the version metadata is injected into.
+	// Nil means the inferred main.version, main.commit and main.date.
+	Version *VersionSymbols
+
+	// Tags are build tags. They change the compiled bytes deterministically
+	// and are pinned by the commit like any other config, so they cost the
+	// reproducibility claim nothing.
+	Tags []string
 
 	// Targets overrides the default build matrix, as "goos/goarch" strings.
 	// Parsing into gobuild.Target happens at plan time so that an invalid
@@ -46,6 +65,18 @@ type Config struct {
 	Draft bool
 }
 
+// VersionSymbols names the variables that receive the version metadata.
+//
+// Each is a package path and a variable, as the linker writes it —
+// "internal/buildinfo.Version" relative to the module, or the fully qualified
+// "github.com/you/tool/internal/buildinfo.Version". An empty field keeps the
+// inferred main.<name>.
+type VersionSymbols struct {
+	Version string
+	Commit  string
+	Date    string
+}
+
 // Image is the container image a release publishes.
 type Image struct {
 	// Reference overrides the default, which is derived from the repository.
@@ -70,15 +101,42 @@ type Image struct {
 // A closed set is the point: an unrecognised directive is a mistake, and
 // saying so immediately is better than ignoring it and producing a release
 // that quietly does not match what the file asked for.
+// known lists every directive, with its arity described for error messages.
+// A closed set is the point: an unrecognised directive is a mistake, and
+// saying so immediately is better than ignoring it and producing a release
+// that quietly does not match what the file asked for.
+//
+// Kept separate from handlers rather than as one table of {usage, apply}
+// pairs, because arity() reads this and every handler calls arity(), which is
+// an initialisation cycle Go will not accept. TestEveryDirectiveIsHandled
+// holds the two in step.
 var known = map[string]string{
 	"project": "project <name>",
+	"module":  "module <dir>",
 	"build":   "build <goos/goarch>... or a build ( ... ) block",
+	"tags":    "tags <tag>...",
 	"ldflags": "ldflags <flag>...",
+	"version": "version <symbol>, or version commit|date <symbol>",
 	"archive": "archive <file>... or an archive ( ... ) block",
 	"budget":  "budget <goos/goarch> <size>",
 	"image":   "image, image <reference>, image base <ref>, image cmd <arg>..., or image expose <port>...",
 	"brew":    "brew <owner/tap-repo>",
 	"release": "release <key=value>...",
+}
+
+// handlers folds each directive into the config.
+var handlers = map[string]func(cfg *Config, file string, line *Line) error{
+	"project": applyProject,
+	"module":  applyModule,
+	"build":   applyBuild,
+	"tags":    applyTags,
+	"ldflags": applyLDFlags,
+	"version": applyVersion,
+	"archive": applyArchive,
+	"budget":  applyBudget,
+	"image":   applyImage,
+	"brew":    applyBrew,
+	"release": applyRelease,
 }
 
 // Decode interprets a parsed file.
@@ -135,7 +193,7 @@ func decodeLine(cfg *Config, file string, seen map[string]Position, line *Line) 
 
 func isScalar(keyword string) bool {
 	switch keyword {
-	case "project", "brew":
+	case "project", "module", "brew":
 		return true
 	}
 	return false
@@ -181,44 +239,124 @@ func checkOnce(file string, seen map[string]Position, keyword string, pos Positi
 // function: the shapes have nothing in common beyond the keyword, and a single
 // switch grew into something nobody could read at a glance.
 func apply(cfg *Config, file string, line *Line) error {
-	switch line.Keyword {
-	case "project":
-		if len(line.Args) != 1 {
-			return arity(file, line)
-		}
-		cfg.Project = line.Args[0]
-
-	case "build":
-		if len(line.Args) == 0 {
-			return arity(file, line)
-		}
-		cfg.Targets = append(cfg.Targets, line.Args...)
-
-	case "ldflags":
-		if len(line.Args) == 0 {
-			return arity(file, line)
-		}
-		cfg.LDFlags = append(cfg.LDFlags, line.Args...)
-
-	case "archive":
-		if len(line.Args) == 0 {
-			return arity(file, line)
-		}
-		cfg.ArchiveFiles = append(cfg.ArchiveFiles, line.Args...)
-
-	case "budget":
-		return applyBudget(cfg, file, line)
-
-	case "image":
-		return applyImage(cfg, file, line)
-
-	case "brew":
-		return applyBrew(cfg, file, line)
-
-	case "release":
-		return applyRelease(cfg, file, line)
+	if handle, ok := handlers[line.Keyword]; ok {
+		return handle(cfg, file, line)
 	}
 	return nil
+}
+
+func applyProject(cfg *Config, file string, line *Line) error {
+	if len(line.Args) != 1 {
+		return arity(file, line)
+	}
+	cfg.Project = line.Args[0]
+	return nil
+}
+
+func applyBuild(cfg *Config, file string, line *Line) error {
+	if len(line.Args) == 0 {
+		return arity(file, line)
+	}
+	cfg.Targets = append(cfg.Targets, line.Args...)
+	return nil
+}
+
+func applyTags(cfg *Config, file string, line *Line) error {
+	if len(line.Args) == 0 {
+		return arity(file, line)
+	}
+	cfg.Tags = append(cfg.Tags, line.Args...)
+	return nil
+}
+
+func applyLDFlags(cfg *Config, file string, line *Line) error {
+	if len(line.Args) == 0 {
+		return arity(file, line)
+	}
+	cfg.LDFlags = append(cfg.LDFlags, line.Args...)
+	return nil
+}
+
+func applyArchive(cfg *Config, file string, line *Line) error {
+	if len(line.Args) == 0 {
+		return arity(file, line)
+	}
+	cfg.ArchiveFiles = append(cfg.ArchiveFiles, line.Args...)
+	return nil
+}
+
+// applyModule reads the module directory.
+//
+// It must stay inside the repository: the path ends up joined to the root and
+// then handed to the toolchain, so an absolute path or one climbing out with
+// ".." would silently build something the commit does not contain.
+func applyModule(cfg *Config, file string, line *Line) error {
+	if len(line.Args) != 1 {
+		return arity(file, line)
+	}
+
+	dir := path.Clean(filepath.ToSlash(line.Args[0]))
+
+	switch {
+	case dir == "." || dir == "":
+		// Naming the root is the default, so saying it is harmless.
+		return nil
+	case path.IsAbs(dir), filepath.IsAbs(line.Args[0]):
+		return errAt(file, line.P, "module %s must be relative to the repository root", line.Args[0])
+	case dir == "..", strings.HasPrefix(dir, "../"):
+		return errAt(file, line.P, "module %s leaves the repository", line.Args[0])
+	}
+
+	cfg.ModuleDir = dir
+	return nil
+}
+
+// applyVersion reads where the version metadata is injected.
+//
+// The bare form names the version's variable, which is the case worth being
+// short; commit and date are keyed, and follow the same shape as the image
+// directive's settings.
+func applyVersion(cfg *Config, file string, line *Line) error {
+	if cfg.Version == nil {
+		cfg.Version = &VersionSymbols{}
+	}
+
+	var (
+		field  *string
+		label  string
+		symbol string
+	)
+	switch {
+	case len(line.Args) == 1:
+		field, label, symbol = &cfg.Version.Version, "version", line.Args[0]
+	case len(line.Args) == 2 && line.Args[0] == "commit":
+		field, label, symbol = &cfg.Version.Commit, "version commit", line.Args[1]
+	case len(line.Args) == 2 && line.Args[0] == "date":
+		field, label, symbol = &cfg.Version.Date, "version date", line.Args[1]
+	default:
+		return arity(file, line)
+	}
+
+	if _, name, ok := cutSymbol(symbol); !ok || name == "" {
+		return errAt(file, line.P,
+			"%s %s must name a package and a variable, as in internal/buildinfo.Version", label, symbol)
+	}
+	if *field != "" {
+		return errAt(file, line.P, "%s is already set", label)
+	}
+	*field = symbol
+	return nil
+}
+
+// cutSymbol splits a linker symbol into its package path and variable name at
+// the final dot, which is where the linker splits it: a package path may
+// contain dots of its own, as every domain-named import path does.
+func cutSymbol(symbol string) (pkg, name string, ok bool) {
+	i := strings.LastIndex(symbol, ".")
+	if i <= 0 {
+		return "", "", false
+	}
+	return symbol[:i], symbol[i+1:], true
 }
 
 func applyBudget(cfg *Config, file string, line *Line) error {
