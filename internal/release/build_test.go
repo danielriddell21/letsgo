@@ -42,6 +42,13 @@ func main() {
 
 func fixture(t *testing.T) *plan.Plan {
 	t.Helper()
+	return resolve(t, fixtureRepo(t, "build "+gobuild.Host().String()+"\n"), nil)
+}
+
+// fixtureRepo writes a minimal releasable module with the given config and
+// commits it, returning the repository root.
+func fixtureRepo(t *testing.T, config string) string {
+	t.Helper()
 	dir := t.TempDir()
 
 	write := func(name, content string) {
@@ -56,7 +63,7 @@ func fixture(t *testing.T) *plan.Plan {
 	write("go.mod", "module example.com/demo\n\ngo 1.24\n")
 	write("main.go", mainGo)
 	write("README.md", "# demo\n")
-	write("letsgo.mod", "build "+gobuild.Host().String()+"\n")
+	write("letsgo.mod", config)
 
 	run := func(args ...string) {
 		t.Helper()
@@ -76,7 +83,14 @@ func fixture(t *testing.T) *plan.Plan {
 	run("commit", "-q", "-m", "feat: first release")
 	run("tag", "v1.2.3")
 
-	p, err := plan.Resolve(context.Background(), plan.Options{Dir: dir})
+	return dir
+}
+
+// resolve plans the repository, optionally as one machine's share of it.
+func resolve(t *testing.T, dir string, only []string) *plan.Plan {
+	t.Helper()
+
+	p, err := plan.Resolve(context.Background(), plan.Options{Dir: dir, OnlyTargets: only})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}

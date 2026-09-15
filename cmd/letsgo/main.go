@@ -241,6 +241,10 @@ func runRelease(args []string) error {
 	appendNotes := fs.Bool("append-notes", false, "add the changelog after an existing release description instead of replacing it")
 	allowVulnerable := fs.Bool("allow-vulnerable", false, "publish despite reachable vulnerabilities, recording which were accepted")
 	allowBreaking := fs.Bool("allow-breaking", false, "publish an incompatible API change without a major version bump")
+	stageTargets := fs.String("stage", "",
+		"build only these targets and stop, for one machine's share of a release (comma-separated)")
+	merge := fs.String("merge", "",
+		"publish the staged directories named here instead of building (comma-separated)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -248,20 +252,38 @@ func runRelease(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
+	if *stageTargets != "" && *merge != "" {
+		return fmt.Errorf("--stage builds a share of a release and --merge publishes the shares; " +
+			"they are two different runs")
+	}
+
 	// A rehearsal needs no forge and no token, so the gates that check for
 	// them are not run.
-	p, dir, result, err := planAndBuild(ctx, planBuildOptions{
+	options := planBuildOptions{
 		Out: *out,
 		Plan: plan.Options{
 			Dir: ".", Publish: !*snapshot, Token: *token, Snapshot: *snapshot,
 			Analyse: true, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
+			OnlyTargets: split(*stageTargets),
 		},
 		FailureNote: "nothing was built or published",
 		Started:     started,
-	})
+		Stage:       *stageTargets != "",
+		Merge:       split(*merge),
+	}
+
+	p, dir, result, err := planAndBuild(ctx, options)
 	if err != nil {
 		return err
 	}
+
+	// A stage stops here: the artifacts and their description are on disk for
+	// another machine to merge, and nothing has been published.
+	if options.Stage {
+		reportStaged(result, dir, started)
+		return nil
+	}
+
 	fmt.Printf("\n  built %d files\n", len(result.Files))
 
 	tokenValue, _ := plan.Token(*token)
@@ -275,13 +297,47 @@ func runRelease(args []string) error {
 		return err
 	}
 
+	return publishRelease(ctx, publishOptions{
+		Plan: p, Result: result, Dir: dir, Notes: notes,
+		Client: client, Token: tokenValue, Repo: repo,
+		Snapshot: *snapshot, Draft: *draft, AppendNotes: *appendNotes, SkipWarm: *skipWarm,
+		Started: started,
+	})
+}
+
+// publishOptions are what writing a release to the world needs.
+type publishOptions struct {
+	Plan   *plan.Plan
+	Result *release.Result
+	Dir    string
+	Notes  string
+
+	Client *github.Client
+	Token  string
+	Repo   github.Repo
+
+	Snapshot    bool
+	Draft       bool
+	AppendNotes bool
+	SkipWarm    bool
+
+	Started time.Time
+}
+
+// publishRelease uploads the assets and everything that follows from them.
+//
+// Split from runRelease because the two halves answer different questions —
+// what to build, and where to put it — and a rehearsal swaps only the second.
+func publishRelease(ctx context.Context, o publishOptions) error {
+	p, result := o.Plan, o.Result
+
 	// Everything above this line is identical in a rehearsal. Only the thing
 	// that writes to the world is exchanged.
 	var (
-		forge  publish.Forge = client
-		tapAPI brew.FileAPI  = client
+		forge  publish.Forge = o.Client
+		tapAPI brew.FileAPI  = o.Client
 	)
-	if *snapshot {
+	if o.Snapshot {
 		fmt.Println("\n  rehearsal: the calls below would be made, and are not")
 		recorder := publish.NewRecorder(os.Stdout)
 		forge, tapAPI = recorder, recorder
@@ -289,16 +345,16 @@ func runRelease(args []string) error {
 
 	published, err := publish.Run(ctx, publish.Options{
 		Client: forge,
-		Repo:   repo,
-		Dir:    dir,
+		Repo:   o.Repo,
+		Dir:    o.Dir,
 		Files:  result.Files,
 		Sums:   sumsFrom(result),
-		Notes:  notesMode(*appendNotes),
+		Notes:  notesMode(o.AppendNotes),
 		Release: github.ReleaseInput{
 			TagName:         releaseTag(p),
 			Name:            releaseTag(p),
-			Body:            notes,
-			Draft:           *draft || p.Config.Draft,
+			Body:            o.Notes,
+			Draft:           o.Draft || p.Config.Draft,
 			Prerelease:      isPrerelease(p),
 			TargetCommitish: p.Git.Commit,
 		},
@@ -313,24 +369,25 @@ func runRelease(args []string) error {
 
 	// After publication, because a formula names download URLs that only
 	// exist once the assets are attached.
-	if err := publishTap(ctx, p, result, tapAPI, client, repo); err != nil {
+	if err := publishTap(ctx, p, result, tapAPI, o.Client, o.Repo); err != nil {
 		return err
 	}
 
-	if err := publishImages(ctx, p, result, tokenValue, *snapshot); err != nil {
+	if err := publishImages(ctx, p, result, o.Token, o.Snapshot); err != nil {
 		return err
 	}
 
-	if !*skipWarm && !*snapshot && !published.Release.Draft {
+	if !o.SkipWarm && !o.Snapshot && !published.Release.Draft {
 		warmProxy(ctx, p)
 	}
 
-	if *snapshot {
-		fmt.Printf("\n  rehearsed in %s \u00b7 nothing was published\n  artifacts: %s\n", took(started), dir)
+	if o.Snapshot {
+		fmt.Printf("\n  rehearsed in %s \u00b7 nothing was published\n  artifacts: %s\n",
+			took(o.Started), o.Dir)
 		return nil
 	}
 
-	fmt.Printf("\n  released in %s\n  %s\n", took(started), published.Release.HTMLURL)
+	fmt.Printf("\n  released in %s\n  %s\n", took(o.Started), published.Release.HTMLURL)
 	return nil
 }
 
@@ -345,6 +402,11 @@ type planBuildOptions struct {
 	FailureNote string
 
 	Started time.Time
+
+	// Stage builds only this machine's share and stops; Merge names the staged
+	// directories to assemble instead of building anything. At most one is set.
+	Stage bool
+	Merge []string
 }
 
 // planAndBuild resolves a plan, prints its report, and builds it.
@@ -355,7 +417,7 @@ type planBuildOptions struct {
 func planAndBuild(ctx context.Context, o planBuildOptions) (*plan.Plan, string, *release.Result, error) {
 	p, err := plan.Resolve(ctx, o.Plan)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("letsgo: %w", err)
+		return nil, "", nil, err
 	}
 	p.Report(os.Stdout, false)
 
@@ -369,13 +431,42 @@ func planAndBuild(ctx context.Context, o planBuildOptions) (*plan.Plan, string, 
 		return nil, "", nil, fmt.Errorf("letsgo: %w", err)
 	}
 
-	result, err := release.Build(ctx, p, dir, version, func(format string, args ...any) {
+	warnf := func(format string, args ...any) {
 		fmt.Printf("    ! "+format+"\n", args...)
-	})
+	}
+
+	var result *release.Result
+	switch {
+	case len(o.Merge) > 0:
+		result, err = release.Merge(p, o.Merge, dir, version)
+	case o.Stage:
+		result, err = release.Stage(ctx, p, dir, version, warnf)
+	default:
+		result, err = release.Build(ctx, p, dir, version, warnf)
+	}
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("letsgo: %w", err)
+		return nil, "", nil, err
 	}
 	return p, dir, result, nil
+}
+
+// split reads a comma-separated flag, ignoring empty entries so that a
+// trailing comma is not a target called "".
+func split(list string) []string {
+	var out []string
+	for _, item := range strings.Split(list, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// reportStaged summarises one machine's share, and says what to do with it.
+func reportStaged(result *release.Result, dir string, started time.Time) {
+	fmt.Printf("\n  staged %d files in %s\n", len(result.Files), dir)
+	fmt.Printf("  merge them with `letsgo release --merge %s`\n", dir)
+	fmt.Printf("\n  done in %s\n", took(started))
 }
 
 // reportPublished summarises what reached the forge.

@@ -45,6 +45,33 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 	if !p.OK() {
 		return nil, fmt.Errorf("release: refusing to build a plan that did not pass its gates")
 	}
+
+	result, err := buildParts(ctx, p, dir, toolVersion, warnf)
+	if err != nil {
+		return nil, err
+	}
+
+	files, err := writeMetadata(p, result.Manifest, toolVersion, dir, result.Artifacts, result.Source)
+	if err != nil {
+		return nil, err
+	}
+	result.Files = files
+
+	return result, nil
+}
+
+// buildParts produces the artifacts and the manifest describing them, and
+// stops short of the files that describe a finished release.
+//
+// Split out because a staged release needs everything up to here and nothing
+// after it: a checksum file and an installer describe a whole release, and a
+// stage is one machine's share of one.
+func buildParts(
+	ctx context.Context,
+	p *plan.Plan,
+	dir, toolVersion string,
+	warnf func(string, ...any),
+) (*Result, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("release: %w", err)
 	}
@@ -89,14 +116,8 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 
 	m := describe(p, toolVersion, goVersion, source, mods, artifacts, images)
 
-	files, err := writeMetadata(p, m, toolVersion, dir, artifacts, source)
-	if err != nil {
-		return nil, err
-	}
-
 	return &Result{
-		Dir: dir, Manifest: m, Artifacts: artifacts, Source: source,
-		Images: images, Files: files,
+		Dir: dir, Manifest: m, Artifacts: artifacts, Source: source, Images: images,
 	}, nil
 }
 

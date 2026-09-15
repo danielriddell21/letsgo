@@ -17,6 +17,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -74,6 +75,11 @@ type Options struct {
 	// AllowBreaking publishes an incompatible API change without a major
 	// version bump.
 	AllowBreaking bool
+
+	// OnlyTargets restricts the build to these "goos/goarch" pairs, for one
+	// machine's share of a release that spans several. The plan still knows
+	// the whole matrix, so the merge can tell whether the shares covered it.
+	OnlyTargets []string
 }
 
 // Status is the outcome of one check.
@@ -483,6 +489,14 @@ type Plan struct {
 	// commands.
 	Groups []Group
 
+	// Matrix is every target the release covers, including any a variant adds
+	// and any this machine was told to leave to another. Groups hold what is
+	// actually built here.
+	Matrix []gobuild.Target
+
+	// Staged reports whether this plan builds only part of the matrix.
+	Staged bool
+
 	// Plugins are the pinned programs this release runs, by hook.
 	Plugins map[plugin.Hook]plugin.Plugin
 
@@ -583,6 +597,8 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 
 	p.resolveTap()
 	p.resolveImage(ctx)
+
+	p.restrictTargets(opts.OnlyTargets)
 
 	if opts.Publish {
 		p.checkForge(ctx, opts)
@@ -1645,7 +1661,11 @@ func (p *Plan) resolveArtifacts(ctx context.Context) {
 	p.Groups = p.defaultGroups()
 	p.applyLayoutPlugin(ctx)
 	p.addVariantGroups(ctx)
+	p.buildArtifacts()
+}
 
+// buildArtifacts turns the groups into the archives they produce.
+func (p *Plan) buildArtifacts() {
 	for _, group := range p.Groups {
 		for _, target := range group.Targets {
 			format := archive.FormatTarGz
@@ -1729,6 +1749,8 @@ func (p *Plan) addVariantGroups(ctx context.Context) {
 		}
 	}
 
+	p.recordMatrix()
+
 	if len(p.Config.Variants) > 0 {
 		names := make([]string, len(p.Config.Variants))
 		for i, v := range p.Config.Variants {
@@ -1737,6 +1759,85 @@ func (p *Plan) addVariantGroups(ctx context.Context) {
 		p.note("variants", strings.Join(names, ", "), ConfigFile)
 		p.add("variants", Pass, "%d variant(s): %s", len(names), strings.Join(names, ", "))
 	}
+}
+
+// recordMatrix collects every target the release covers, before any
+// restriction to one machine's share.
+func (p *Plan) recordMatrix() {
+	seen := map[string]bool{}
+	for _, group := range p.Groups {
+		for _, target := range group.Targets {
+			if !seen[target.String()] {
+				seen[target.String()] = true
+				p.Matrix = append(p.Matrix, target)
+			}
+		}
+	}
+	sortTargets(p.Matrix)
+}
+
+// restrictTargets narrows the build to one machine's share.
+//
+// The matrix is already recorded, so what this removes is still known: a stage
+// says what it built and what the release as a whole needs, and the merge
+// refuses to publish until the shares account for all of it.
+func (p *Plan) restrictTargets(only []string) {
+	if len(only) == 0 {
+		return
+	}
+
+	wanted, err := gobuild.ParseTargets(only)
+	if err != nil {
+		p.add("stage", Fail, "%v", err)
+		return
+	}
+
+	keep := map[string]bool{}
+	for _, target := range wanted {
+		keep[target.String()] = true
+	}
+
+	var unplanned []string
+	for _, target := range wanted {
+		if !slices.ContainsFunc(p.Matrix, func(t gobuild.Target) bool { return t == target }) {
+			unplanned = append(unplanned, target.String())
+		}
+	}
+	if len(unplanned) > 0 {
+		p.add("stage", Fail,
+			"this release does not build %s; its matrix is %s",
+			strings.Join(unplanned, ", "), summarise(p.Matrix))
+		return
+	}
+
+	groups := make([]Group, 0, len(p.Groups))
+	for _, group := range p.Groups {
+		var targets []gobuild.Target
+		for _, target := range group.Targets {
+			if keep[target.String()] {
+				targets = append(targets, target)
+			}
+		}
+		// A group with nothing left belongs to another machine entirely — a
+		// variant that only builds for macOS, say.
+		if len(targets) == 0 {
+			continue
+		}
+		group.Targets = targets
+		groups = append(groups, group)
+	}
+
+	p.Groups, p.Staged = groups, true
+	p.Artifacts = nil
+	p.buildArtifacts()
+
+	p.note("staged targets", summarise(wanted), "--targets")
+	p.add("stage", Pass, "building %d of %d target(s); the rest are another machine's",
+		len(wanted), len(p.Matrix))
+}
+
+func sortTargets(targets []gobuild.Target) {
+	sort.Slice(targets, func(i, j int) bool { return targets[i].String() < targets[j].String() })
 }
 
 // variantToolchain obtains the C compiler a variant needs, which is usually

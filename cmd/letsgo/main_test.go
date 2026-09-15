@@ -194,3 +194,27 @@ func TestErrUsage(t *testing.T) {
 		t.Errorf("errUsage = %v", err)
 	}
 }
+
+// --targets and --merge are comma-separated lists typed by hand, so the
+// forgiving readings matter: a trailing comma must not become a target called
+// "", which would then fail to parse as a platform.
+func TestSplitIgnoresEmptyEntries(t *testing.T) {
+	for _, tt := range []struct {
+		in   string
+		want []string
+	}{
+		{"linux/amd64", []string{"linux/amd64"}},
+		{"linux/amd64,darwin/arm64", []string{"linux/amd64", "darwin/arm64"}},
+		{" linux/amd64 , darwin/arm64 ", []string{"linux/amd64", "darwin/arm64"}},
+		{"linux/amd64,", []string{"linux/amd64"}},
+		{",,linux/amd64,,", []string{"linux/amd64"}},
+		{"", nil},
+		{" ", nil},
+		{",", nil},
+	} {
+		got := split(tt.in)
+		if strings.Join(got, "|") != strings.Join(tt.want, "|") {
+			t.Errorf("split(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
