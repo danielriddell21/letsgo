@@ -22,7 +22,7 @@ func options(t *testing.T, sourceDir, workDir string) repro.Options {
 	t.Helper()
 	return repro.Options{
 		ModuleDir:  sourceDir,
-		Package:    ".",
+		Commands:   []repro.Command{{Package: ".", Binary: "fixture"}},
 		Name:       "fixture",
 		Version:    "1.2.3",
 		Commit:     "9f2ab1c",
@@ -138,12 +138,22 @@ func compare(t *testing.T, first, second []repro.Artifact) {
 			continue
 		}
 
-		// Report the binary first. If the binaries match and the archives do
-		// not, the archive writer is at fault; if the binaries differ, nothing
-		// downstream of the compiler is worth investigating yet.
-		if a.BinarySHA256 != b.BinarySHA256 {
-			t.Errorf("%s: binary is not reproducible\n  run 1: %s\n  run 2: %s",
-				a.Target, a.BinarySHA256, b.BinarySHA256)
+		// Report the binaries first. If they match and the archives do not,
+		// the archive writer is at fault; if they differ, nothing downstream
+		// of the compiler is worth investigating yet.
+		if len(a.Binaries) != len(b.Binaries) {
+			t.Errorf("%s: %d binaries vs %d", a.Target, len(a.Binaries), len(b.Binaries))
+			continue
+		}
+		differed := false
+		for j := range a.Binaries {
+			if a.Binaries[j].SHA256 != b.Binaries[j].SHA256 {
+				t.Errorf("%s: %s is not reproducible\n  run 1: %s\n  run 2: %s",
+					a.Target, a.Binaries[j].Name, a.Binaries[j].SHA256, b.Binaries[j].SHA256)
+				differed = true
+			}
+		}
+		if differed {
 			continue
 		}
 		if a.ArchiveSHA256 != b.ArchiveSHA256 {

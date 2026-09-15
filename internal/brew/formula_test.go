@@ -9,7 +9,7 @@ import (
 
 func sample() brew.Formula {
 	return brew.Formula{
-		Binary: "my-tool", Version: "1.2.3",
+		Name: "my-tool", Binaries: []string{"my-tool"}, Version: "1.2.3",
 		Homepage:    "https://github.com/you/my-tool",
 		Description: `A tool that says "hello"`,
 		License:     "MIT",
@@ -31,7 +31,7 @@ func TestClassNameFollowsHomebrewConvention(t *testing.T) {
 		"foo.bar":    "FooBar",
 		"go-version": "GoVersion",
 	} {
-		if got := (brew.Formula{Binary: binary}).ClassName(); got != want {
+		if got := (brew.Formula{Name: binary}).ClassName(); got != want {
 			t.Errorf("ClassName(%q) = %q, want %q", binary, got, want)
 		}
 	}
@@ -115,7 +115,7 @@ func TestRenderRefusesAnUninstallableRelease(t *testing.T) {
 		t.Error("want an error for a release with nothing Homebrew can install")
 	}
 
-	if _, err := (brew.Formula{Binary: "x"}).Render(); err == nil {
+	if _, err := (brew.Formula{Name: "x", Binaries: []string{"x"}}).Render(); err == nil {
 		t.Error("want an error for an incomplete formula")
 	}
 }

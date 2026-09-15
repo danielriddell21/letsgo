@@ -138,24 +138,96 @@ type Artifact struct {
 	Arch string `json:"arch"`
 	Size int64  `json:"size"`
 
-	// Binary is the executable inside the archive. A module with several
-	// commands produces one archive per command per target, and without this
-	// the manifest cannot say which is which — which anything regenerating a
-	// package definition from a published release has to know.
+	// Binary is the executable inside the archive, when there is exactly one.
+	// Anything regenerating a package definition from a published release has
+	// to know which archive holds which command.
+	//
+	// An archive holding several carries Binaries instead, and leaves this
+	// empty. Both spellings exist because this one is what every release
+	// published so far uses, and a reader that only understands it keeps
+	// working on the releases it was written against.
 	Binary string `json:"binary,omitempty"`
 
-	// BinarySize is the compiled binary's size before archiving. Archive size
-	// moves with the compressor; this is the number that describes what a
-	// user runs, and the one a size budget is written against.
+	// Binaries describes every executable in the archive, when there is more
+	// than one. A module whose product is a collection of tools ships them in
+	// one archive, and then no single digest or size describes it.
+	Binaries []Binary `json:"binaries,omitempty"`
+
+	// BinarySize is the compiled binary's size before archiving, summed over
+	// Binaries where there are several. Archive size moves with the
+	// compressor; this is the number that describes what a user runs, and the
+	// one a size budget is written against.
 	BinarySize int64 `json:"binary_size,omitempty"`
 
 	// SHA256 is the archive's digest; BinarySHA256 is the digest of the
 	// binary inside it. Keeping both means a failed verification says whether
-	// the compiler or the packaging differed.
+	// the compiler or the packaging differed. With several binaries the
+	// per-binary digests are in Binaries and this is empty.
 	SHA256       string `json:"sha256"`
-	BinarySHA256 string `json:"binary_sha256"`
+	BinarySHA256 string `json:"binary_sha256,omitempty"`
 
 	Build Build `json:"build"`
+}
+
+// Binary is one executable inside an archive that holds several.
+type Binary struct {
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+// Executables returns every binary in the archive, whichever way the artifact
+// spells it.
+//
+// Callers that key on a binary — a formula's install line, an image's
+// entrypoint, a yank's list of formulas to retract — go through here rather
+// than reading Binary directly, so that one archive holding eleven tools is
+// not silently read as one holding the first of them.
+func (a Artifact) Executables() []Binary {
+	if len(a.Binaries) > 0 {
+		return a.Binaries
+	}
+	if a.Binary == "" {
+		return nil
+	}
+	return []Binary{{Name: a.Binary, Size: a.BinarySize, SHA256: a.BinarySHA256}}
+}
+
+// BaseName recovers the archive's base name — what it was called before the
+// version and platform were appended. It is the formula's name, and the name a
+// rebuild has to use to produce the same filename.
+func (a Artifact) BaseName(version string) string {
+	return BaseName(a.Name, version, a.OS, a.Arch)
+}
+
+// BaseName strips the suffix the builder appends to every archive.
+//
+// One implementation because three callers need the same answer — the formula
+// writer, the rebuilder and the yanker — and a second copy would be a second
+// chance to disagree about what an archive is called.
+func BaseName(archive, version, goos, goarch string) string {
+	name := archive
+	for _, ext := range []string{".tar.gz", ".zip"} {
+		if trimmed, ok := strings.CutSuffix(name, ext); ok {
+			name = trimmed
+			break
+		}
+	}
+	base, ok := strings.CutSuffix(name, "_"+version+"_"+goos+"_"+goarch)
+	if !ok {
+		return ""
+	}
+	return base
+}
+
+// BinaryNames returns the names of every binary in the archive.
+func (a Artifact) BinaryNames() []string {
+	binaries := a.Executables()
+	names := make([]string, len(binaries))
+	for i, b := range binaries {
+		names[i] = b.Name
+	}
+	return names
 }
 
 // Build records exactly how an artifact was produced, so that reproducing it

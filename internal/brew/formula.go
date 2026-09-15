@@ -28,10 +28,17 @@ type Platform struct {
 	SHA256 string
 }
 
-// Formula describes one binary to publish.
+// Formula describes one archive to publish.
 type Formula struct {
-	// Binary is the executable's name, which is also the formula's name.
-	Binary string
+	// Name is the formula's name, which is the archive's. It is the binary's
+	// name for the ordinary single-command repository, and the module's for
+	// one whose product is a collection of tools.
+	Name string
+
+	// Binaries are the executables the archive installs. A formula names one
+	// archive per platform, so every binary inside it is installed by this
+	// formula rather than by one formula each.
+	Binaries []string
 
 	Version  string
 	Homepage string
@@ -54,14 +61,14 @@ var supported = map[string]bool{
 }
 
 // FileName is where the formula belongs in a tap.
-func (f Formula) FileName() string { return "Formula/" + f.Binary + ".rb" }
+func (f Formula) FileName() string { return "Formula/" + f.Name + ".rb" }
 
 // ClassName is the Ruby class Homebrew expects, derived from the binary name
 // the way Homebrew's own `brew create` derives it.
 func (f Formula) ClassName() string {
 	var b strings.Builder
 	upper := true
-	for _, r := range f.Binary {
+	for _, r := range f.Name {
 		switch {
 		case r == '-' || r == '_' || r == '.' || r == '+':
 			upper = true
@@ -77,7 +84,7 @@ func (f Formula) ClassName() string {
 
 // Render produces the formula.
 func (f Formula) Render() ([]byte, error) {
-	if f.Binary == "" || f.Version == "" || f.Homepage == "" {
+	if f.Name == "" || len(f.Binaries) == 0 || f.Version == "" || f.Homepage == "" {
 		return nil, fmt.Errorf("brew: binary, version and homepage are required")
 	}
 
@@ -88,7 +95,7 @@ func (f Formula) Render() ([]byte, error) {
 		}
 	}
 	if len(usable) == 0 {
-		return nil, fmt.Errorf("brew: %s has no macOS or Linux build to install", f.Binary)
+		return nil, fmt.Errorf("brew: %s has no macOS or Linux build to install", f.Name)
 	}
 	// Sorted so that the same release always renders the same bytes, which is
 	// what lets publication skip an unchanged formula.
@@ -101,10 +108,11 @@ func (f Formula) Render() ([]byte, error) {
 
 	data := struct {
 		Formula
-		Class string
-		MacOS []Platform
-		Linux []Platform
-	}{Formula: f, Class: f.ClassName()}
+		Class   string
+		Install string
+		MacOS   []Platform
+		Linux   []Platform
+	}{Formula: f, Class: f.ClassName(), Install: installList(f.Binaries)}
 
 	for _, p := range usable {
 		if p.OS == "darwin" {
@@ -127,6 +135,16 @@ func (f Formula) Render() ([]byte, error) {
 func quote(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 	return `"` + r.Replace(s) + `"`
+}
+
+// installList renders the arguments to bin.install, which takes every
+// executable the archive holds.
+func installList(binaries []string) string {
+	quoted := make([]string, len(binaries))
+	for i, b := range binaries {
+		quoted[i] = quote(b)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func archBlock(p Platform) string {
@@ -169,14 +187,14 @@ class {{.Class}} < Formula
   end
 {{end}}
   def install
-    bin.install {{quote .Binary}}
+    bin.install {{.Install}}
   end
 
   test do
     # letsgo verifies before publishing that the binary reports this version,
     # so asserting it here catches a formula pointing at the wrong release
     # rather than merely proving the binary starts.
-    assert_match {{quote .Version}}, shell_output("#{bin}/{{.Binary}} --version")
+    assert_match {{quote .Version}}, shell_output("#{bin}/{{index .Binaries 0}} --version")
   end
 end
 `))

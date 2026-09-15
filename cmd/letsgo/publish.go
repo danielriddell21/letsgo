@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
+	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
@@ -42,18 +44,28 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 	return nil
 }
 
-// formulas builds one formula per binary, grouping the artifacts by the
-// command that produced them.
+// formulas builds one formula per archive, grouping the artifacts by the
+// archive they belong to.
+//
+// Per archive rather than per binary, because a formula names one archive per
+// platform: an archive holding eleven tools is one formula that installs
+// eleven binaries, not eleven formulas fighting over the same file.
 func formulas(p *plan.Plan, result *release.Result, repo github.Repo, info *github.RepoInfo) []brew.Formula {
 	tag := releaseTag(p)
 
-	order := make([]string, 0, len(p.Commands))
+	order := make([]string, 0, len(p.Groups))
 	platforms := map[string][]brew.Platform{}
+	binaries := map[string][]string{}
+
 	for _, a := range result.Artifacts {
-		if _, seen := platforms[a.Binary]; !seen {
-			order = append(order, a.Binary)
+		name := formulaName(a, p.Version)
+		if _, seen := platforms[name]; !seen {
+			order = append(order, name)
+			for _, b := range a.Binaries {
+				binaries[name] = append(binaries[name], b.Name)
+			}
 		}
-		platforms[a.Binary] = append(platforms[a.Binary], brew.Platform{
+		platforms[name] = append(platforms[name], brew.Platform{
 			OS: a.OS, Arch: a.Arch,
 			URL:    github.DownloadURL(repo, tag, a.Archive),
 			SHA256: a.ArchiveSHA256,
@@ -61,12 +73,13 @@ func formulas(p *plan.Plan, result *release.Result, repo github.Repo, info *gith
 	}
 
 	out := make([]brew.Formula, 0, len(order))
-	for _, binary := range order {
+	for _, name := range order {
 		formula := brew.Formula{
-			Binary:    binary,
+			Name:      name,
+			Binaries:  binaries[name],
 			Version:   p.Version,
 			Homepage:  "https://" + p.Repo.String(),
-			Platforms: platforms[binary],
+			Platforms: platforms[name],
 		}
 		if info != nil {
 			formula.Description, formula.License = info.Description, info.License
@@ -77,6 +90,12 @@ func formulas(p *plan.Plan, result *release.Result, repo github.Repo, info *gith
 		out = append(out, formula)
 	}
 	return out
+}
+
+// formulaName is the archive's base name, which is what the formula is called.
+func formulaName(a build.Artifact, version string) string {
+	name := strings.TrimSuffix(strings.TrimSuffix(a.Archive, ".tar.gz"), ".zip")
+	return strings.TrimSuffix(name, fmt.Sprintf("_%s_%s_%s", version, a.OS, a.Arch))
 }
 
 // describeRepo reads the description and licence the formula should carry.

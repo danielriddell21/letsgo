@@ -32,10 +32,13 @@ type Options struct {
 	// ModuleDir is the module to build.
 	ModuleDir string
 
-	// Package is the package to build, e.g. "." or "./cmd/foo".
-	Package string
+	// Commands are the binaries to compile into each archive. One is the
+	// ordinary case; several means a module whose product is the collection,
+	// shipped as one archive per target rather than one per tool.
+	Commands []Command
 
-	// Name is the project name, used for the binary and archive filenames.
+	// Name is the archive's base name. With a single command it is also the
+	// binary's name.
 	Name string
 
 	// Version and Commit are injected through the linker.
@@ -99,6 +102,16 @@ type Options struct {
 	Warnf func(format string, args ...any)
 }
 
+// Command is one binary to compile into an archive.
+type Command struct {
+	// Package is the package to build, e.g. "." or "./cmd/foo".
+	Package string
+
+	// Binary is the executable's name inside the archive, without any
+	// platform extension.
+	Binary string
+}
+
 // Artifact is one built and packaged target.
 type Artifact struct {
 	// Size is the archive's size in bytes.
@@ -116,15 +129,16 @@ type Artifact struct {
 	// Archive is the archive filename, e.g. "foo_1.0.0_linux_amd64.tar.gz".
 	Archive string `json:"archive"`
 
-	// Binary is the executable's name inside the archive. A module with
-	// several commands produces one artifact per command per target, and
-	// nothing else in here distinguishes them.
-	Binary string `json:"binary"`
+	// Binaries are the executables in this archive, in the order they were
+	// built, each with its own size and digest. Nothing else in here
+	// distinguishes one archive's contents from another's.
+	Binaries []Binary `json:"binaries"`
 
-	// BinaryPath is where the compiled binary sits on disk, for anything that
-	// needs the executable rather than the archive — a container layer, say.
-	// Never serialised: it is a fact about this machine, not about the release.
-	BinaryPath string `json:"-"`
+	// Paths maps each binary's name to where it sits on disk, for anything
+	// that needs the executable rather than the archive — a container layer,
+	// say. Never serialised: it is a fact about this machine, not about the
+	// release.
+	Paths map[string]string `json:"-"`
 
 	// Target is the GOOS/GOARCH pair, e.g. "linux/amd64".
 	Target string `json:"target"`
@@ -133,11 +147,15 @@ type Artifact struct {
 	OS   string `json:"os"`
 	Arch string `json:"arch"`
 
-	// BinarySHA256 is the digest of the compiled binary before archiving.
-	BinarySHA256 string `json:"binary_sha256"`
-
 	// ArchiveSHA256 is the digest of the archive.
 	ArchiveSHA256 string `json:"archive_sha256"`
+}
+
+// Binary is one compiled executable inside an archive.
+type Binary struct {
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
 }
 
 // Run compiles and packages every target, returning the artifacts sorted by
@@ -174,30 +192,13 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 	cached := 0
 
 	for _, target := range targets {
-		binName := o.Name + target.Ext()
-		binPath := filepath.Join(o.WorkDir, fmt.Sprintf("%s_%s_%s", o.Name, target.OS, target.Arch), binName)
-
-		// The key covers everything that determines these bytes. A build
-		// reused on a partial key would be a build nobody can account for —
-		// and the compiler is a build input, so the resolved version has to be
-		// in here. o.Toolchain alone is not enough: it is usually empty, and
-		// an entry compiled by one Go release would then be handed back to
-		// another.
-		var key string
-		if o.CacheKey != "" {
-			key = CacheKey(o.CacheKey, o.Package, target.String(),
-				strings.Join(ldflags, " "), o.Toolchain, goVersion, binName)
-		}
-
-		reused, err := o.compile(ctx, target, binPath, key, ldflags)
+		built, reused, err := o.compileAll(ctx, target, ldflags, goVersion)
 		if err != nil {
 			return nil, err
 		}
-		if reused {
-			cached++
-		}
+		cached += reused
 
-		artifact, err := o.pack(target, binName, binPath, ldflagString)
+		artifact, err := o.pack(target, built, ldflagString)
 		if err != nil {
 			return nil, err
 		}
@@ -205,7 +206,7 @@ func Run(ctx context.Context, o Options) ([]Artifact, error) {
 	}
 
 	if cached > 0 && o.Warnf != nil {
-		o.Warnf("%d of %d binaries reused from the build cache", cached, len(targets))
+		o.Warnf("%d of %d binaries reused from the build cache", cached, len(targets)*len(o.Commands))
 	}
 
 	slices.SortFunc(out, func(a, b Artifact) int { return strings.Compare(a.Archive, b.Archive) })
@@ -222,11 +223,21 @@ func (o *Options) normalise() error {
 	case len(o.Targets) == 0:
 		return fmt.Errorf("build: no targets")
 	}
-	if o.Package == "" {
-		o.Package = "."
-	}
 	if o.Name == "" {
 		o.Name = "app"
+	}
+	// One unnamed command is the module root, which is what a single-command
+	// repository means and what the zero value should do.
+	if len(o.Commands) == 0 {
+		o.Commands = []Command{{Package: ".", Binary: o.Name}}
+	}
+	for i, cmd := range o.Commands {
+		if cmd.Package == "" {
+			o.Commands[i].Package = "."
+		}
+		if cmd.Binary == "" {
+			o.Commands[i].Binary = o.Name
+		}
 	}
 	if o.FilesDir == "" {
 		o.FilesDir = o.ModuleDir
@@ -278,7 +289,13 @@ func (o Options) linkerFlags() []string {
 
 // compile produces one target's binary, reusing a cached one where the key
 // matches, and reports whether it did.
-func (o Options) compile(ctx context.Context, target gobuild.Target, binPath, key string, ldflags []string) (bool, error) {
+func (o Options) compile(
+	ctx context.Context,
+	pkg string,
+	target gobuild.Target,
+	binPath, key string,
+	ldflags []string,
+) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(binPath), 0o750); err != nil {
 		return false, fmt.Errorf("build: %w", err)
 	}
@@ -287,7 +304,7 @@ func (o Options) compile(ctx context.Context, target gobuild.Target, binPath, ke
 	if !reused {
 		if err := gobuild.Build(ctx, gobuild.Request{
 			Dir:       o.ModuleDir,
-			Package:   o.Package,
+			Package:   pkg,
 			Output:    binPath,
 			Tags:      o.Tags,
 			Target:    target,
@@ -313,22 +330,76 @@ func (o Options) compile(ctx context.Context, target gobuild.Target, binPath, ke
 }
 
 // pack wraps one target's binary in its archive and digests both.
-func (o Options) pack(target gobuild.Target, binName, binPath, ldflagString string) (Artifact, error) {
-	binSum, err := sha256File(binPath)
-	if err != nil {
-		return Artifact{}, err
-	}
-	binInfo, err := os.Stat(binPath)
-	if err != nil {
-		return Artifact{}, fmt.Errorf("build: %w", err)
-	}
+// builtBinary is one compiled executable on disk, before archiving.
+type builtBinary struct {
+	Binary
+	nameOnDisk string
+	path       string
+}
 
+// compileAll produces every command's binary for one target, and reports how
+// many came from the cache.
+func (o Options) compileAll(
+	ctx context.Context,
+	target gobuild.Target,
+	ldflags []string,
+	goVersion string,
+) ([]builtBinary, int, error) {
+	dir := filepath.Join(o.WorkDir, fmt.Sprintf("%s_%s_%s", o.Name, target.OS, target.Arch))
+
+	built := make([]builtBinary, 0, len(o.Commands))
+	cached := 0
+
+	for _, cmd := range o.Commands {
+		binName := cmd.Binary + target.Ext()
+		binPath := filepath.Join(dir, binName)
+
+		// The key covers everything that determines these bytes. A build
+		// reused on a partial key would be a build nobody can account for —
+		// and the compiler is a build input, so the resolved version has to be
+		// in here. o.Toolchain alone is not enough: it is usually empty, and
+		// an entry compiled by one Go release would then be handed back to
+		// another.
+		var key string
+		if o.CacheKey != "" {
+			key = CacheKey(o.CacheKey, cmd.Package, target.String(),
+				strings.Join(ldflags, " "), o.Toolchain, goVersion, binName)
+		}
+
+		reused, err := o.compile(ctx, cmd.Package, target, binPath, key, ldflags)
+		if err != nil {
+			return nil, 0, err
+		}
+		if reused {
+			cached++
+		}
+
+		sum, err := sha256File(binPath)
+		if err != nil {
+			return nil, 0, err
+		}
+		info, err := os.Stat(binPath)
+		if err != nil {
+			return nil, 0, fmt.Errorf("build: %w", err)
+		}
+
+		built = append(built, builtBinary{
+			Binary:     Binary{Name: cmd.Binary, Size: info.Size(), SHA256: sum},
+			nameOnDisk: binName,
+			path:       binPath,
+		})
+	}
+	return built, cached, nil
+}
+
+// pack writes one target's archive, holding every binary built for it.
+func (o Options) pack(target gobuild.Target, built []builtBinary, ldflagString string) (Artifact, error) {
 	format := archive.FormatTarGz
 	if target.OS == "windows" {
 		format = archive.FormatZip
 	}
 
-	entries, err := entriesFor(binName, binPath, o.FilesDir, o.ExtraFiles)
+	entries, err := entriesFor(built, o.FilesDir, o.ExtraFiles)
 	if err != nil {
 		return Artifact{}, err
 	}
@@ -349,17 +420,27 @@ func (o Options) pack(target gobuild.Target, binName, binPath, ldflagString stri
 		return Artifact{}, fmt.Errorf("build: %w", err)
 	}
 
+	binaries := make([]Binary, len(built))
+	paths := make(map[string]string, len(built))
+	total := int64(0)
+	for i, b := range built {
+		binaries[i] = b.Binary
+		paths[b.Name] = b.path
+		total += b.Size
+	}
+
 	return Artifact{
-		Archive:       archiveName,
-		Binary:        o.Name,
-		BinaryPath:    binPath,
-		Target:        target.String(),
-		OS:            target.OS,
-		Arch:          target.Arch,
-		Size:          info.Size(),
-		BinarySize:    binInfo.Size(),
+		Archive:  archiveName,
+		Binaries: binaries,
+		Paths:    paths,
+		Target:   target.String(),
+		OS:       target.OS,
+		Arch:     target.Arch,
+		Size:     info.Size(),
+		// Summed, so that a size budget still describes what a user installs
+		// when an archive carries several tools.
+		BinarySize:    total,
 		LDFlags:       ldflagString,
-		BinarySHA256:  binSum,
 		ArchiveSHA256: archiveSum,
 	}, nil
 }
@@ -376,17 +457,19 @@ func hostFirst(targets []gobuild.Target) []gobuild.Target {
 	return targets
 }
 
-func entriesFor(binName, binPath, moduleDir string, extra []string) ([]archive.Entry, error) {
-	entries := make([]archive.Entry, 0, len(extra)+1)
+func entriesFor(built []builtBinary, moduleDir string, extra []string) ([]archive.Entry, error) {
+	entries := make([]archive.Entry, 0, len(extra)+len(built))
 
-	bin, err := archive.FromFile(binName, binPath)
-	if err != nil {
-		return nil, fmt.Errorf("build: adding binary: %w", err)
+	for _, b := range built {
+		bin, err := archive.FromFile(b.nameOnDisk, b.path)
+		if err != nil {
+			return nil, fmt.Errorf("build: adding binary: %w", err)
+		}
+		// The compiler's output mode can vary with umask; a release binary is
+		// always executable.
+		bin.Executable = true
+		entries = append(entries, bin)
 	}
-	// The compiler's output mode can vary with umask; a release binary is
-	// always executable.
-	bin.Executable = true
-	entries = append(entries, bin)
 
 	for _, name := range extra {
 		e, err := archive.FromFile(name, filepath.Join(moduleDir, name))

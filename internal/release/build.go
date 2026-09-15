@@ -183,16 +183,31 @@ func describe(
 	}
 
 	for _, a := range artifacts {
-		m.Artifacts = append(m.Artifacts, manifest.Artifact{
-			Name: a.Archive, OS: a.OS, Arch: a.Arch, Binary: a.Binary,
+		record := manifest.Artifact{
+			Name: a.Archive, OS: a.OS, Arch: a.Arch,
 			Size: a.Size, BinarySize: a.BinarySize,
-			SHA256: a.ArchiveSHA256, BinarySHA256: a.BinarySHA256,
+			SHA256: a.ArchiveSHA256,
 			Build: manifest.Build{
 				Flags:   buildFlags(p),
 				LDFlags: a.LDFlags,
 				Env:     map[string]string{"CGO_ENABLED": "0", "GOOS": a.OS, "GOARCH": a.Arch},
 			},
-		})
+		}
+
+		// One binary keeps the long-standing spelling, so a reader written
+		// against an earlier release still understands the common case; only
+		// an archive holding several needs the per-binary list.
+		if len(a.Binaries) == 1 {
+			record.Binary = a.Binaries[0].Name
+			record.BinarySHA256 = a.Binaries[0].SHA256
+		} else {
+			for _, b := range a.Binaries {
+				record.Binaries = append(record.Binaries,
+					manifest.Binary{Name: b.Name, Size: b.Size, SHA256: b.SHA256})
+			}
+		}
+
+		m.Artifacts = append(m.Artifacts, record)
 	}
 	manifest.SortArtifacts(m.Artifacts)
 
@@ -226,17 +241,22 @@ func buildCommands(ctx context.Context, p *plan.Plan, dir string, warnf func(str
 	cache := build.OpenCache("")
 
 	var artifacts []build.Artifact
-	for _, cmd := range p.Commands {
-		name := p.Project
-		if len(p.Commands) > 1 {
-			name = cmd.BinaryName
+	for _, group := range p.Groups {
+		commands := make([]build.Command, len(group.Commands))
+		for i, cmd := range group.Commands {
+			commands[i] = build.Command{Package: cmd.RelPath, Binary: cmd.BinaryName}
+		}
+		// A single-command group is named after the project, not the command,
+		// so the binary inside it follows the archive.
+		if len(commands) == 1 {
+			commands[0].Binary = group.Name
 		}
 
 		produced, err := build.Run(ctx, build.Options{
 			ModuleDir:    p.Module.Dir,
 			FilesDir:     p.RootDir,
-			Package:      cmd.RelPath,
-			Name:         name,
+			Commands:     commands,
+			Name:         group.Name,
 			Version:      p.Version,
 			Commit:       p.Git.ShortCommit,
 			ModTime:      p.Git.CommitTime,

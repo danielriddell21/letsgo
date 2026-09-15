@@ -99,10 +99,26 @@ type Source struct {
 
 // Artifact is one archive a release would produce.
 type Artifact struct {
-	Name    string
-	Target  gobuild.Target
-	Command discover.MainPackage
-	Format  archive.Format
+	Name   string
+	Target gobuild.Target
+	Format archive.Format
+
+	// Commands are the binaries inside it. One is the ordinary case; a module
+	// whose product is a collection of tools ships them together.
+	Commands []discover.MainPackage
+}
+
+// Group is one archive's contents, before targets multiply it.
+//
+// This is the seam a layout plugin decides: core knows how to carry several
+// binaries in one archive, and what goes where is a question core answers by
+// default and a plugin can answer instead.
+type Group struct {
+	// Name is the archive's base name, without version, platform or
+	// extension.
+	Name string
+
+	Commands []discover.MainPackage
 }
 
 // ImageTarget is where a release's container images go.
@@ -181,6 +197,10 @@ type Plan struct {
 	LDFlags   []string
 	Files     []string
 	Artifacts []Artifact
+
+	// Groups are the archives the release produces, each holding one or more
+	// commands.
+	Groups []Group
 
 	// Tags are build tags passed to the compiler.
 	Tags []string
@@ -1266,25 +1286,38 @@ func (p *Plan) resolveArtifacts() {
 		return
 	}
 
-	for _, cmd := range p.Commands {
-		name := p.Project
-		// With several commands the project name cannot identify an artifact.
-		if len(p.Commands) > 1 {
-			name = cmd.BinaryName
-		}
+	p.Groups = p.defaultGroups()
+
+	for _, group := range p.Groups {
 		for _, target := range p.Targets {
 			format := archive.FormatTarGz
 			if target.OS == "windows" {
 				format = archive.FormatZip
 			}
 			p.Artifacts = append(p.Artifacts, Artifact{
-				Name:    fmt.Sprintf("%s_%s_%s_%s%s", name, p.Version, target.OS, target.Arch, format.Ext()),
-				Target:  target,
-				Command: cmd,
-				Format:  format,
+				Name: fmt.Sprintf("%s_%s_%s_%s%s",
+					group.Name, p.Version, target.OS, target.Arch, format.Ext()),
+				Target:   target,
+				Commands: group.Commands,
+				Format:   format,
 			})
 		}
 	}
+}
+
+// defaultGroups is one archive per command, which is what letsgo has always
+// produced and what a single-command repository wants.
+func (p *Plan) defaultGroups() []Group {
+	groups := make([]Group, 0, len(p.Commands))
+	for _, cmd := range p.Commands {
+		name := p.Project
+		// With several commands the project name cannot identify an artifact.
+		if len(p.Commands) > 1 {
+			name = cmd.BinaryName
+		}
+		groups = append(groups, Group{Name: name, Commands: []discover.MainPackage{cmd}})
+	}
+	return groups
 }
 
 func summarise(targets []gobuild.Target) string {

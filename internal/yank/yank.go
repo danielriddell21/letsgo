@@ -204,18 +204,24 @@ func FormulasFrom(m *manifest.Manifest, repo github.Repo, project string) []brew
 	var order []string
 	platforms := map[string][]brew.Platform{}
 
+	binaries := map[string][]string{}
+
 	for _, a := range m.Artifacts {
-		// Archives published before the manifest recorded binary names carry
-		// the project's name, which for a single-command module is the same
-		// answer.
-		binary := a.Binary
-		if binary == "" {
-			binary = project
+		// A formula is named after the archive, not after a binary inside it.
+		// Archives published before the manifest recorded any of this fall
+		// back to the project's name, which for a single-command module is the
+		// same answer.
+		name := a.BaseName(m.Version)
+		if name == "" {
+			name = project
 		}
-		if _, seen := platforms[binary]; !seen {
-			order = append(order, binary)
+		if _, seen := platforms[name]; !seen {
+			order = append(order, name)
+			if binaries[name] = a.BinaryNames(); len(binaries[name]) == 0 {
+				binaries[name] = []string{name}
+			}
 		}
-		platforms[binary] = append(platforms[binary], brew.Platform{
+		platforms[name] = append(platforms[name], brew.Platform{
 			OS: a.OS, Arch: a.Arch,
 			URL:    github.DownloadURL(repo, tag, a.Name),
 			SHA256: a.SHA256,
@@ -224,12 +230,13 @@ func FormulasFrom(m *manifest.Manifest, repo github.Repo, project string) []brew
 	sort.Strings(order)
 
 	out := make([]brew.Formula, 0, len(order))
-	for _, binary := range order {
+	for _, name := range order {
 		out = append(out, brew.Formula{
-			Binary:    binary,
+			Name:      name,
+			Binaries:  binaries[name],
 			Version:   m.Version,
 			Homepage:  fmt.Sprintf("https://github.com/%s/%s", repo.Owner, repo.Name),
-			Platforms: platforms[binary],
+			Platforms: platforms[name],
 		})
 	}
 	return out

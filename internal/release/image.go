@@ -90,14 +90,18 @@ func groupForImages(p *plan.Plan, artifacts []build.Artifact) ([]string, map[str
 	var binaries []string
 	byBinary := map[string][]build.Artifact{}
 
+	// An image holds one program, so an archive carrying several produces
+	// several images rather than one image with a choice of entrypoints.
 	for _, a := range artifacts {
 		if !platforms[a.Target] {
 			continue
 		}
-		if _, seen := byBinary[a.Binary]; !seen {
-			binaries = append(binaries, a.Binary)
+		for _, b := range a.Binaries {
+			if _, seen := byBinary[b.Name]; !seen {
+				binaries = append(binaries, b.Name)
+			}
+			byBinary[b.Name] = append(byBinary[b.Name], a)
 		}
-		byBinary[a.Binary] = append(byBinary[a.Binary], a)
 	}
 	return binaries, byBinary
 }
@@ -124,7 +128,7 @@ func buildOne(
 		built.Base = base
 
 		image, err := oci.BuildImage(oci.ImageOptions{
-			Binary:       a.BinaryPath,
+			Binary:       a.Paths[binary],
 			Name:         binary,
 			Platform:     platform,
 			Created:      p.Git.CommitTime,

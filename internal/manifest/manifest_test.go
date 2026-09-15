@@ -149,3 +149,55 @@ func TestSortArtifacts(t *testing.T) {
 		t.Errorf("SortArtifacts produced %+v", artifacts)
 	}
 }
+
+// Both spellings describe the same thing, and every caller that keys on a
+// binary reads them through here. One that read Binary directly would see an
+// archive of eleven tools as an archive of none.
+func TestExecutablesReadsBothSpellings(t *testing.T) {
+	single := Artifact{Binary: "fish", BinarySize: 42, BinarySHA256: "abc"}
+	got := single.Executables()
+	if len(got) != 1 || got[0].Name != "fish" || got[0].Size != 42 || got[0].SHA256 != "abc" {
+		t.Errorf("Executables() = %+v", got)
+	}
+
+	several := Artifact{Binaries: []Binary{{Name: "crabs"}, {Name: "duck"}}}
+	if names := several.BinaryNames(); strings.Join(names, ",") != "crabs,duck" {
+		t.Errorf("BinaryNames() = %q", names)
+	}
+
+	// An archive carrying neither is not an archive of one nameless binary.
+	if got := (Artifact{}).Executables(); got != nil {
+		t.Errorf("Executables() = %+v, want nil", got)
+	}
+	if got := (Artifact{}).BinaryNames(); len(got) != 0 {
+		t.Errorf("BinaryNames() = %q, want none", got)
+	}
+}
+
+// The base name is the formula's name and the name a rebuild must reproduce,
+// so recovering it wrongly is not a cosmetic error.
+func TestBaseNameStripsWhatTheBuilderAppended(t *testing.T) {
+	for _, tt := range []struct {
+		archive, version, goos, goarch, want string
+	}{
+		{"toolshed_1.2.3_linux_amd64.tar.gz", "1.2.3", "linux", "amd64", "toolshed"},
+		{"toolshed_1.2.3_windows_amd64.zip", "1.2.3", "windows", "amd64", "toolshed"},
+		// A variant's suffix is part of the name, not part of the platform.
+		{"gambit-gui_1.2.3_darwin_arm64.tar.gz", "1.2.3", "darwin", "arm64", "gambit-gui"},
+		// A prerelease version contains a hyphen, which must not be mistaken
+		// for a separator.
+		{"tool_1.2.3-rc.1_linux_arm64.tar.gz", "1.2.3-rc.1", "linux", "arm64", "tool"},
+		// Nothing recoverable: an archive this release did not name.
+		{"tool_9.9.9_linux_amd64.tar.gz", "1.2.3", "linux", "amd64", ""},
+		{"letsgo.json", "1.2.3", "linux", "amd64", ""},
+	} {
+		if got := BaseName(tt.archive, tt.version, tt.goos, tt.goarch); got != tt.want {
+			t.Errorf("BaseName(%q) = %q, want %q", tt.archive, got, tt.want)
+		}
+	}
+
+	a := Artifact{Name: "toolshed_1.2.3_linux_amd64.tar.gz", OS: "linux", Arch: "amd64"}
+	if got := a.BaseName("1.2.3"); got != "toolshed" {
+		t.Errorf("Artifact.BaseName() = %q", got)
+	}
+}

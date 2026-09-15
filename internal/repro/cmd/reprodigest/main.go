@@ -48,7 +48,7 @@ func run() error {
 
 	artifacts, err := repro.Build(context.Background(), repro.Options{
 		ModuleDir:  *fixture,
-		Package:    ".",
+		Commands:   []repro.Command{{Package: ".", Binary: "fixture"}},
 		Name:       "fixture",
 		Version:    "1.2.3",
 		Commit:     "9f2ab1c",

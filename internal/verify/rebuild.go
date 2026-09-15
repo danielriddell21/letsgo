@@ -140,31 +140,27 @@ func compareRebuilt(
 	source, moduleDir string,
 	commands []discover.MainPackage,
 ) {
+	groups, err := rebuildGroups(m, commands)
+	if err != nil {
+		result.add("rebuild", Fail, "%v", err)
+		return
+	}
+
 	var problems []string
 	matched := 0
 
-	for _, cmd := range commands {
-		name := m.Project
-		if len(commands) > 1 {
-			name = cmd.BinaryName
-		}
-
-		targets, wanted := targetsFor(m, name)
-		if len(targets) == 0 {
-			continue
-		}
-
+	for _, group := range groups {
 		produced, err := build.Run(ctx, build.Options{
 			ModuleDir:    moduleDir,
 			FilesDir:     source,
-			Package:      cmd.RelPath,
-			Name:         name,
+			Commands:     group.commands,
+			Name:         group.name,
 			Version:      m.Version,
 			ModTime:      sourceDate(m),
-			Targets:      targets,
+			Targets:      group.targets,
 			ExtraFiles:   build.FindDocumentation(source),
-			ExactLDFlags: exactFlags(wanted),
-			Tags:         recordedTags(wanted),
+			ExactLDFlags: exactFlags(group.artifacts),
+			Tags:         recordedTags(group.artifacts),
 			Toolchain:    m.Builder.Go,
 			WorkDir:      filepath.Join(o.WorkDir, "rebuild"),
 		})
@@ -178,15 +174,15 @@ func compareRebuilt(
 			if !ok {
 				continue
 			}
-			switch {
-			case got.BinarySHA256 != want.BinarySHA256:
+			switch differing := differingBinaries(got, want); {
+			case len(differing) > 0:
 				// Reported first: if the binaries differ, nothing downstream
 				// of the compiler is worth investigating yet.
-				problems = append(problems, fmt.Sprintf("%s: binary rebuilt as %s, published %s",
-					got.Target, short(got.BinarySHA256), short(want.BinarySHA256)))
+				problems = append(problems,
+					fmt.Sprintf("%s: %s", got.Target, strings.Join(differing, "; ")))
 			case got.ArchiveSHA256 != want.SHA256:
 				problems = append(problems, fmt.Sprintf(
-					"%s: binary matches but the archive does not (%s vs %s)",
+					"%s: binaries match but the archive does not (%s vs %s)",
 					got.Target, short(got.ArchiveSHA256), short(want.SHA256)))
 			default:
 				matched++
@@ -211,20 +207,102 @@ func compareRebuilt(
 	}
 }
 
-// targetsFor returns the targets belonging to one command, and the artifacts
-// describing them.
-func targetsFor(m *manifest.Manifest, name string) ([]gobuild.Target, []manifest.Artifact) {
-	var targets []gobuild.Target
-	var artifacts []manifest.Artifact
+// differingBinaries names every executable whose digest does not match what the
+// release published. An archive can hold several, and saying which one moved is
+// the difference between a lead and a shrug.
+func differingBinaries(got build.Artifact, want manifest.Artifact) []string {
+	published := make(map[string]string, len(want.Executables()))
+	for _, b := range want.Executables() {
+		published[b.Name] = b.SHA256
+	}
+
+	var differing []string
+	for _, b := range got.Binaries {
+		switch recorded, ok := published[b.Name]; {
+		case !ok:
+			differing = append(differing, fmt.Sprintf("%s was rebuilt but the release does not list it", b.Name))
+		case recorded != b.SHA256:
+			differing = append(differing, fmt.Sprintf("%s rebuilt as %s, published %s",
+				b.Name, short(b.SHA256), short(recorded)))
+		}
+	}
+	return differing
+}
+
+// rebuildGroup is one archive to rebuild: which binaries go in it, and every
+// target it was published for.
+type rebuildGroup struct {
+	name      string
+	commands  []build.Command
+	targets   []gobuild.Target
+	artifacts []manifest.Artifact
+}
+
+// rebuildGroups reconstructs the archives from the manifest rather than from
+// the source tree.
+//
+// The manifest is the authority here: it says which binaries shared an archive,
+// and re-deriving that from the commands would mean re-running whatever decided
+// the layout — which may have been a plugin this machine does not have.
+func rebuildGroups(m *manifest.Manifest, commands []discover.MainPackage) ([]rebuildGroup, error) {
+	byName := map[string]string{}
+	for _, c := range commands {
+		byName[c.BinaryName] = c.RelPath
+	}
+
+	var order []string
+	groups := map[string]*rebuildGroup{}
 
 	for _, a := range m.Artifacts {
-		if !strings.HasPrefix(a.Name, name+"_"+m.Version+"_") {
+		base := a.BaseName(m.Version)
+		if base == "" {
 			continue
 		}
-		targets = append(targets, gobuild.Target{OS: a.OS, Arch: a.Arch})
-		artifacts = append(artifacts, a)
+
+		group, ok := groups[base]
+		if !ok {
+			binaries := a.BinaryNames()
+			built, err := commandsFor(binaries, commands, byName)
+			if err != nil {
+				return nil, err
+			}
+			group = &rebuildGroup{name: base, commands: built}
+			groups[base], order = group, append(order, base)
+		}
+
+		group.targets = append(group.targets, gobuild.Target{OS: a.OS, Arch: a.Arch})
+		group.artifacts = append(group.artifacts, a)
 	}
-	return targets, artifacts
+
+	out := make([]rebuildGroup, 0, len(order))
+	for _, name := range order {
+		out = append(out, *groups[name])
+	}
+	return out, nil
+}
+
+// commandsFor maps the binaries an archive held back to the packages that
+// build them.
+func commandsFor(
+	binaries []string,
+	commands []discover.MainPackage,
+	byName map[string]string,
+) ([]build.Command, error) {
+	// A module with one command names its binary after the project, not after
+	// the command's directory, so there is nothing to match on.
+	if len(commands) == 1 && len(binaries) == 1 {
+		return []build.Command{{Package: commands[0].RelPath, Binary: binaries[0]}}, nil
+	}
+
+	out := make([]build.Command, 0, len(binaries))
+	for _, binary := range binaries {
+		pkg, ok := byName[binary]
+		if !ok {
+			return nil, fmt.Errorf("the release published %s, which this source has no main package for", binary)
+		}
+		out = append(out, build.Command{Package: pkg, Binary: binary})
+	}
+	return out, nil
 }
 
 // exactFlags recovers the linker flags a release recorded.

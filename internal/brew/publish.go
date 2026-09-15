@@ -60,7 +60,7 @@ func Publish(ctx context.Context, api FileAPI, tap github.Repo, f Formula) (Resu
 
 	if err := api.WriteFile(ctx, tap, github.FileInput{
 		Path:    path,
-		Message: fmt.Sprintf("%s %s", f.Binary, f.Version),
+		Message: fmt.Sprintf("%s %s", f.Name, f.Version),
 		Content: content,
 		SHA:     sha,
 	}); err != nil {

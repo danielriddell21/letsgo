@@ -24,6 +24,7 @@ import (
 // code reads as one thing rather than two.
 type (
 	Options  = build.Options
+	Command  = build.Command
 	Artifact = build.Artifact
 )
 
@@ -58,7 +59,7 @@ func ImageDigest(artifacts []Artifact, name string, created time.Time) (string, 
 			continue
 		}
 		image, err := oci.BuildImage(oci.ImageOptions{
-			Binary:   a.BinaryPath,
+			Binary:   a.Paths[name],
 			Name:     name,
 			Platform: oci.Platform{OS: a.OS, Architecture: a.Arch},
 			Created:  created,
