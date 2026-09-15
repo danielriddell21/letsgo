@@ -14,12 +14,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/plugin"
 )
 
 // Result is everything a release consists of on disk.
@@ -173,7 +175,7 @@ func describe(
 		Commit:          p.Git.Commit,
 		SourceDateEpoch: p.Git.CommitTime.Unix(),
 		ModuleDir:       p.Config.ModuleDir,
-		Builder:         manifest.Builder{Tool: "letsgo " + toolVersion, Go: goVersion},
+		Builder:         builder(p, toolVersion, goVersion),
 		Source:          &manifest.Source{Archive: source.Name, SHA256: source.SHA256},
 		Modules:         mods,
 		Gates:           gates(p),
@@ -212,6 +214,26 @@ func describe(
 	manifest.SortArtifacts(m.Artifacts)
 
 	return m
+}
+
+// builder records what produced the release, including any plugin that took
+// part in deciding it.
+func builder(p *plan.Plan, toolVersion, goVersion string) manifest.Builder {
+	b := manifest.Builder{Tool: "letsgo " + toolVersion, Go: goVersion}
+
+	hooks := make([]string, 0, len(p.Plugins))
+	for hook := range p.Plugins {
+		hooks = append(hooks, string(hook))
+	}
+	sort.Strings(hooks)
+
+	for _, hook := range hooks {
+		used := p.Plugins[plugin.Hook(hook)]
+		b.Plugins = append(b.Plugins, manifest.BuilderPlugin{
+			Hook: hook, Command: used.Command, Version: used.Version, Digest: used.Digest,
+		})
+	}
+	return b
 }
 
 // buildFlags are the go build flags an artifact was produced with, recorded so

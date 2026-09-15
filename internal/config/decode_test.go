@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestImageDirective(t *testing.T) {
 	cfg := decode(t, "image\n")
@@ -162,6 +165,37 @@ func TestEveryDirectiveIsHandled(t *testing.T) {
 	for name := range handlers {
 		if known[name] == "" {
 			t.Errorf("directive %q is handled but not documented", name)
+		}
+	}
+}
+
+func TestPluginDirective(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	cfg := decode(t, "plugin archive-layout letsgo-multi v0.1.0 "+digest+"\n")
+
+	if len(cfg.Plugins) != 1 {
+		t.Fatalf("Plugins = %+v", cfg.Plugins)
+	}
+	got := cfg.Plugins[0]
+	if got.Hook != "archive-layout" || got.Command != "letsgo-multi" ||
+		got.Version != "v0.1.0" || got.Digest != digest {
+		t.Errorf("plugin = %+v", got)
+	}
+}
+
+// A plugin that ran unpinned would be an unrecorded build input, which is the
+// thing the whole contract exists to prevent.
+func TestPluginDirectiveRequiresAPin(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	for _, in := range []string{
+		"plugin archive-layout letsgo-multi v0.1.0\n",
+		"plugin archive-layout letsgo-multi v0.1.0 deadbeef\n",
+		"plugin archive-layout letsgo-multi v0.1.0 sha256:short\n",
+		"plugin archive-layout letsgo-multi v0.1.0 md5:" + strings.Repeat("a", 64) + "\n",
+		"plugin archive-layout a v1 " + digest + "\nplugin archive-layout b v1 " + digest + "\n",
+	} {
+		if _, err := Decode(parse(t, in)); err == nil {
+			t.Errorf("%q should not have parsed", in)
 		}
 	}
 }

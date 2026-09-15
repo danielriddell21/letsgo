@@ -29,6 +29,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/oci"
+	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
@@ -121,6 +122,159 @@ type Group struct {
 	Commands []discover.MainPackage
 }
 
+// resolvePlugins reads the pinned plugins, without running any.
+//
+// Whether a plugin is installed and matches its pin is checked when it runs;
+// what is checked here is that the config names hooks letsgo has, because an
+// unknown hook is a plugin that would silently never run.
+func (p *Plan) resolvePlugins() {
+	if len(p.Config.Plugins) == 0 {
+		return
+	}
+
+	p.Plugins = make(map[plugin.Hook]plugin.Plugin, len(p.Config.Plugins))
+	named := make([]string, 0, len(p.Config.Plugins))
+
+	for _, configured := range p.Config.Plugins {
+		hook := plugin.Hook(configured.Hook)
+		if !hook.Valid() {
+			hooks := make([]string, len(plugin.Hooks))
+			for i, h := range plugin.Hooks {
+				hooks[i] = string(h)
+			}
+			p.add("plugins", Fail, "%q is not a hook; letsgo has %s",
+				configured.Hook, strings.Join(hooks, " and "))
+			return
+		}
+		p.Plugins[hook] = plugin.Plugin{
+			Hook:    hook,
+			Command: configured.Command,
+			Version: configured.Version,
+			Digest:  configured.Digest,
+		}
+		named = append(named, fmt.Sprintf("%s %s (%s)", configured.Command, configured.Version, hook))
+	}
+
+	p.note("plugins", strings.Join(named, ", "), ConfigFile)
+}
+
+// applyLayoutPlugin asks the layout plugin which binaries share an archive.
+//
+// Core has already decided; the plugin replaces that answer, and what comes
+// back is recorded in the manifest so that verification replays the layout
+// rather than asking again. A machine with no plugins installed can still
+// verify the release.
+func (p *Plan) applyLayoutPlugin(ctx context.Context) {
+	configured, ok := p.Plugins[plugin.HookArchiveLayout]
+	if !ok {
+		return
+	}
+
+	in := plugin.ArchiveLayoutInput{
+		Project: p.Project,
+		Version: p.Version,
+		Module:  p.Module.Path,
+		Targets: make([]string, len(p.Targets)),
+	}
+	for i, t := range p.Targets {
+		in.Targets[i] = t.String()
+	}
+	for _, cmd := range p.Commands {
+		in.Commands = append(in.Commands,
+			plugin.InputCommand{Binary: cmd.BinaryName, Package: cmd.RelPath})
+	}
+
+	var out plugin.ArchiveLayoutOutput
+	if err := plugin.Run(ctx, configured, in, &out); err != nil {
+		p.add("plugins", Fail, "%v", err)
+		return
+	}
+
+	groups, err := layoutGroups(out, p.Commands)
+	if err != nil {
+		p.add("plugins", Fail, "plugin %s: %v", configured.Command, err)
+		return
+	}
+
+	p.Groups = groups
+	p.note("archives", describeGroups(groups), configured.Command)
+	p.add("plugins", Pass, "%s laid out %d archive(s)", configured.Command, len(groups))
+}
+
+// layoutGroups turns a plugin's answer into groups, refusing one that does not
+// account for every command exactly once.
+//
+// Checked rather than trusted: a layout that drops a command ships a release
+// missing a binary, and one that repeats a command produces two archives
+// claiming the same program. Both are silent.
+func layoutGroups(out plugin.ArchiveLayoutOutput, commands []discover.MainPackage) ([]Group, error) {
+	byName := make(map[string]discover.MainPackage, len(commands))
+	for _, cmd := range commands {
+		byName[cmd.BinaryName] = cmd
+	}
+
+	seen := map[string]string{}
+	groups := make([]Group, 0, len(out.Archives))
+
+	for _, archive := range out.Archives {
+		group, err := layoutGroup(archive, byName, seen)
+		if err != nil {
+			return nil, err
+		}
+		groups = append(groups, group)
+	}
+
+	for _, cmd := range commands {
+		if _, ok := seen[cmd.BinaryName]; !ok {
+			return nil, fmt.Errorf("%s is in no archive, so the release would not ship it", cmd.BinaryName)
+		}
+	}
+	return groups, nil
+}
+
+// layoutGroup turns one of a plugin's archives into a group, recording in seen
+// which archive claimed each binary so that a second claim can be named
+// against the first.
+func layoutGroup(
+	archive plugin.OutputArchive,
+	byName map[string]discover.MainPackage,
+	seen map[string]string,
+) (Group, error) {
+	if archive.Name == "" {
+		return Group{}, fmt.Errorf("it returned an archive with no name")
+	}
+	if len(archive.Binaries) == 0 {
+		return Group{}, fmt.Errorf("archive %s holds no binaries", archive.Name)
+	}
+
+	group := Group{Name: archive.Name}
+	for _, binary := range archive.Binaries {
+		cmd, ok := byName[binary]
+		if !ok {
+			return Group{}, fmt.Errorf("archive %s names %s, which this module does not build",
+				archive.Name, binary)
+		}
+		if first, repeated := seen[binary]; repeated {
+			return Group{}, fmt.Errorf("%s is in both %s and %s", binary, first, archive.Name)
+		}
+		seen[binary] = archive.Name
+		group.Commands = append(group.Commands, cmd)
+	}
+	return group, nil
+}
+
+func describeGroups(groups []Group) string {
+	out := make([]string, len(groups))
+	for i, g := range groups {
+		binaries := make([]string, len(g.Commands))
+		for j, cmd := range g.Commands {
+			binaries[j] = cmd.BinaryName
+		}
+		out[i] = fmt.Sprintf("%s (%s)", g.Name, strings.Join(binaries, ", "))
+	}
+	return strings.Join(out, ", ")
+}
+
 // ImageTarget is where a release's container images go.
 type ImageTarget struct {
 	// Registry is the host as it is written and published — "docker.io", not
@@ -202,6 +356,9 @@ type Plan struct {
 	// commands.
 	Groups []Group
 
+	// Plugins are the pinned programs this release runs, by hook.
+	Plugins map[plugin.Hook]plugin.Plugin
+
 	// Tags are build tags passed to the compiler.
 	Tags []string
 
@@ -282,6 +439,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	// move it: `module web` says the go.mod to build is not the one beside
 	// letsgo.mod.
 	p.loadConfig(root.Dir)
+	p.resolvePlugins()
 	p.resolveModule()
 	p.resolveProject()
 	p.resolveVersion(ctx)
@@ -290,7 +448,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveBudgets()
 	p.resolveCommands()
 	p.resolveFiles(ctx)
-	p.resolveArtifacts()
+	p.resolveArtifacts(ctx)
 
 	p.resolveTap()
 	p.resolveImage(ctx)
@@ -1281,12 +1439,13 @@ func filesUnder(tracked []string, dir string) []string {
 	return found
 }
 
-func (p *Plan) resolveArtifacts() {
+func (p *Plan) resolveArtifacts(ctx context.Context) {
 	if p.Version == "" || len(p.Commands) == 0 {
 		return
 	}
 
 	p.Groups = p.defaultGroups()
+	p.applyLayoutPlugin(ctx)
 
 	for _, group := range p.Groups {
 		for _, target := range p.Targets {

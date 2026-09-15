@@ -30,6 +30,11 @@ type Config struct {
 	// Nil means the inferred main.version, main.commit and main.date.
 	Version *VersionSymbols
 
+	// Plugins are the external programs this repository puts in the middle of
+	// its release, keyed by hook. Each is pinned by digest: a program that
+	// decides what gets built is a build input.
+	Plugins []Plugin
+
 	// Tags are build tags. They change the compiled bytes deterministically
 	// and are pinned by the commit like any other config, so they cost the
 	// reproducibility claim nothing.
@@ -63,6 +68,14 @@ type Config struct {
 
 	// Draft creates the release without publishing it.
 	Draft bool
+}
+
+// Plugin is one external program invoked at a named hook.
+type Plugin struct {
+	Hook    string
+	Command string
+	Version string
+	Digest  string
 }
 
 // VersionSymbols names the variables that receive the version metadata.
@@ -101,10 +114,6 @@ type Image struct {
 // A closed set is the point: an unrecognised directive is a mistake, and
 // saying so immediately is better than ignoring it and producing a release
 // that quietly does not match what the file asked for.
-// known lists every directive, with its arity described for error messages.
-// A closed set is the point: an unrecognised directive is a mistake, and
-// saying so immediately is better than ignoring it and producing a release
-// that quietly does not match what the file asked for.
 //
 // Kept separate from handlers rather than as one table of {usage, apply}
 // pairs, because arity() reads this and every handler calls arity(), which is
@@ -115,6 +124,7 @@ var known = map[string]string{
 	"module":  "module <dir>",
 	"build":   "build <goos/goarch>... or a build ( ... ) block",
 	"tags":    "tags <tag>...",
+	"plugin":  "plugin <hook> <command> <version> sha256:<digest>",
 	"ldflags": "ldflags <flag>...",
 	"version": "version <symbol>, or version commit|date <symbol>",
 	"archive": "archive <file>... or an archive ( ... ) block",
@@ -130,6 +140,7 @@ var handlers = map[string]func(cfg *Config, file string, line *Line) error{
 	"module":  applyModule,
 	"build":   applyBuild,
 	"tags":    applyTags,
+	"plugin":  applyPlugin,
 	"ldflags": applyLDFlags,
 	"version": applyVersion,
 	"archive": applyArchive,
@@ -266,6 +277,35 @@ func applyTags(cfg *Config, file string, line *Line) error {
 		return arity(file, line)
 	}
 	cfg.Tags = append(cfg.Tags, line.Args...)
+	return nil
+}
+
+// applyPlugin reads one plugin pin.
+//
+// Four fields and no defaults: the hook says when it runs, the command what to
+// run, the version what was asked for, and the digest what actually has to be
+// on disk. Nothing here is optional, because a plugin that ran unpinned would
+// be an unrecorded build input — the thing the whole contract exists to
+// prevent.
+func applyPlugin(cfg *Config, file string, line *Line) error {
+	if len(line.Args) != 4 {
+		return arity(file, line)
+	}
+
+	hook, command, version, digest := line.Args[0], line.Args[1], line.Args[2], line.Args[3]
+
+	for _, existing := range cfg.Plugins {
+		if existing.Hook == hook {
+			return errAt(file, line.P, "a plugin for the %s hook is already set", hook)
+		}
+	}
+	if !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
+		return errAt(file, line.P, "plugin %s: %q is not a sha256 digest", command, digest)
+	}
+
+	cfg.Plugins = append(cfg.Plugins, Plugin{
+		Hook: hook, Command: command, Version: version, Digest: digest,
+	})
 	return nil
 }
 

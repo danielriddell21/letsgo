@@ -105,6 +105,23 @@ type APIChange struct {
 type Builder struct {
 	Tool string `json:"tool"`
 	Go   string `json:"go"`
+
+	// Plugins are the external programs that took part, pinned to the exact
+	// executables that ran.
+	//
+	// Recorded for the reader, not for the verifier: everything a plugin
+	// decided is already written into the artifacts it decided for, so
+	// verification replays the result and never runs a plugin. This is what
+	// says one took part at all.
+	Plugins []BuilderPlugin `json:"plugins,omitempty"`
+}
+
+// BuilderPlugin is one plugin that ran during a release.
+type BuilderPlugin struct {
+	Hook    string `json:"hook"`
+	Command string `json:"command"`
+	Version string `json:"version,omitempty"`
+	Digest  string `json:"digest"`
 }
 
 // Source is the deterministic source archive published with the release.
