@@ -121,6 +121,12 @@ type ImageTarget struct {
 	// Base is the image to stack on. The zero value means scratch.
 	Base oci.Reference
 
+	// Cmd is the default argument list, and Expose the ports to record. Both
+	// are config verbatim: they are strings in the image config, so the commit
+	// pins them exactly as it pins the reference.
+	Cmd    []string
+	Expose []string
+
 	// Platforms are the targets that get an image, which is the Linux subset
 	// of the build matrix: nothing else runs in a container.
 	Platforms []gobuild.Target
@@ -239,7 +245,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveArtifacts()
 
 	p.resolveTap()
-	p.resolveImage()
+	p.resolveImage(ctx)
 
 	if opts.Publish {
 		p.checkForge(ctx, opts)
@@ -545,7 +551,7 @@ func (p *Plan) resolveTap() {
 // The reference names a repository and nothing else: the tag comes from the
 // release, so accepting one here would create two answers to what a release is
 // called and let them disagree.
-func (p *Plan) resolveImage() {
+func (p *Plan) resolveImage(ctx context.Context) {
 	if p.Config.Image == nil {
 		return
 	}
@@ -576,6 +582,7 @@ func (p *Plan) resolveImage() {
 
 	target := &ImageTarget{
 		Registry: ref.Registry, APIHost: ref.APIHost(), Repository: ref.Repository,
+		Cmd: p.Config.Image.Cmd, Expose: p.Config.Image.Expose,
 	}
 	for _, t := range p.Targets {
 		if t.OS == "linux" {
@@ -603,16 +610,60 @@ func (p *Plan) resolveImage() {
 		p.add("image", Pass, "%s on scratch, for %d platform(s)", reference, len(target.Platforms))
 		return
 	}
+	p.checkBase(ctx, reference, target)
+}
+
+// checkBase resolves the base image while planning rather than while building.
+//
+// Whether a base can be fetched is a fact about the release, and plan's whole
+// purpose is to surface those in two seconds rather than after a cross-compile
+// of every target. Resolving it here also turns the "named by tag" warning
+// from advice into an instruction: it can name the digest to pin.
+//
+// One platform is enough to answer the question. The release resolves each
+// one and caches them, which is a different job.
+func (p *Plan) checkBase(ctx context.Context, reference string, target *ImageTarget) {
+	registry := oci.NewRegistry(target.Base.APIHost())
+	registry.UserAgent = "letsgo"
+
+	platform := oci.Platform{OS: "linux", Architecture: target.Platforms[0].Arch}
+
+	base, err := oci.ResolveBase(ctx, registry, target.Base, platform)
+
+	status, detail := baseResult(reference, target, base, err)
+	p.add("image", status, "%s", detail)
+}
+
+// baseResult judges a base resolution.
+//
+// Separated from the fetch above because the judgement is the part worth
+// testing: whether a failure is the config's fault turns on who answered, and
+// that distinction should not need a registry to exercise.
+func baseResult(reference string, target *ImageTarget, base *oci.Base, err error) (Status, string) {
+	where := fmt.Sprintf("%s on %s, for %d platform(s)", reference, target.Base, len(target.Platforms))
+
+	if err != nil {
+		// A registry that answered is reporting a real problem with the
+		// reference — the wrong repository, a tag that does not exist, a
+		// private image. One that could not be reached says nothing about the
+		// config, and planning offline is worth keeping.
+		var answered *oci.Error
+		if errors.As(err, &answered) {
+			return Fail, err.Error()
+		}
+		return Warn, fmt.Sprintf(
+			"%s\n  the base could not be resolved, so it was not checked: %v", where, err)
+	}
+
 	if target.Base.Digest == "" {
 		// A tag is a moving target. The resolved digest is recorded in the
-		// manifest either way, so this is a warning rather than a refusal.
-		p.add("image", Warn,
-			"%s on %s, for %d platform(s)\n"+
-				"  the base is named by tag, so two releases of the same commit can differ; pin it with @sha256:…",
-			reference, target.Base, len(target.Platforms))
-		return
+		// manifest either way, so this is a warning rather than a refusal —
+		// and naming the digest makes the fix a copy and paste.
+		return Warn, fmt.Sprintf(
+			"%s\n  the base is named by tag, so two releases of the same commit can differ; "+
+				"pin it with @%s", where, base.IndexDigest)
 	}
-	p.add("image", Pass, "%s on %s, for %d platform(s)", reference, target.Base, len(target.Platforms))
+	return Pass, where
 }
 
 // checkTap establishes that the formula has somewhere to go before anything is

@@ -150,6 +150,80 @@ func TestBuildImageSetsEntrypointAndAnnotations(t *testing.T) {
 	}
 }
 
+// The entrypoint is inferred from the binary; which of its subcommands runs
+// when the image is started bare is not something a binary name can say.
+func TestBuildImageSetsCmdAndExposedPorts(t *testing.T) {
+	o := options(t)
+	o.Cmd = []string{"serve"}
+	o.ExposedPorts = []string{"8080/tcp"}
+
+	img, err := oci.BuildImage(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var config oci.Config
+	if err := json.Unmarshal(img.ConfigJS.Content, &config); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Config.Cmd) != 1 || config.Config.Cmd[0] != "serve" {
+		t.Errorf("cmd = %v", config.Config.Cmd)
+	}
+	if _, ok := config.Config.ExposedPorts["8080/tcp"]; !ok {
+		t.Errorf("exposed ports = %v", config.Config.ExposedPorts)
+	}
+
+	// Absent rather than empty: the config blob's bytes are its digest, so a
+	// field nobody asked for would change the image.
+	if bytes.Contains(img.ConfigJS.Content, []byte("ExposedPorts")) !=
+		(len(config.Config.ExposedPorts) > 0) {
+		t.Error("ExposedPorts is serialised when it is empty")
+	}
+	plain, err := oci.BuildImage(options(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(plain.ConfigJS.Content, []byte("ExposedPorts")) ||
+		bytes.Contains(plain.ConfigJS.Content, []byte(`"Cmd"`)) {
+		t.Errorf("an image with neither carries the fields anyway: %s", plain.ConfigJS.Content)
+	}
+}
+
+// A base's ports accumulate the way EXPOSE does, but its Cmd does not: it is
+// the argument list for an entrypoint we have just replaced.
+func TestBuildImageInheritsPortsButNotCmd(t *testing.T) {
+	o := options(t)
+	o.Cmd = []string{"serve"}
+	o.ExposedPorts = []string{"8080/tcp"}
+	o.Base = &oci.Base{
+		Reference: "gcr.io/distroless/static@sha256:aaaa",
+		Digest:    "sha256:aaaa",
+		Config: oci.Config{
+			Config: oci.RunConfig{
+				Cmd:          []string{"--base-flag"},
+				ExposedPorts: map[string]struct{}{"53/udp": {}},
+			},
+			RootFS: oci.RootFS{Type: "layers", DiffIDs: []oci.Digest{"sha256:base"}},
+		},
+	}
+
+	img, err := oci.BuildImage(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var config oci.Config
+	if err := json.Unmarshal(img.ConfigJS.Content, &config); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Config.Cmd) != 1 || config.Config.Cmd[0] != "serve" {
+		t.Errorf("cmd = %v, want only ours", config.Config.Cmd)
+	}
+	if len(config.Config.ExposedPorts) != 2 {
+		t.Errorf("exposed ports = %v, want both", config.Config.ExposedPorts)
+	}
+}
+
 // Two runs over the same inputs must produce the same image digest, or none
 // of the reproducibility claims extend to the container.
 func TestBuildImageIsDeterministic(t *testing.T) {

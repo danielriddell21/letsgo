@@ -111,12 +111,18 @@ type Config struct {
 
 // RunConfig is what the runtime does with the image.
 type RunConfig struct {
-	Entrypoint []string          `json:"Entrypoint,omitempty"`
-	Cmd        []string          `json:"Cmd,omitempty"`
-	Env        []string          `json:"Env,omitempty"`
-	WorkingDir string            `json:"WorkingDir,omitempty"`
-	User       string            `json:"User,omitempty"`
-	Labels     map[string]string `json:"Labels,omitempty"`
+	Entrypoint []string `json:"Entrypoint,omitempty"`
+	Cmd        []string `json:"Cmd,omitempty"`
+	Env        []string `json:"Env,omitempty"`
+	WorkingDir string   `json:"WorkingDir,omitempty"`
+	User       string   `json:"User,omitempty"`
+
+	// ExposedPorts is a set, which is how the image spec models it: the keys
+	// are "port/proto" and the values carry nothing. It opens no port — it is
+	// metadata a registry UI displays and `docker run -P` reads.
+	ExposedPorts map[string]struct{} `json:"ExposedPorts,omitempty"`
+
+	Labels map[string]string `json:"Labels,omitempty"`
 }
 
 // RootFS lists the uncompressed digests of the stacked layers.

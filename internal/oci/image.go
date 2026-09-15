@@ -46,6 +46,14 @@ type ImageOptions struct {
 	// Base is the image to stack on. The zero value means `scratch`.
 	Base *Base
 
+	// Cmd is the default argument list, overridable at `docker run` exactly as
+	// the spec intends. The entrypoint can be inferred from the binary; which
+	// of its subcommands should run bare cannot.
+	Cmd []string
+
+	// ExposedPorts are "port/proto" strings. Metadata only: see RunConfig.
+	ExposedPorts []string
+
 	// Annotations are attached to the manifest and mirrored into the config's
 	// labels, which is where most registry UIs read them from.
 	Annotations map[string]string
@@ -103,8 +111,10 @@ func BuildImage(o ImageOptions) (*Image, error) {
 		OS:           o.Platform.OS,
 		Variant:      o.Platform.Variant,
 		Config: RunConfig{
-			Entrypoint: []string{path.Join(BinDir, o.Name)},
-			Labels:     o.Annotations,
+			Entrypoint:   []string{path.Join(BinDir, o.Name)},
+			Cmd:          o.Cmd,
+			ExposedPorts: portSet(o.ExposedPorts),
+			Labels:       o.Annotations,
 		},
 		RootFS: RootFS{Type: "layers"},
 	}
@@ -117,6 +127,20 @@ func BuildImage(o ImageOptions) (*Image, error) {
 		config.Config.Env = o.Base.Config.Config.Env
 		config.Config.User = o.Base.Config.Config.User
 		config.Config.WorkingDir = o.Base.Config.Config.WorkingDir
+
+		// Ports accumulate, the way EXPOSE does: a base that publishes one is
+		// describing a service that is still there underneath ours.
+		//
+		// Cmd deliberately does not. It is the argument list for the base's
+		// entrypoint, and we have just replaced that entrypoint with our own
+		// binary — inheriting it would hand our program somebody else's
+		// arguments.
+		for port := range o.Base.Config.Config.ExposedPorts {
+			if config.Config.ExposedPorts == nil {
+				config.Config.ExposedPorts = map[string]struct{}{}
+			}
+			config.Config.ExposedPorts[port] = struct{}{}
+		}
 		config.RootFS.DiffIDs = append(config.RootFS.DiffIDs, o.Base.Config.RootFS.DiffIDs...)
 		config.History = append(config.History, o.Base.Config.History...)
 		layers = append(layers, o.Base.Layers...)
@@ -169,6 +193,20 @@ func BuildImage(o ImageOptions) (*Image, error) {
 			Platform:  &platform,
 		},
 	}, nil
+}
+
+// portSet renders the ports as the image spec's set. Nil for none, so the
+// field stays out of the config entirely rather than appearing as an empty
+// object — the config blob's bytes are its digest.
+func portSet(ports []string) map[string]struct{} {
+	if len(ports) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(ports))
+	for _, port := range ports {
+		set[port] = struct{}{}
+	}
+	return set
 }
 
 // buildLayer produces the compressed layer and the digest of its uncompressed

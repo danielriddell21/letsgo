@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -54,6 +55,15 @@ type Image struct {
 	// answer for a static binary that makes no TLS calls and the wrong one for
 	// anything that does.
 	Base string
+
+	// Cmd is the default argument list. The entrypoint is inferred from the
+	// binary, which for a multi-command binary says nothing about which
+	// subcommand should run when the image is started bare.
+	Cmd []string
+
+	// Expose are the ports to record, as "port" or "port/proto". Metadata
+	// only: nothing is opened, and `docker run -p` works either way.
+	Expose []string
 }
 
 // known lists every directive, with its arity described for error messages.
@@ -66,7 +76,7 @@ var known = map[string]string{
 	"ldflags": "ldflags <flag>...",
 	"archive": "archive <file>... or an archive ( ... ) block",
 	"budget":  "budget <goos/goarch> <size>",
-	"image":   "image, image <reference>, or image base <reference>",
+	"image":   "image, image <reference>, image base <ref>, image cmd <arg>..., or image expose <port>...",
 	"brew":    "brew <owner/tap-repo>",
 	"release": "release <key=value>...",
 }
@@ -222,37 +232,96 @@ func applyBudget(cfg *Config, file string, line *Line) error {
 	return nil
 }
 
+// imageSettings are the keyed forms of the image directive.
+//
+// One function each, for the same reason apply itself dispatches rather than
+// switching: image carries more shapes than any other directive — a bare form,
+// a bare reference, and a setting per key — and a single switch over all of
+// them is past the point where anyone can read it at a glance.
+var imageSettings = map[string]func(*Image, string, *Line) error{
+	"base":   applyImageBase,
+	"cmd":    applyImageCmd,
+	"expose": applyImageExpose,
+}
+
 func applyImage(cfg *Config, file string, line *Line) error {
 	if cfg.Image == nil {
 		cfg.Image = &Image{}
 	}
 
-	switch {
 	// A bare `image` asks for the default: a reference derived from the
 	// repository, on scratch.
-	case len(line.Args) == 0:
+	if len(line.Args) == 0 {
 		return nil
+	}
+	if setting, ok := imageSettings[line.Args[0]]; ok {
+		return setting(cfg.Image, file, line)
+	}
 
-	case line.Args[0] == "base":
-		if len(line.Args) != 2 {
-			return arity(file, line)
-		}
-		if cfg.Image.Base != "" {
-			return errAt(file, line.P, "image base is already set")
-		}
-		cfg.Image.Base = line.Args[1]
-		return nil
-
-	case len(line.Args) == 1:
-		if cfg.Image.Reference != "" {
-			return errAt(file, line.P, "the image reference is already set")
-		}
-		cfg.Image.Reference = line.Args[0]
-		return nil
-
-	default:
+	if len(line.Args) != 1 {
 		return arity(file, line)
 	}
+	if cfg.Image.Reference != "" {
+		return errAt(file, line.P, "the image reference is already set")
+	}
+	cfg.Image.Reference = line.Args[0]
+	return nil
+}
+
+func applyImageBase(img *Image, file string, line *Line) error {
+	if len(line.Args) != 2 {
+		return arity(file, line)
+	}
+	if img.Base != "" {
+		return errAt(file, line.P, "image base is already set")
+	}
+	img.Base = line.Args[1]
+	return nil
+}
+
+func applyImageCmd(img *Image, file string, line *Line) error {
+	if len(line.Args) < 2 {
+		return arity(file, line)
+	}
+	if img.Cmd != nil {
+		return errAt(file, line.P, "image cmd is already set")
+	}
+	img.Cmd = line.Args[1:]
+	return nil
+}
+
+func applyImageExpose(img *Image, file string, line *Line) error {
+	if len(line.Args) < 2 {
+		return arity(file, line)
+	}
+	for _, arg := range line.Args[1:] {
+		port, err := exposedPort(arg)
+		if err != nil {
+			return errAt(file, line.P, "%v", err)
+		}
+		img.Expose = append(img.Expose, port)
+	}
+	return nil
+}
+
+// exposedPort normalises "8080" or "8080/udp" into the image spec's
+// "port/proto" form. Validated here rather than passed through, because a
+// malformed entry is silent otherwise: nothing reads ExposedPorts except a
+// registry UI, so a typo would surface as a missing row months later.
+func exposedPort(s string) (string, error) {
+	number, proto, ok := strings.Cut(s, "/")
+	if !ok {
+		proto = "tcp"
+	}
+	if proto != "tcp" && proto != "udp" {
+		return "", fmt.Errorf("image expose %q: protocol must be tcp or udp", s)
+	}
+
+	n, err := strconv.Atoi(number)
+	if err != nil || n < 1 || n > 65535 {
+		return "", fmt.Errorf("image expose %q: %q is not a port between 1 and 65535", s, number)
+	}
+	return number + "/" + proto, nil
 }
 
 func applyBrew(cfg *Config, file string, line *Line) error {

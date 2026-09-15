@@ -124,12 +124,14 @@ func buildOne(
 		built.Base = base
 
 		image, err := oci.BuildImage(oci.ImageOptions{
-			Binary:      a.BinaryPath,
-			Name:        binary,
-			Platform:    platform,
-			Created:     p.Git.CommitTime,
-			Base:        base,
-			Annotations: annotations,
+			Binary:       a.BinaryPath,
+			Name:         binary,
+			Platform:     platform,
+			Created:      p.Git.CommitTime,
+			Base:         base,
+			Cmd:          p.Image.Cmd,
+			ExposedPorts: p.Image.Expose,
+			Annotations:  annotations,
 		})
 		if err != nil {
 			return err
