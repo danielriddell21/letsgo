@@ -102,8 +102,13 @@ func WriteSource(ctx context.Context, o SourceOptions) (Source, error) {
 // Exported because verification has to reach the same answer as the release
 // did from the same tree; two copies of this list would be two chances to
 // disagree about what a published archive contains.
+// Both spellings of "licence" are listed: the British one is not rare, and
+// omitting it silently ships an archive with no licence in it. The cost is one
+// os.Stat.
 var DocumentationFiles = []string{
-	"README.md", "README", "LICENSE", "LICENSE.md", "CHANGELOG.md",
+	"README.md", "README",
+	"LICENSE", "LICENSE.md", "LICENCE", "LICENCE.md",
+	"CHANGELOG.md",
 }
 
 // FindDocumentation returns the documentation files present in dir, in a

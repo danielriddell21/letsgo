@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -241,7 +242,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveTargets(ctx)
 	p.resolveBudgets()
 	p.resolveCommands()
-	p.resolveFiles()
+	p.resolveFiles(ctx)
 	p.resolveArtifacts()
 
 	p.resolveTap()
@@ -934,10 +935,19 @@ func (p *Plan) resolveLDFlags() {
 	}
 }
 
-func (p *Plan) resolveFiles() {
+// archiveFiles is the check that reports what the archives will carry beside
+// the binaries, however that list was arrived at.
+const archiveFiles = "archive files"
+
+func (p *Plan) resolveFiles(ctx context.Context) {
 	if len(p.Config.ArchiveFiles) > 0 {
-		p.Files = p.Config.ArchiveFiles
-		p.note("archive files", strings.Join(p.Files, ", "), ConfigFile)
+		files, err := p.expandArchiveFiles(ctx, p.Config.ArchiveFiles)
+		if err != nil {
+			p.add(archiveFiles, Fail, "%v", err)
+			return
+		}
+		p.Files = files
+		p.note(archiveFiles, strings.Join(p.Files, ", "), ConfigFile)
 		return
 	}
 
@@ -947,8 +957,70 @@ func (p *Plan) resolveFiles() {
 	p.Files = build.FindDocumentation(p.Module.Dir)
 
 	if len(p.Files) > 0 {
-		p.note("archive files", strings.Join(p.Files, ", "), "found in the repository root")
+		p.note(archiveFiles, strings.Join(p.Files, ", "), "found in the repository root")
 	}
+}
+
+// expandArchiveFiles turns the configured entries into the exact file list the
+// archives will contain.
+//
+// A directory expands to the tracked files beneath it, sorted. That is pinned
+// by the commit as tightly as a literal list is — the tree at a commit is
+// fixed — while staying correct as the directory changes, which a hand-written
+// list does not: adding a file to it and forgetting the config ships a release
+// missing the file, and nothing fails, because nothing was asked for.
+//
+// A glob is refused rather than expanded. It would resolve against whatever is
+// on disk at release time, which is an input the config does not pin.
+func (p *Plan) expandArchiveFiles(ctx context.Context, entries []string) ([]string, error) {
+	var tracked []string
+
+	out := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if strings.ContainsAny(entry, "*?[") {
+			return nil, fmt.Errorf(
+				"archive %s: archive takes paths, not patterns; name a file or a directory", entry)
+		}
+
+		info, err := os.Stat(filepath.Join(p.Module.Dir, filepath.FromSlash(entry)))
+		if err != nil {
+			return nil, fmt.Errorf("archive %s: %w", entry, err)
+		}
+		if !info.IsDir() {
+			out = append(out, entry)
+			continue
+		}
+
+		// Read once, and only when a directory is actually named.
+		if tracked == nil {
+			if tracked, err = discover.TrackedFiles(ctx, p.Module.Dir); err != nil {
+				return nil, fmt.Errorf("archive %s: %w", entry, err)
+			}
+		}
+
+		under := filesUnder(tracked, entry)
+		if len(under) == 0 {
+			return nil, fmt.Errorf("archive %s: the directory holds no tracked files", entry)
+		}
+		out = append(out, under...)
+	}
+
+	sort.Strings(out)
+	return out, nil
+}
+
+// filesUnder returns the tracked files inside dir, which git already reports
+// in sorted, slash-separated form.
+func filesUnder(tracked []string, dir string) []string {
+	prefix := path.Clean(filepath.ToSlash(dir)) + "/"
+
+	var found []string
+	for _, name := range tracked {
+		if strings.HasPrefix(name, prefix) {
+			found = append(found, name)
+		}
+	}
+	return found
 }
 
 func (p *Plan) resolveArtifacts() {

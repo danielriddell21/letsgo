@@ -451,3 +451,56 @@ func TestNoImageConfiguredMeansNoImageCheck(t *testing.T) {
 		}
 	}
 }
+
+// `archive scripts` must expand to the tracked files beneath it: the set is
+// fixed by the commit, so it pins as tightly as a literal list while staying
+// correct when a file is added to the directory.
+func TestArchiveDirectoryExpandsToTrackedFiles(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("README.md", "# foo\n")
+	r.write("config.example.yaml", "example: true\n")
+	r.write("scripts/nzbget/foo.py", "print('a')\n")
+	r.write("scripts/sabnzbd/foo.py", "print('b')\n")
+	r.write("letsgo.mod", "archive (\n\tREADME.md\n\tconfig.example.yaml\n\tscripts\n)\n")
+	r.commit("v1.0.0")
+
+	// Untracked files in the directory are not shipped: a release contains
+	// what a clone at this commit contains.
+	r.write("scripts/scratch.tmp", "local\n")
+
+	p := r.resolve(plan.Options{})
+
+	want := []string{
+		"README.md",
+		"config.example.yaml",
+		"scripts/nzbget/foo.py",
+		"scripts/sabnzbd/foo.py",
+	}
+	if strings.Join(p.Files, "\n") != strings.Join(want, "\n") {
+		t.Errorf("Files = %q, want %q", p.Files, want)
+	}
+}
+
+// A glob resolves against whatever is on disk at release time, which the
+// config does not pin. Saying so at plan time catches the GoReleaser habit in
+// two seconds rather than after the cross-compile.
+func TestArchiveRejectsGlobsAtPlanTime(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("scripts/foo.py", "print('a')\n")
+	r.write("letsgo.mod", "archive scripts/**/*\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+
+	c := check(t, p, "archive files")
+	if c.Status != plan.Fail {
+		t.Fatalf("status = %s, want fail: %+v", c.Status, c)
+	}
+	if !strings.Contains(c.Detail, "paths, not patterns") {
+		t.Errorf("detail = %q", c.Detail)
+	}
+}
