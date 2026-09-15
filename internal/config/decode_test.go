@@ -158,13 +158,21 @@ func TestTagsDirective(t *testing.T) {
 // empty description.
 func TestEveryDirectiveIsHandled(t *testing.T) {
 	for name := range known {
-		if handlers[name] == nil {
+		if handlers[name] == nil && !blockOnly[name] {
 			t.Errorf("directive %q is documented but not handled", name)
 		}
 	}
 	for name := range handlers {
 		if known[name] == "" {
 			t.Errorf("directive %q is handled but not documented", name)
+		}
+	}
+	for name := range blockOnly {
+		if known[name] == "" {
+			t.Errorf("block %q is handled but not documented", name)
+		}
+		if handlers[name] != nil {
+			t.Errorf("block %q also has a line handler, so one of them is dead", name)
 		}
 	}
 }
@@ -234,5 +242,61 @@ func TestCGoDirectiveRejects(t *testing.T) {
 		if _, err := Decode(parse(t, in)); err == nil {
 			t.Errorf("%q should not have parsed", in)
 		}
+	}
+}
+
+func TestVariantBlock(t *testing.T) {
+	cfg := decode(t, "variant gui (\n\tbuild darwin/arm64 darwin/amd64\n\ttags ebiten\n\tcgo on\n)\n")
+
+	if len(cfg.Variants) != 1 {
+		t.Fatalf("Variants = %+v", cfg.Variants)
+	}
+	got := cfg.Variants[0]
+	if got.Name != "gui" {
+		t.Errorf("name = %q", got.Name)
+	}
+	if strings.Join(got.Targets, ",") != "darwin/arm64,darwin/amd64" {
+		t.Errorf("targets = %q", got.Targets)
+	}
+	if strings.Join(got.Tags, ",") != "ebiten" {
+		t.Errorf("tags = %q", got.Tags)
+	}
+	if got.CGo == nil {
+		t.Error("cgo was not enabled for the variant")
+	}
+
+	// Several variants are the point: a repository can have more than two
+	// products from one source.
+	cfg = decode(t, "variant gui (\n\tbuild darwin/arm64\n)\nvariant headless (\n\tbuild linux/amd64\n)\n")
+	if len(cfg.Variants) != 2 {
+		t.Errorf("Variants = %+v, want two", cfg.Variants)
+	}
+}
+
+func TestVariantBlockRejects(t *testing.T) {
+	for _, in := range []string{
+		// A variant that inherited the matrix would build everywhere, which is
+		// never why one exists.
+		"variant gui (\n\ttags ebiten\n)\n",
+		"variant (\n\tbuild linux/amd64\n)\n",
+		"variant a b (\n\tbuild linux/amd64\n)\n",
+		"variant gui (\n\tbuild linux/amd64\n\tbrew you/tap\n)\n",
+		"variant gui (\n\tbuild linux/amd64\n\tproject other\n)\n",
+		"variant gui (\n\tbuild linux/amd64\n)\nvariant gui (\n\tbuild linux/arm64\n)\n",
+		"variant with_underscore (\n\tbuild linux/amd64\n)\n",
+		// A block keyword used as a plain line parses and does nothing, so it
+		// says so instead.
+		"variant gui\n",
+	} {
+		if _, err := Decode(parse(t, in)); err == nil {
+			t.Errorf("%q should not have parsed", in)
+		}
+	}
+}
+
+// A block that takes no name must not silently accept one.
+func TestUnnamedBlocksRejectAName(t *testing.T) {
+	if _, err := Decode(parse(t, "archive extra (\n\tREADME.md\n)\n")); err == nil {
+		t.Error("a named archive block should not have parsed")
 	}
 }

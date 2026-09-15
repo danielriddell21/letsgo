@@ -57,7 +57,11 @@ func writeLine(b *strings.Builder, line *Line) {
 }
 
 func writeBlock(b *strings.Builder, block *Block) {
-	b.WriteString(block.Keyword + " (")
+	b.WriteString(block.Keyword)
+	for _, arg := range block.Args {
+		b.WriteString(" " + quoteIfNeeded(arg))
+	}
+	b.WriteString(" (")
 	writeComment(b, block.Comment)
 	b.WriteString("\n")
 

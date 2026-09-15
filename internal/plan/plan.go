@@ -122,6 +122,17 @@ type Group struct {
 	Name string
 
 	Commands []discover.MainPackage
+
+	// Targets, Tags and CGo are the group's own. The release's settings for a
+	// group with none; a variant's where it declared them, because a variant
+	// exists precisely to be compiled differently.
+	Targets []gobuild.Target
+	Tags    []string
+	CGo     zig.Toolchain
+
+	// Variant names the variant this group came from, empty for the default
+	// build. It suffixes the archive.
+	Variant string
 }
 
 // resolvePlugins reads the pinned plugins, without running any.
@@ -196,6 +207,10 @@ func (p *Plan) applyLayoutPlugin(ctx context.Context) {
 	if err != nil {
 		p.add("plugins", Fail, "plugin %s: %v", configured.Command, err)
 		return
+	}
+
+	for i := range groups {
+		groups[i].Targets, groups[i].Tags, groups[i].CGo = p.Targets, p.Tags, p.CGo
 	}
 
 	p.Groups = groups
@@ -1629,9 +1644,10 @@ func (p *Plan) resolveArtifacts(ctx context.Context) {
 
 	p.Groups = p.defaultGroups()
 	p.applyLayoutPlugin(ctx)
+	p.addVariantGroups(ctx)
 
 	for _, group := range p.Groups {
-		for _, target := range p.Targets {
+		for _, target := range group.Targets {
 			format := archive.FormatTarGz
 			if target.OS == "windows" {
 				format = archive.FormatZip
@@ -1657,9 +1673,107 @@ func (p *Plan) defaultGroups() []Group {
 		if len(p.Commands) > 1 {
 			name = cmd.BinaryName
 		}
-		groups = append(groups, Group{Name: name, Commands: []discover.MainPackage{cmd}})
+		groups = append(groups, Group{
+			Name:     name,
+			Commands: []discover.MainPackage{cmd},
+			Targets:  p.Targets,
+			Tags:     p.Tags,
+			CGo:      p.CGo,
+		})
 	}
 	return groups
+}
+
+// addVariantGroups appends a second build of the same commands for each
+// variant.
+//
+// The commands and the layout are the release's; only how they compile and
+// where they run differ. A repository with a CGO-free CLI and a GUI build
+// behind a tag ships both from one commit, and the suffix is what keeps their
+// archives apart.
+// variantFailed reports a problem with one variant, naming which. A repository
+// can declare several, and a message that did not say which one would leave
+// the reader to guess.
+func (p *Plan) variantFailed(name string, err error) {
+	p.add("variants", Fail, "variant %s: %v", name, err)
+}
+
+func (p *Plan) addVariantGroups(ctx context.Context) {
+	base := len(p.Groups)
+
+	for _, variant := range p.Config.Variants {
+		targets, err := gobuild.ParseTargets(variant.Targets)
+		if err != nil {
+			p.variantFailed(variant.Name, err)
+			return
+		}
+		if err := gobuild.Validate(ctx, "", targets); err != nil {
+			p.variantFailed(variant.Name, err)
+			return
+		}
+
+		toolchain, ok := p.variantToolchain(ctx, variant, targets)
+		if !ok {
+			return
+		}
+
+		for _, group := range p.Groups[:base] {
+			p.Groups = append(p.Groups, Group{
+				Name:     group.Name + "-" + variant.Name,
+				Commands: group.Commands,
+				Targets:  targets,
+				Tags:     append(append([]string{}, p.Tags...), variant.Tags...),
+				CGo:      toolchain,
+				Variant:  variant.Name,
+			})
+		}
+	}
+
+	if len(p.Config.Variants) > 0 {
+		names := make([]string, len(p.Config.Variants))
+		for i, v := range p.Config.Variants {
+			names[i] = v.Name
+		}
+		p.note("variants", strings.Join(names, ", "), ConfigFile)
+		p.add("variants", Pass, "%d variant(s): %s", len(names), strings.Join(names, ", "))
+	}
+}
+
+// variantToolchain obtains the C compiler a variant needs, which is usually
+// the reason it is a variant at all.
+func (p *Plan) variantToolchain(
+	ctx context.Context,
+	variant config.Variant,
+	targets []gobuild.Target,
+) (zig.Toolchain, bool) {
+	if variant.CGo == nil {
+		return p.CGo, true
+	}
+
+	for _, target := range targets {
+		if _, ok := zig.Target(target); !ok {
+			p.add("variants", Fail,
+				"variant %s cannot be cross-compiled to %s from here\n"+
+					"  zig carries a libc for macOS but not Apple's frameworks, so those\n"+
+					"  targets need a macOS host; build them there and merge the results",
+				variant.Name, target)
+			return zig.Toolchain{}, false
+		}
+	}
+
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		p.variantFailed(variant.Name, err)
+		return zig.Toolchain{}, false
+	}
+
+	toolchain, err := zig.Ensure(ctx,
+		variant.CGo.ZigVersion, variant.CGo.ZigDigest, filepath.Join(cache, "letsgo"))
+	if err != nil {
+		p.variantFailed(variant.Name, err)
+		return zig.Toolchain{}, false
+	}
+	return toolchain, true
 }
 
 func summarise(targets []gobuild.Target) string {

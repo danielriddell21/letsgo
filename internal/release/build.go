@@ -190,9 +190,9 @@ func describe(
 			Size: a.Size, BinarySize: a.BinarySize,
 			SHA256: a.ArchiveSHA256,
 			Build: manifest.Build{
-				Flags:   buildFlags(p),
+				Flags:   buildFlags(groupFor(p, a)),
 				LDFlags: a.LDFlags,
-				Env:     buildEnv(p, a),
+				Env:     buildEnv(groupFor(p, a), a),
 			},
 		}
 
@@ -216,10 +216,22 @@ func describe(
 	return m
 }
 
+// groupFor finds the group an artifact came from, which is what says how it
+// was compiled: a variant's archives carry different tags and may use a
+// different toolchain from the release they ship beside.
+func groupFor(p *plan.Plan, a build.Artifact) plan.Group {
+	for _, group := range p.Groups {
+		if manifest.BaseName(a.Archive, p.Version, a.OS, a.Arch) == group.Name {
+			return group
+		}
+	}
+	return plan.Group{Targets: p.Targets, Tags: p.Tags, CGo: p.CGo}
+}
+
 // buildEnv is the environment an artifact was compiled under, as recorded.
-func buildEnv(p *plan.Plan, a build.Artifact) map[string]string {
+func buildEnv(group plan.Group, a build.Artifact) map[string]string {
 	env := map[string]string{"CGO_ENABLED": "0", "GOOS": a.OS, "GOARCH": a.Arch}
-	if p.CGo.Path != "" {
+	if group.CGo.Path != "" {
 		env["CGO_ENABLED"] = "1"
 	}
 	return env
@@ -230,10 +242,15 @@ func buildEnv(p *plan.Plan, a build.Artifact) map[string]string {
 func builder(p *plan.Plan, toolVersion, goVersion string) manifest.Builder {
 	b := manifest.Builder{Tool: "letsgo " + toolVersion, Go: goVersion}
 
-	if p.CGo.Path != "" {
-		b.CC = &manifest.CCompiler{
-			Name: "zig", Version: p.CGo.Version, Digest: p.CGo.Digest,
-			Host: gobuild.Host().String(),
+	// Whichever toolchain compiled something: a release may be pure Go while a
+	// variant of it is not.
+	for _, group := range p.Groups {
+		if group.CGo.Path != "" {
+			b.CC = &manifest.CCompiler{
+				Name: "zig", Version: group.CGo.Version, Digest: group.CGo.Digest,
+				Host: gobuild.Host().String(),
+			}
+			break
 		}
 	}
 
@@ -254,10 +271,10 @@ func builder(p *plan.Plan, toolVersion, goVersion string) manifest.Builder {
 
 // buildFlags are the go build flags an artifact was produced with, recorded so
 // that verification replays them rather than reconstructing them.
-func buildFlags(p *plan.Plan) []string {
+func buildFlags(group plan.Group) []string {
 	flags := []string{"-trimpath", "-buildvcs=false"}
-	if len(p.Tags) > 0 {
-		flags = append(flags, "-tags="+strings.Join(p.Tags, ","))
+	if len(group.Tags) > 0 {
+		flags = append(flags, "-tags="+strings.Join(group.Tags, ","))
 	}
 	return flags
 }
@@ -298,11 +315,11 @@ func buildCommands(ctx context.Context, p *plan.Plan, dir string, warnf func(str
 			Version:      p.Version,
 			Commit:       p.Git.ShortCommit,
 			ModTime:      p.Git.CommitTime,
-			Targets:      p.Targets,
+			Targets:      group.Targets,
 			ExtraFiles:   p.Files,
 			ExtraLDFlags: p.LDFlags,
-			Tags:         p.Tags,
-			CGo:          p.CGo,
+			Tags:         group.Tags,
+			CGo:          group.CGo,
 			Symbols: build.VersionSymbols{
 				Version: p.Symbols.Version, Commit: p.Symbols.Commit, Date: p.Symbols.Date,
 			},
