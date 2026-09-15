@@ -25,6 +25,13 @@ func TestParseReference(t *testing.T) {
 		{"you/tool:v1", "docker.io", "you/tool", "v1", ""},
 		{"alpine", "docker.io", "library/alpine", "", ""},
 		{"localhost:5000/tool:dev", "localhost:5000", "tool", "dev", ""},
+
+		// Both a tag and a digest: the tag is stripped from the repository
+		// rather than left in it, and the digest is what addresses the image.
+		{"gcr.io/distroless/static:nonroot@" + digest, "gcr.io", "distroless/static", "", digest},
+		{"you/tool:v1@" + digest, "docker.io", "you/tool", "", digest},
+		{"alpine:3@" + digest, "docker.io", "library/alpine", "", digest},
+		{"localhost:5000/tool:dev@" + digest, "localhost:5000", "tool", "", digest},
 	}
 
 	for _, c := range tests {

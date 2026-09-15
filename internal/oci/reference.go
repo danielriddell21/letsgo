@@ -50,15 +50,22 @@ func ParseReference(s string) (Reference, error) {
 		ref.Registry, name = first, rest
 	}
 
-	if ref.Digest == "" {
-		// Only the last path element may carry a tag, so a port in the host is
-		// not mistaken for one.
-		if base, tag, ok := strings.Cut(lastElement(name), ":"); ok {
-			if tag == "" {
-				return Reference{}, fmt.Errorf("oci: %q has an empty tag", s)
-			}
-			name, ref.Tag = strings.TrimSuffix(name, ":"+tag), tag
-			_ = base
+	// Only the last path element may carry a tag, so a port in the host is not
+	// mistaken for one.
+	if _, tag, ok := strings.Cut(lastElement(name), ":"); ok {
+		if tag == "" {
+			return Reference{}, fmt.Errorf("oci: %q has an empty tag", s)
+		}
+		name = strings.TrimSuffix(name, ":"+tag)
+
+		// A reference carrying both is what Dependabot and Renovate write when
+		// they pin a base image, so it is the spelling anything automating
+		// base bumps produces. The digest is what gets fetched and the tag is
+		// documentation, so the tag is dropped rather than recorded: Target
+		// resolves to exactly one of them, and when both are written it is
+		// never the tag.
+		if ref.Digest == "" {
+			ref.Tag = tag
 		}
 	}
 
