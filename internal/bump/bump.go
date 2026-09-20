@@ -13,6 +13,7 @@
 package bump
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -69,11 +70,28 @@ type Proposal struct {
 //
 // Only ever a floor: additions cannot break a dependant, removals always can,
 // and an unchanged API says nothing about behaviour.
-func FromAPI(changes []gate.Change, available bool) Signal {
-	if !available {
+//
+// err is why the comparison did not happen, and it is reported rather than
+// summarised. A signal that dropped out leaves the version decided by commit
+// messages alone, so whoever reads the report needs to know it dropped out and
+// why — "apidiff is not installed" and "apidiff ran and failed" call for
+// different actions, and guessing between them helps with neither.
+func FromAPI(changes []gate.Change, err error) Signal {
+	switch {
+	case errors.Is(err, gate.ErrToolMissing):
 		return Signal{
 			Source: "exported API", Level: None,
-			Detail: "not compared; nothing in this module is importable, or apidiff is not installed",
+			Detail: "not compared; apidiff is not installed",
+		}
+	case errors.Is(err, gate.ErrNothingExported):
+		return Signal{
+			Source: "exported API", Level: None,
+			Detail: "not compared; nothing in this module is importable",
+		}
+	case err != nil:
+		return Signal{
+			Source: "exported API", Level: None,
+			Detail: "not compared: " + err.Error(),
 		}
 	}
 

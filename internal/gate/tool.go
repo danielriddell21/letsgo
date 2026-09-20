@@ -25,6 +25,15 @@ import (
 // claim a guarantee nothing established.
 var ErrToolMissing = errors.New("gate: tool not installed")
 
+// ErrNothingExported reports that a module has no package anyone outside it
+// could import, so there is no exported API to compare.
+//
+// Distinguished from an unchanged API for the same reason ErrToolMissing is
+// distinguished from a passing check: "nothing changed" and "nothing was
+// looked at" are different answers, and reporting the second as the first
+// claims a guarantee nothing established.
+var ErrNothingExported = errors.New("gate: nothing in this module is importable, so there is no exported API to compare")
+
 // MissingToolError names what to install.
 type MissingToolError struct {
 	Tool    string

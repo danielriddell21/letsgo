@@ -688,7 +688,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 
 	changes, err := gate.APIDiff(ctx, old, p.Module.Dir)
 	switch {
-	case errors.Is(err, gate.ErrToolMissing):
+	case errors.Is(err, gate.ErrToolMissing), errors.Is(err, gate.ErrNothingExported):
 		p.add("api compatibility", Skip, "%v", err)
 		return
 	case err != nil:

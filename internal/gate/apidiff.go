@@ -60,6 +60,9 @@ func APIDiff(ctx context.Context, oldDir, newDir string) ([]Change, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(packages) == 0 {
+		return nil, ErrNothingExported
+	}
 
 	var changes []Change
 	for _, pkg := range packages {

@@ -1,6 +1,7 @@
 package bump
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -10,27 +11,57 @@ import (
 
 func TestFromAPI(t *testing.T) {
 	tests := map[string]struct {
-		changes   []gate.Change
-		available bool
-		want      Level
+		changes []gate.Change
+		err     error
+		want    Level
 	}{
 		"a removal proves a major is needed": {
-			[]gate.Change{{Kind: gate.Incompatible}}, true, Major,
+			changes: []gate.Change{{Kind: gate.Incompatible}}, want: Major,
 		},
 		"additions cannot break anyone": {
-			[]gate.Change{{Kind: gate.Compatible}}, true, Minor,
+			changes: []gate.Change{{Kind: gate.Compatible}}, want: Minor,
 		},
 		// The crucial one: an unchanged API is not evidence of a small
 		// change, because behaviour behind an identical signature is free to
 		// change completely.
-		"an unchanged API says nothing":          {nil, true, None},
-		"an unavailable comparison says nothing": {nil, false, None},
+		"an unchanged API says nothing":          {want: None},
+		"an unavailable comparison says nothing": {err: gate.ErrToolMissing, want: None},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			if got := FromAPI(tt.changes, tt.available).Level; got != tt.want {
+			if got := FromAPI(tt.changes, tt.err).Level; got != tt.want {
 				t.Errorf("Level = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// A signal that dropped out must say why it dropped out. Reporting every
+// cause with one sentence that guesses between two of them sent a real
+// failure — apidiff built by an older Go than the module targets — out as
+// "apidiff is not installed", when it was installed and working.
+func TestFromAPIReportsWhyItCouldNotCompare(t *testing.T) {
+	tests := map[string]struct {
+		err  error
+		want string
+	}{
+		"the tool is missing":     {gate.ErrToolMissing, "apidiff is not installed"},
+		"nothing is importable":   {gate.ErrNothingExported, "nothing in this module is importable"},
+		"the tool ran and failed": {errors.New("package requires newer Go version go1.27"), "package requires newer Go version go1.27"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := FromAPI(nil, tt.err)
+			if got.Level != None {
+				t.Errorf("Level = %v, want None", got.Level)
+			}
+			if !strings.Contains(got.Detail, tt.want) {
+				t.Errorf("Detail = %q, want it to mention %q", got.Detail, tt.want)
+			}
+			if !strings.HasPrefix(got.Detail, "not compared") {
+				t.Errorf("Detail = %q, want it to start with \"not compared\"", got.Detail)
 			}
 		})
 	}

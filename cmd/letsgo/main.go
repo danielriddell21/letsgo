@@ -638,22 +638,25 @@ func proposeVersion(ctx context.Context, module discover.Module, previous string
 	notes := changelog.Build(previous, "", commits)
 
 	// The API signal needs an earlier tree to compare against, and something
-	// importable to compare. Where either is missing it simply has no view,
-	// which the report says rather than hides.
-	var changes []gate.Change
-	available := false
+	// importable to compare. Whatever stopped it is carried into the signal
+	// rather than swallowed: a signal that dropped out leaves the version
+	// decided by commit messages alone, and the report should say so.
+	var (
+		changes []gate.Change
+		apiErr  = errors.New("no earlier release to compare against")
+	)
 	if previous != "" {
 		old, cleanup, err := checkoutForDiff(ctx, module.Dir, previous)
-		if err == nil {
+		if err != nil {
+			apiErr = err
+		} else {
 			defer cleanup()
-			if changes, err = gate.APIDiff(ctx, old, module.Dir); err == nil {
-				available = true
-			}
+			changes, apiErr = gate.APIDiff(ctx, old, module.Dir)
 		}
 	}
 
 	return bump.Propose(previous, module.Path,
-		bump.FromAPI(changes, available),
+		bump.FromAPI(changes, apiErr),
 		bump.FromCommits(notes.Entries))
 }
 
