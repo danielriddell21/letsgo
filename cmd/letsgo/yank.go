@@ -4,9 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/diff"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
@@ -60,6 +62,7 @@ func runYank(args []string) error {
 		Reason:   *reason,
 		GoMod:    filepath.Join(module.Dir, "go.mod"),
 		Project:  module.Name,
+		Caveats:  brewCaveats(module.Dir),
 		Previous: previous,
 		Manifests: func(ctx context.Context, tag string) (*manifest.Manifest, error) {
 			return diff.Fetch(ctx, client, repo, tag)
@@ -141,3 +144,23 @@ func confirmYank(tag string) bool {
 }
 
 func envList() string { return "GITHUB_TOKEN or GH_TOKEN" }
+
+// brewCaveats reads the formula's caveats from the config, so a rollback
+// republishes the formula the release published rather than one missing a
+// section. Nothing here is fatal: a repository with no config, or one whose
+// config no longer parses, simply has nothing to say.
+func brewCaveats(moduleDir string) string {
+	data, err := os.ReadFile(filepath.Join(moduleDir, plan.ConfigFile))
+	if err != nil {
+		return ""
+	}
+	file, err := config.Parse(plan.ConfigFile, data)
+	if err != nil {
+		return ""
+	}
+	cfg, err := config.Decode(file)
+	if err != nil {
+		return ""
+	}
+	return cfg.BrewCaveats
+}

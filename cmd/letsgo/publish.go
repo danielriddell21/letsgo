@@ -113,6 +113,7 @@ func formulas(p *plan.Plan, result *release.Result, repo github.Repo, info *gith
 			Binaries:  binaries[name],
 			Version:   p.Version,
 			Homepage:  "https://" + p.Repo.String(),
+			Caveats:   p.Config.BrewCaveats,
 			Platforms: platforms[name],
 		}
 		if info != nil {

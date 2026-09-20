@@ -146,7 +146,7 @@ func TestFormulasFromRebuildsFromTheManifest(t *testing.T) {
 		},
 	}
 
-	formulas := yank.FormulasFrom(m, github.Repo{Owner: "you", Name: "foo"}, "foo")
+	formulas := yank.FormulasFrom(m, github.Repo{Owner: "you", Name: "foo"}, "foo", "")
 	if len(formulas) != 1 {
 		t.Fatalf("got %d formulas", len(formulas))
 	}
@@ -181,7 +181,7 @@ func TestFormulasFromSkipsAVariant(t *testing.T) {
 		},
 	}
 
-	formulas := yank.FormulasFrom(m, github.Repo{Owner: "you", Name: "foo"}, "foo")
+	formulas := yank.FormulasFrom(m, github.Repo{Owner: "you", Name: "foo"}, "foo", "")
 	if len(formulas) != 1 {
 		names := make([]string, len(formulas))
 		for i, f := range formulas {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/bump"
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -18,6 +19,7 @@ func releasePlan() *plan.Plan {
 		Tag:     "v1.2.3",
 		Repo:    discover.Repo{Host: "github.com", Owner: "you", Name: "foo"},
 		HasRepo: true,
+		Config:  &config.Config{},
 	}
 }
 
@@ -176,5 +178,23 @@ func TestFormulasLeaveOutAVariant(t *testing.T) {
 		if strings.Contains(p.URL, "foo-gui") {
 			t.Errorf("the variant's archive leaked into the formula: %q", p.URL)
 		}
+	}
+}
+
+// Caveats come from the config rather than the repository, because they say
+// what the program needs of the machine — which no API knows.
+func TestFormulasCarryTheConfiguredCaveats(t *testing.T) {
+	p := releasePlan()
+	p.Config.BrewCaveats = "needs a display"
+
+	got := formulas(p, built(
+		artifact("foo_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"),
+	), github.Repo{Owner: "you", Name: "foo"}, nil)
+
+	if len(got) != 1 {
+		t.Fatalf("got %d formulas, want 1", len(got))
+	}
+	if got[0].Caveats != "needs a display" {
+		t.Errorf("Caveats = %q", got[0].Caveats)
 	}
 }

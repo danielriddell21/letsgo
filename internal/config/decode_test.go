@@ -260,3 +260,32 @@ func TestUnnamedBlocksRejectAName(t *testing.T) {
 		t.Error("a named archive block should not have parsed")
 	}
 }
+
+func TestBrewDirective(t *testing.T) {
+	cfg := decode(t, "brew you/tap\nbrew caveats \"needs a display\"\n")
+	if cfg.BrewTap != "you/tap" {
+		t.Errorf("BrewTap = %q", cfg.BrewTap)
+	}
+	if cfg.BrewCaveats != "needs a display" {
+		t.Errorf("BrewCaveats = %q", cfg.BrewCaveats)
+	}
+
+	// The tap on its own is the common case and stays short.
+	if cfg := decode(t, "brew you/tap\n"); cfg.BrewCaveats != "" {
+		t.Errorf("BrewCaveats = %q, want empty", cfg.BrewCaveats)
+	}
+}
+
+func TestBrewDirectiveRejects(t *testing.T) {
+	for _, in := range []string{
+		"brew\n",
+		"brew not-a-tap\n",
+		"brew you/tap\nbrew other/tap\n",
+		"brew caveats one\nbrew caveats two\n",
+		"brew caveats\n",
+	} {
+		if _, err := Decode(parse(t, in)); err == nil {
+			t.Errorf("%q should not have parsed", in)
+		}
+	}
+}

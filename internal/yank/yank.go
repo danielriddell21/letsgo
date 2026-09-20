@@ -48,6 +48,11 @@ type Options struct {
 	// manifest recording binary names.
 	Project string
 
+	// Caveats is the formula's caveats block, read from the config. It is not
+	// in the manifest — it describes the program rather than the artifacts —
+	// so a rollback that did not carry it would quietly drop it from the tap.
+	Caveats string
+
 	Logf func(format string, args ...any)
 }
 
@@ -183,7 +188,7 @@ func (o Options) revertFormula(ctx context.Context, result *Result, logf func(st
 		return err
 	}
 
-	for _, formula := range FormulasFrom(m, o.Repo, o.Project) {
+	for _, formula := range FormulasFrom(m, o.Repo, o.Project, o.Caveats) {
 		published, err := brew.Publish(ctx, o.TapAPI, o.Tap, formula)
 		if err != nil {
 			return err
@@ -195,7 +200,7 @@ func (o Options) revertFormula(ctx context.Context, result *Result, logf func(st
 }
 
 // FormulasFrom rebuilds a release's Homebrew formulas from its manifest.
-func FormulasFrom(m *manifest.Manifest, repo github.Repo, project string) []brew.Formula {
+func FormulasFrom(m *manifest.Manifest, repo github.Repo, project, caveats string) []brew.Formula {
 	tag := m.Tag
 	if tag == "" {
 		tag = "v" + m.Version
@@ -241,6 +246,7 @@ func FormulasFrom(m *manifest.Manifest, repo github.Repo, project string) []brew
 			Binaries:  binaries[name],
 			Version:   m.Version,
 			Homepage:  fmt.Sprintf("https://github.com/%s/%s", repo.Owner, repo.Name),
+			Caveats:   caveats,
 			Platforms: platforms[name],
 		})
 	}

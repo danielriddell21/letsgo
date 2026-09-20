@@ -143,3 +143,55 @@ func TestParseTap(t *testing.T) {
 		}
 	}
 }
+
+// A formula's caveats are the one part of it nothing else can supply: the
+// release knows the digests and the repository knows its description, but only
+// the author knows what the program needs of the machine it lands on.
+func TestFormulaRendersCaveats(t *testing.T) {
+	f := brew.Formula{
+		Name: "vivarium", Binaries: []string{"vivarium"},
+		Version: "1.0.0", Homepage: "https://github.com/you/vivarium",
+		Caveats: "The native GUI is macOS-only: on macOS install the cask.\nElsewhere use `vivarium headless`.",
+		Platforms: []brew.Platform{
+			{OS: "darwin", Arch: "arm64", URL: "https://example.test/a.tar.gz", SHA256: "aaa"},
+		},
+	}
+
+	out, err := f.Render()
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	got := string(out)
+
+	// The squiggly heredoc strips the common indent, so every line has to
+	// carry the same prefix or Ruby takes the wrong amount off.
+	for _, want := range []string{
+		"  def caveats\n    <<~EOS\n",
+		"      The native GUI is macOS-only: on macOS install the cask.\n",
+		"      Elsewhere use `vivarium headless`.\n",
+		"    EOS\n  end\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("formula is missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// A formula without caveats has no caveats block at all, rather than an empty
+// one Homebrew would print as a blank line.
+func TestFormulaOmitsAnEmptyCaveats(t *testing.T) {
+	f := brew.Formula{
+		Name: "foo", Binaries: []string{"foo"},
+		Version: "1.0.0", Homepage: "https://example.test",
+		Platforms: []brew.Platform{
+			{OS: "linux", Arch: "amd64", URL: "https://example.test/a.tar.gz", SHA256: "aaa"},
+		},
+	}
+	out, err := f.Render()
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+	if strings.Contains(string(out), "caveats") {
+		t.Errorf("a formula with no caveats should have no caveats block:\n%s", out)
+	}
+}

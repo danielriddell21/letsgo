@@ -68,6 +68,12 @@ type Config struct {
 	// BrewTap is an "owner/repo" Homebrew tap to publish a formula to.
 	BrewTap string
 
+	// BrewCaveats is what the formula tells someone after installing. The
+	// one piece of a formula that cannot be derived from the release or the
+	// repository description: it says what this program needs of the machine
+	// it landed on, which only the author knows.
+	BrewCaveats string
+
 	// Prerelease is "auto", "true" or "false".
 	Prerelease string
 
@@ -150,7 +156,7 @@ var known = map[string]string{
 	"archive": "archive <file>... or an archive ( ... ) block",
 	"budget":  "budget <goos/goarch> <size>",
 	"image":   "image, image <reference>, image base <ref>, image cmd <arg>..., or image expose <port>...",
-	"brew":    "brew <owner/tap-repo>",
+	"brew":    "brew <owner/tap-repo>, or brew caveats <text>",
 	"release": "release <key=value>...",
 }
 
@@ -238,7 +244,7 @@ func decodeLine(cfg *Config, file string, seen map[string]Position, line *Line) 
 
 func isScalar(keyword string) bool {
 	switch keyword {
-	case "project", "module", "brew":
+	case "project", "module":
 		return true
 	}
 	return false
@@ -597,12 +603,29 @@ func exposedPort(s string) (string, error) {
 	return number + "/" + proto, nil
 }
 
+// applyBrew reads where the formula goes, and what it says afterwards.
+//
+// The bare form names the tap, which is the case worth being short; caveats
+// are keyed, following the same shape as the version and image directives.
+// Repeating either is rejected here rather than by the scalar check, because
+// the two forms are separate settings sharing one keyword.
 func applyBrew(cfg *Config, file string, line *Line) error {
+	if len(line.Args) == 2 && line.Args[0] == "caveats" {
+		if cfg.BrewCaveats != "" {
+			return errAt(file, line.P, "brew caveats is already set")
+		}
+		cfg.BrewCaveats = line.Args[1]
+		return nil
+	}
+
 	if len(line.Args) != 1 {
 		return arity(file, line)
 	}
 	if _, _, ok := strings.Cut(line.Args[0], "/"); !ok {
 		return errAt(file, line.P, "brew tap %q must be in owner/repo form", line.Args[0])
+	}
+	if cfg.BrewTap != "" {
+		return errAt(file, line.P, "brew is already set")
 	}
 	cfg.BrewTap = line.Args[0]
 	return nil
