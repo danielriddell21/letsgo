@@ -57,7 +57,7 @@ func ResolveBase(ctx context.Context, reg *Registry, ref Reference, platform Pla
 	}
 
 	return &Base{
-		Reference:   ref.String(),
+		Reference:   ref,
 		Digest:      fetched.Digest,
 		IndexDigest: indexDigest,
 		Config:      config,

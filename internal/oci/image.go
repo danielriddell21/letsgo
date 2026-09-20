@@ -63,7 +63,10 @@ type ImageOptions struct {
 // digests. Nothing here is fetched by this package — resolving a reference to
 // these bytes is the registry client's job.
 type Base struct {
-	Reference string
+	// Reference is what the config named, parsed. Kept as a reference rather
+	// than the string it was written as, so that pinning it to the digest that
+	// was actually used is a substitution and not a concatenation.
+	Reference Reference
 
 	// Digest names this platform's manifest, which is what stacks. IndexDigest
 	// names what the reference itself resolved to — the index, where there is

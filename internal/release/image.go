@@ -229,8 +229,10 @@ func imageRecords(builds []ImageBuild) []manifest.Image {
 		}
 		if b.Base != nil {
 			// The digest, not the tag: a tag says what was asked for, and a
-			// digest says what was used.
-			record.Base = b.Base.Reference + "@" + string(b.Base.IndexDigest)
+			// digest says what was used. Substituted rather than appended,
+			// because a base the config already pinned by digest would
+			// otherwise be recorded carrying two of them.
+			record.Base = b.Base.Reference.WithDigest(b.Base.IndexDigest).String()
 		}
 		out = append(out, record)
 	}

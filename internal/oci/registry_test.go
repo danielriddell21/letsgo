@@ -312,7 +312,7 @@ func TestPushMountsBaseLayersRatherThanCopyingThem(t *testing.T) {
 
 	o := options(t)
 	o.Base = &oci.Base{
-		Reference: "distroless/static",
+		Reference: oci.Reference{Registry: oci.DefaultRegistry, Repository: "distroless/static"},
 		Config:    oci.Config{RootFS: oci.RootFS{Type: "layers", DiffIDs: []oci.Digest{"sha256:base"}}},
 		Layers: []oci.Descriptor{{
 			MediaType: oci.MediaTypeLayerGzip, Digest: baseDigest, Size: int64(len(baseLayer)),
@@ -357,7 +357,7 @@ func TestPushFallsBackWhenAMountIsRefused(t *testing.T) {
 
 	o := options(t)
 	o.Base = &oci.Base{
-		Reference: "distroless/static",
+		Reference: oci.Reference{Registry: oci.DefaultRegistry, Repository: "distroless/static"},
 		Config:    oci.Config{RootFS: oci.RootFS{Type: "layers", DiffIDs: []oci.Digest{"sha256:base"}}},
 		Layers: []oci.Descriptor{{
 			MediaType: oci.MediaTypeLayerGzip, Digest: baseDigest, Size: int64(len(baseLayer)),
@@ -388,7 +388,7 @@ func TestPushRefusesAnUnreachableBase(t *testing.T) {
 
 	o := options(t)
 	o.Base = &oci.Base{
-		Reference: "distroless/static",
+		Reference: oci.Reference{Registry: oci.DefaultRegistry, Repository: "distroless/static"},
 		Config:    oci.Config{RootFS: oci.RootFS{Type: "layers", DiffIDs: []oci.Digest{"sha256:base"}}},
 		Layers:    []oci.Descriptor{{MediaType: oci.MediaTypeLayerGzip, Digest: oci.Digest("sha256:" + strings.Repeat("a", 64))}},
 	}

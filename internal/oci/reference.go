@@ -125,6 +125,14 @@ func (r Reference) String() string {
 	}
 }
 
+// WithDigest returns the same repository pinned to a digest, dropping
+// whichever tag or digest was written: a reference addresses one or the other,
+// never both.
+func (r Reference) WithDigest(d Digest) Reference {
+	r.Tag, r.Digest = "", d
+	return r
+}
+
 // WithTag returns the same repository at a different tag.
 func (r Reference) WithTag(tag string) Reference {
 	r.Tag, r.Digest = tag, ""

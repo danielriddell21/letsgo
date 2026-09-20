@@ -75,10 +75,7 @@ func baseSource(built ImageBuild, target *oci.Registry) *oci.Source {
 	if built.Base == nil {
 		return nil
 	}
-	ref, err := oci.ParseReference(built.Base.Reference)
-	if err != nil {
-		return nil
-	}
+	ref := built.Base.Reference
 
 	source := &oci.Source{Repository: ref.Repository}
 	if ref.APIHost() == target.Host {

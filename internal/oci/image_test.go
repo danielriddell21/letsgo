@@ -196,7 +196,7 @@ func TestBuildImageInheritsPortsButNotCmd(t *testing.T) {
 	o.Cmd = []string{"serve"}
 	o.ExposedPorts = []string{"8080/tcp"}
 	o.Base = &oci.Base{
-		Reference: "gcr.io/distroless/static@sha256:aaaa",
+		Reference: oci.Reference{Registry: "gcr.io", Repository: "distroless/static", Digest: "sha256:aaaa"},
 		Digest:    "sha256:aaaa",
 		Config: oci.Config{
 			Config: oci.RunConfig{
@@ -257,7 +257,7 @@ func TestBuildImageIsDeterministic(t *testing.T) {
 func TestBuildImageStacksOnABase(t *testing.T) {
 	o := options(t)
 	o.Base = &oci.Base{
-		Reference: "gcr.io/distroless/static@sha256:aaaa",
+		Reference: oci.Reference{Registry: "gcr.io", Repository: "distroless/static", Digest: "sha256:aaaa"},
 		Digest:    "sha256:aaaa",
 		Config: oci.Config{
 			Config: oci.RunConfig{
