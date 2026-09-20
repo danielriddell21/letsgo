@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -605,5 +606,132 @@ func TestTagsAreResolvedAndValidated(t *testing.T) {
 	bad := workspace(t, "module web\ntags with,comma\n")
 	if c := check(t, bad.resolve(plan.Options{}), "tags"); c.Status != plan.Fail {
 		t.Errorf("check = %+v", c)
+	}
+}
+
+// A variant is the same commands compiled differently, shipped beside the
+// release rather than instead of it.
+func TestVariantAddsASecondBuild(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/gambit\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod",
+		"build linux/amd64 windows/amd64\n\nvariant gui (\n\tbuild linux/amd64\n\ttags ebiten\n)\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+	if !p.OK() {
+		t.Fatalf("plan should pass: %+v", p.Checks)
+	}
+
+	if len(p.Groups) != 2 {
+		t.Fatalf("got %d groups, want the release and its variant: %+v", len(p.Groups), p.Groups)
+	}
+	base, variant := p.Groups[0], p.Groups[1]
+
+	if base.Name != "gambit" || base.Variant != "" {
+		t.Errorf("base group = %+v", base)
+	}
+	// The suffix is what keeps the two archives — and the two binaries — apart
+	// when both are installed.
+	if variant.Name != "gambit-gui" || variant.Variant != "gui" {
+		t.Errorf("variant group = %+v", variant)
+	}
+	if strings.Join(variant.Tags, ",") != "ebiten" {
+		t.Errorf("variant tags = %q", variant.Tags)
+	}
+	// Its own targets, not the release's: a variant exists because it does not
+	// build everywhere.
+	if len(variant.Targets) != 1 || variant.Targets[0].String() != "linux/amd64" {
+		t.Errorf("variant targets = %v", variant.Targets)
+	}
+	if len(base.Targets) != 2 {
+		t.Errorf("base targets = %v, want the release's two", base.Targets)
+	}
+
+	names := make([]string, len(p.Artifacts))
+	for i, a := range p.Artifacts {
+		names[i] = a.Name
+	}
+	for _, want := range []string{
+		"gambit_1.0.0_linux_amd64.tar.gz",
+		"gambit_1.0.0_windows_amd64.zip",
+		"gambit-gui_1.0.0_linux_amd64.tar.gz",
+	} {
+		if !slices.Contains(names, want) {
+			t.Errorf("%s is missing from %v", want, names)
+		}
+	}
+}
+
+// A variant adds to the release's tags rather than replacing them: it is the
+// same module, built once more.
+func TestVariantKeepsTheReleaseTags(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/gambit\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod",
+		"build linux/amd64\ntags netgo\n\nvariant gui (\n\tbuild linux/amd64\n\ttags ebiten\n)\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+	if len(p.Groups) != 2 {
+		t.Fatalf("got %d groups: %+v", len(p.Groups), p.Groups)
+	}
+	if got := strings.Join(p.Groups[1].Tags, ","); got != "netgo,ebiten" {
+		t.Errorf("variant tags = %q, want the release's then its own", got)
+	}
+}
+
+// Variants multiply the layout rather than replacing it, so a collection of
+// tools in one archive stays one archive in each variant.
+func TestVariantsMultiplyEveryGroup(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/tools\n\ngo 1.24\n")
+	r.write("cmd/alpha/main.go", "package main\n\nfunc main() {}\n")
+	r.write("cmd/beta/main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\n\nvariant gui (\n\tbuild linux/amd64\n\ttags ebiten\n)\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+
+	// Two commands, each with a variant.
+	if len(p.Groups) != 4 {
+		t.Fatalf("got %d groups, want 4: %+v", len(p.Groups), p.Groups)
+	}
+	for _, want := range []string{"alpha", "beta", "alpha-gui", "beta-gui"} {
+		found := false
+		for _, g := range p.Groups {
+			if g.Name == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no group named %s", want)
+		}
+	}
+}
+
+// An unbuildable target is reported against the variant that asked for it,
+// not against the release.
+func TestVariantWithAnUnknownTargetFails(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/gambit\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\n\nvariant gui (\n\tbuild nowhere/amd64\n)\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+	if p.OK() {
+		t.Fatal("a variant naming an unbuildable target should not plan")
+	}
+	found := false
+	for _, c := range p.Checks {
+		if c.Name == "variants" && strings.Contains(c.Detail, "gui") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no failing variants check naming gui: %+v", p.Checks)
 	}
 }

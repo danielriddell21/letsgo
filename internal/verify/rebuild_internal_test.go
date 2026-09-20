@@ -109,3 +109,57 @@ func TestRebuildGroupsRefusesABinaryTheSourceDoesNotBuild(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// A variant ships beside the release it varies, so the manifest holds two
+// builds of the same command. They rebuild separately, each with the tags it
+// was compiled with — which is the whole reason the flags are recorded.
+func TestRebuildGroupsSeparatesAVariantFromTheReleaseItVaries(t *testing.T) {
+	tagged := manifest.Build{Flags: []string{"-trimpath", "-buildvcs=false", "-tags=ebiten"}}
+	m := &manifest.Manifest{
+		Version: "1.0.0",
+		Artifacts: []manifest.Artifact{
+			{
+				Name: "gambit_1.0.0_linux_amd64.tar.gz", OS: "linux", Arch: "amd64",
+				Binary: "gambit", BinarySHA256: "a",
+				Build: manifest.Build{Flags: []string{"-trimpath", "-buildvcs=false"}},
+			},
+			{
+				Name: "gambit_1.0.0_windows_amd64.zip", OS: "windows", Arch: "amd64",
+				Binary: "gambit.exe", BinarySHA256: "b",
+				Build: manifest.Build{Flags: []string{"-trimpath", "-buildvcs=false"}},
+			},
+			{
+				Name: "gambit-gui_1.0.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64",
+				Binary: "gambit-gui", BinarySHA256: "c", Build: tagged,
+			},
+		},
+	}
+
+	commands := []discover.MainPackage{{RelPath: ".", BinaryName: "gambit"}}
+
+	groups, err := rebuildGroups(m, commands)
+	if err != nil {
+		t.Fatalf("rebuildGroups() error = %v", err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("got %d groups, want the release and its variant: %+v", len(groups), groups)
+	}
+
+	base, variant := groups[0], groups[1]
+	if base.name != "gambit" || len(base.targets) != 2 {
+		t.Errorf("base group = %+v", base)
+	}
+	if variant.name != "gambit-gui" || len(variant.targets) != 1 {
+		t.Errorf("variant group = %+v", variant)
+	}
+
+	// Without the tags the variant would rebuild as the release did and its
+	// digest would not match, which is a verification failure reported against
+	// an honest release.
+	if got := strings.Join(recordedTags(variant.artifacts), ","); got != "ebiten" {
+		t.Errorf("variant tags = %q, want ebiten", got)
+	}
+	if got := recordedTags(base.artifacts); len(got) != 0 {
+		t.Errorf("base tags = %q, want none", got)
+	}
+}

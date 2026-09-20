@@ -121,6 +121,16 @@ type Group struct {
 	Name string
 
 	Commands []discover.MainPackage
+
+	// Targets and Tags are the group's own. The release's for a group that
+	// declared none; a variant's where it did, because a variant exists
+	// precisely to be compiled differently.
+	Targets []gobuild.Target
+	Tags    []string
+
+	// Variant names the variant this group came from, empty for the default
+	// build. It suffixes the archive.
+	Variant string
 }
 
 // resolvePlugins reads the pinned plugins, without running any.
@@ -195,6 +205,12 @@ func (p *Plan) applyLayoutPlugin(ctx context.Context) {
 	if err != nil {
 		p.add("plugins", Fail, "plugin %s: %v", configured.Command, err)
 		return
+	}
+
+	// A layout plugin decides which binaries share an archive, not how they
+	// compile: the release's targets and tags still apply.
+	for i := range groups {
+		groups[i].Targets, groups[i].Tags = p.Targets, p.Tags
 	}
 
 	p.Groups = groups
@@ -1558,9 +1574,10 @@ func (p *Plan) resolveArtifacts(ctx context.Context) {
 
 	p.Groups = p.defaultGroups()
 	p.applyLayoutPlugin(ctx)
+	p.addVariantGroups(ctx)
 
 	for _, group := range p.Groups {
-		for _, target := range p.Targets {
+		for _, target := range group.Targets {
 			format := archive.FormatTarGz
 			if target.OS == "windows" {
 				format = archive.FormatZip
@@ -1586,9 +1603,65 @@ func (p *Plan) defaultGroups() []Group {
 		if len(p.Commands) > 1 {
 			name = cmd.BinaryName
 		}
-		groups = append(groups, Group{Name: name, Commands: []discover.MainPackage{cmd}})
+		groups = append(groups, Group{
+			Name:     name,
+			Commands: []discover.MainPackage{cmd},
+			Targets:  p.Targets,
+			Tags:     p.Tags,
+		})
 	}
 	return groups
+}
+
+// addVariantGroups appends a second build of the same commands for each
+// variant.
+//
+// The commands and the layout are the release's; only how they compile and
+// where they run differ. A repository with a headless CLI and a GUI build
+// behind a tag ships both from one commit, and the suffix is what keeps their
+// archives apart.
+func (p *Plan) addVariantGroups(ctx context.Context) {
+	if len(p.Config.Variants) == 0 {
+		return
+	}
+
+	base := len(p.Groups)
+	names := make([]string, 0, len(p.Config.Variants))
+
+	for _, variant := range p.Config.Variants {
+		targets, err := gobuild.ParseTargets(variant.Targets)
+		if err != nil {
+			p.variantFailed(variant.Name, err)
+			return
+		}
+		if err := gobuild.Validate(ctx, "", targets); err != nil {
+			p.variantFailed(variant.Name, err)
+			return
+		}
+
+		for _, group := range p.Groups[:base] {
+			p.Groups = append(p.Groups, Group{
+				Name:     group.Name + "-" + variant.Name,
+				Commands: group.Commands,
+				Targets:  targets,
+				// The release's tags first: a variant adds to how the module
+				// builds rather than replacing it.
+				Tags:    append(append([]string{}, p.Tags...), variant.Tags...),
+				Variant: variant.Name,
+			})
+		}
+		names = append(names, variant.Name)
+	}
+
+	p.note("variants", strings.Join(names, ", "), ConfigFile)
+	p.add("variants", Pass, "%d variant(s): %s", len(names), strings.Join(names, ", "))
+}
+
+// variantFailed reports a problem with one variant, naming which. A repository
+// can declare several, and a message that did not say which one would leave
+// the reader to guess.
+func (p *Plan) variantFailed(name string, err error) {
+	p.add("variants", Fail, "variant %s: %v", name, err)
 }
 
 func summarise(targets []gobuild.Target) string {

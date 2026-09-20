@@ -44,6 +44,11 @@ func (l *Line) Pos() Position { return l.P }
 // Block is a parenthesised group of argument lines sharing one keyword.
 type Block struct {
 	Keyword string
+
+	// Args are the words between the keyword and the opening parenthesis, as
+	// in `variant gui (`. Most blocks have none.
+	Args []string
+
 	Lines   []*Line
 	Comment string // trailing comment on the opening line
 	P       Position
@@ -163,12 +168,23 @@ func parseStatement(name string, lineNo int, tokens []token, comment string) (St
 	rest := tokens[1:]
 
 	if len(rest) > 0 && rest[len(rest)-1].text == "(" {
-		if len(rest) > 1 {
-			return nil, errAt(name, rest[0].pos,
-				"%s ( must open a block on its own line; move %q inside the block",
-				keyword, rest[0].text)
+		// Anything between the keyword and the parenthesis names the block, as
+		// in `variant gui (`. A block whose keyword takes no name rejects it
+		// when the directive is decoded, where the message can say what that
+		// particular keyword accepts.
+		named := make([]string, 0, len(rest)-1)
+		for _, tok := range rest[:len(rest)-1] {
+			if tok.text == "(" || tok.text == ")" {
+				return nil, errAt(name, tok.pos, "unexpected %q", tok.text)
+			}
+			named = append(named, tok.text)
 		}
-		return &Block{Keyword: keyword, Comment: comment, P: Position{lineNo, tokens[0].pos.Col}}, nil
+		return &Block{
+			Keyword: keyword,
+			Args:    named,
+			Comment: comment,
+			P:       Position{lineNo, tokens[0].pos.Col},
+		}, nil
 	}
 
 	args := make([]string, 0, len(rest))

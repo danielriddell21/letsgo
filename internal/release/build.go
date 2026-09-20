@@ -190,7 +190,7 @@ func describe(
 			Size: a.Size, BinarySize: a.BinarySize,
 			SHA256: a.ArchiveSHA256,
 			Build: manifest.Build{
-				Flags:   buildFlags(p),
+				Flags:   buildFlags(groupFor(p, a)),
 				LDFlags: a.LDFlags,
 				Env:     map[string]string{"CGO_ENABLED": "0", "GOOS": a.OS, "GOARCH": a.Arch},
 			},
@@ -236,12 +236,24 @@ func builder(p *plan.Plan, toolVersion, goVersion string) manifest.Builder {
 	return b
 }
 
+// groupFor finds the group an artifact came from, which is what says how it
+// was compiled: a variant's archives carry different tags from the release
+// they ship beside.
+func groupFor(p *plan.Plan, a build.Artifact) plan.Group {
+	for _, group := range p.Groups {
+		if manifest.BaseName(a.Archive, p.Version, a.OS, a.Arch) == group.Name {
+			return group
+		}
+	}
+	return plan.Group{Targets: p.Targets, Tags: p.Tags}
+}
+
 // buildFlags are the go build flags an artifact was produced with, recorded so
 // that verification replays them rather than reconstructing them.
-func buildFlags(p *plan.Plan) []string {
+func buildFlags(group plan.Group) []string {
 	flags := []string{"-trimpath", "-buildvcs=false"}
-	if len(p.Tags) > 0 {
-		flags = append(flags, "-tags="+strings.Join(p.Tags, ","))
+	if len(group.Tags) > 0 {
+		flags = append(flags, "-tags="+strings.Join(group.Tags, ","))
 	}
 	return flags
 }
@@ -282,10 +294,10 @@ func buildCommands(ctx context.Context, p *plan.Plan, dir string, warnf func(str
 			Version:      p.Version,
 			Commit:       p.Git.ShortCommit,
 			ModTime:      p.Git.CommitTime,
-			Targets:      p.Targets,
+			Targets:      group.Targets,
 			ExtraFiles:   p.Files,
 			ExtraLDFlags: p.LDFlags,
-			Tags:         p.Tags,
+			Tags:         group.Tags,
 			Symbols: build.VersionSymbols{
 				Version: p.Symbols.Version, Commit: p.Symbols.Commit, Date: p.Symbols.Date,
 			},

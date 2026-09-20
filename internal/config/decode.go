@@ -40,6 +40,11 @@ type Config struct {
 	// reproducibility claim nothing.
 	Tags []string
 
+	// Variants are additional builds of the same commands, differing by tags
+	// and target. A repository with a headless CLI and a GUI build behind a
+	// tag has two products from one source, and they ship side by side.
+	Variants []Variant
+
 	// Targets overrides the default build matrix, as "goos/goarch" strings.
 	// Parsing into gobuild.Target happens at plan time so that an invalid
 	// target is reported alongside every other planning error rather than
@@ -76,6 +81,20 @@ type Plugin struct {
 	Command string
 	Version string
 	Digest  string
+}
+
+// Variant is one additional build of the module's commands.
+//
+// A variant names its own targets rather than inheriting the release's,
+// because the reason to have one is usually that it does not build
+// everywhere: a GUI build needs a windowing system, and the point is to ship
+// it only where it works.
+type Variant struct {
+	// Name suffixes the archive, as in "gambit-gui_1.0.0_darwin_arm64".
+	Name string
+
+	Targets []string
+	Tags    []string
 }
 
 // VersionSymbols names the variables that receive the version metadata.
@@ -124,6 +143,7 @@ var known = map[string]string{
 	"module":  "module <dir>",
 	"build":   "build <goos/goarch>... or a build ( ... ) block",
 	"tags":    "tags <tag>...",
+	"variant": "a variant <name> ( ... ) block setting build and tags",
 	"plugin":  "plugin <hook> <command> <version> sha256:<digest>",
 	"ldflags": "ldflags <flag>...",
 	"version": "version <symbol>, or version commit|date <symbol>",
@@ -133,6 +153,11 @@ var known = map[string]string{
 	"brew":    "brew <owner/tap-repo>",
 	"release": "release <key=value>...",
 }
+
+// blockOnly names the directives that exist only as a block. Written down so
+// that using one as a plain line says so, rather than parsing and quietly
+// doing nothing.
+var blockOnly = map[string]bool{"variant": true}
 
 // handlers folds each directive into the config.
 var handlers = map[string]func(cfg *Config, file string, line *Line) error{
@@ -176,6 +201,15 @@ func Decode(f *File) (*Config, error) {
 func decodeBlock(cfg *Config, file string, seen map[string]Position, b *Block) error {
 	if err := checkKnown(file, b.Keyword, b.P); err != nil {
 		return err
+	}
+
+	// A variant is the one block a file may have several of, because having
+	// two products from one source is the whole point of it.
+	if b.Keyword == "variant" {
+		return applyVariant(cfg, file, b)
+	}
+	if len(b.Args) > 0 {
+		return errAt(file, b.P, "%s takes no name before its block", b.Keyword)
 	}
 	if err := checkOnce(file, seen, b.Keyword, b.P); err != nil {
 		return err
@@ -253,6 +287,9 @@ func apply(cfg *Config, file string, line *Line) error {
 	if handle, ok := handlers[line.Keyword]; ok {
 		return handle(cfg, file, line)
 	}
+	if blockOnly[line.Keyword] {
+		return errAt(file, line.P, "%s", known[line.Keyword])
+	}
 	return nil
 }
 
@@ -277,6 +314,64 @@ func applyTags(cfg *Config, file string, line *Line) error {
 		return arity(file, line)
 	}
 	cfg.Tags = append(cfg.Tags, line.Args...)
+	return nil
+}
+
+// variantDirectives are what a variant may set.
+//
+// Deliberately two: a variant is the same source built differently, so it can
+// change how it compiles and where it runs, and nothing else. Letting it set a
+// project name or a tap would make it a second release configuration wearing
+// the same file.
+var variantDirectives = map[string]bool{"build": true, "tags": true}
+
+// applyVariant reads one variant block.
+//
+// The inner lines are applied to a throwaway config and the results lifted
+// out, so a variant's `build` and `tags` are parsed and validated by exactly
+// the code that parses the release's own.
+func applyVariant(cfg *Config, file string, b *Block) error {
+	if len(b.Args) != 1 {
+		return errAt(file, b.P, "%s", known["variant"])
+	}
+	name := b.Args[0]
+
+	if name == "" || strings.ContainsAny(name, "_/ ") {
+		return errAt(file, b.P,
+			"variant %q: the name suffixes an archive, so it cannot contain a space, slash or underscore", name)
+	}
+	for _, existing := range cfg.Variants {
+		if existing.Name == name {
+			return errAt(file, b.P, "variant %s is already defined", name)
+		}
+	}
+
+	// A block's lines arrive as arguments to the block's own keyword, so the
+	// directive each one means is its first word — the same shape as
+	// `image ( base ... )`.
+	inner := &Config{Budgets: map[string]string{}}
+	for _, line := range b.Lines {
+		if len(line.Args) == 0 {
+			continue
+		}
+		keyword, args := line.Args[0], line.Args[1:]
+		if !variantDirectives[keyword] {
+			return errAt(file, line.P,
+				"a variant sets build and tags; %q belongs outside it", keyword)
+		}
+		if err := apply(inner, file, &Line{Keyword: keyword, Args: args, P: line.P}); err != nil {
+			return err
+		}
+	}
+
+	// Without its own targets a variant would build the whole matrix, which is
+	// never what one is for: the GUI half of a repository exists precisely
+	// because it does not run everywhere the CLI does.
+	if len(inner.Targets) == 0 {
+		return errAt(file, b.P, "variant %s must name the targets it builds for", name)
+	}
+
+	cfg.Variants = append(cfg.Variants, Variant{Name: name, Targets: inner.Targets, Tags: inner.Tags})
 	return nil
 }
 
