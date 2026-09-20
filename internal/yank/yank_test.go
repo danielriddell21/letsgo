@@ -166,6 +166,34 @@ func TestFormulasFromRebuildsFromTheManifest(t *testing.T) {
 	}
 }
 
+// A retraction republishes the formulas a release published. A variant
+// published none, so rebuilding one from the manifest would create a package
+// the release never had — during a retraction, of all moments.
+func TestFormulasFromSkipsAVariant(t *testing.T) {
+	m := &manifest.Manifest{
+		Version: "1.2.0", Tag: "v1.2.0",
+		Artifacts: []manifest.Artifact{
+			{Name: "foo_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64", Binary: "foo", SHA256: "aaa"},
+			{
+				Name: "foo-gui_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64",
+				Binary: "foo", SHA256: "bbb", Variant: "gui",
+			},
+		},
+	}
+
+	formulas := yank.FormulasFrom(m, github.Repo{Owner: "you", Name: "foo"}, "foo")
+	if len(formulas) != 1 {
+		names := make([]string, len(formulas))
+		for i, f := range formulas {
+			names[i] = f.Name
+		}
+		t.Fatalf("got formulas %v, want only foo", names)
+	}
+	if formulas[0].Name != "foo" {
+		t.Errorf("formula = %q, want foo", formulas[0].Name)
+	}
+}
+
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
 }

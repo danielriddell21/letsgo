@@ -207,6 +207,11 @@ func FormulasFrom(m *manifest.Manifest, repo github.Repo, project string) []brew
 	binaries := map[string][]string{}
 
 	for _, a := range m.Artifacts {
+		// A variant published no formula, so a retraction must not write one.
+		if a.Variant != "" {
+			continue
+		}
+
 		// A formula is named after the archive, not after a binary inside it.
 		// Archives published before the manifest recorded any of this fall
 		// back to the project's name, which for a single-command module is the

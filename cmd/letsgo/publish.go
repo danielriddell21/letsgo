@@ -32,6 +32,11 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 		return nil
 	}
 
+	if names := variantNames(p); len(names) > 0 {
+		fmt.Printf("  ! no formula for variant %s: a variant's package is the repository's to choose\n",
+			strings.Join(names, ", "))
+	}
+
 	info := describeRepo(ctx, client, repo)
 
 	for _, formula := range formulas(p, result, repo, info) {
@@ -44,21 +49,50 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 	return nil
 }
 
+// variantNames are the variants this release built, in order.
+func variantNames(p *plan.Plan) []string {
+	names := make([]string, 0, len(p.Config.Variants))
+	for _, v := range p.Config.Variants {
+		names = append(names, v.Name)
+	}
+	return names
+}
+
+// variantArchives are the archive base names belonging to a variant.
+func variantArchives(p *plan.Plan) map[string]bool {
+	out := map[string]bool{}
+	for _, g := range p.Groups {
+		if g.Variant != "" {
+			out[g.Name] = true
+		}
+	}
+	return out
+}
+
 // formulas builds one formula per archive, grouping the artifacts by the
 // archive they belong to.
 //
 // Per archive rather than per binary, because a formula names one archive per
 // platform: an archive holding eleven tools is one formula that installs
 // eleven binaries, not eleven formulas fighting over the same file.
+//
+// A variant's archives are left out. `brew` says where the release's formula
+// goes, and a variant is a second product from the same source: a windowed
+// build usually belongs in a cask rather than a formula, and writing one
+// anyway would put a package in the tap that nobody asked for.
 func formulas(p *plan.Plan, result *release.Result, repo github.Repo, info *github.RepoInfo) []brew.Formula {
 	tag := releaseTag(p)
 
 	order := make([]string, 0, len(p.Groups))
 	platforms := map[string][]brew.Platform{}
 	binaries := map[string][]string{}
+	variants := variantArchives(p)
 
 	for _, a := range result.Artifacts {
 		name := formulaName(a, p.Version)
+		if variants[name] {
+			continue
+		}
 		if _, seen := platforms[name]; !seen {
 			order = append(order, name)
 			for _, b := range a.Binaries {

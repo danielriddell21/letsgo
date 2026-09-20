@@ -138,3 +138,43 @@ func TestFormulasInstallEveryBinaryInTheArchive(t *testing.T) {
 		t.Errorf("install line missing from:\n%s", rendered)
 	}
 }
+
+// A variant is a second product from the same source, and a windowed build
+// usually belongs in a cask. Writing it a formula anyway would put a package
+// in the tap that the repository never asked for.
+func TestFormulasLeaveOutAVariant(t *testing.T) {
+	p := releasePlan()
+	p.Groups = []plan.Group{
+		{Name: "foo"},
+		{Name: "foo-gui", Variant: "gui"},
+	}
+
+	result := built(
+		artifact("foo_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"),
+		artifact("foo_1.2.3_darwin_arm64.tar.gz", "darwin", "arm64", "a2", "foo"),
+		artifact("foo-gui_1.2.3_darwin_arm64.tar.gz", "darwin", "arm64", "g1", "foo"),
+	)
+
+	got := formulas(p, result, github.Repo{Owner: "you", Name: "foo"}, nil)
+
+	if len(got) != 1 {
+		names := make([]string, len(got))
+		for i, f := range got {
+			names[i] = f.Name
+		}
+		t.Fatalf("got formulas %v, want only foo", names)
+	}
+	if got[0].Name != "foo" {
+		t.Errorf("formula = %q, want foo", got[0].Name)
+	}
+	// The variant's darwin archive must not be folded into the release's
+	// formula either: it is a different build of the same command.
+	if len(got[0].Platforms) != 2 {
+		t.Errorf("foo has %d platforms, want the release's two", len(got[0].Platforms))
+	}
+	for _, p := range got[0].Platforms {
+		if strings.Contains(p.URL, "foo-gui") {
+			t.Errorf("the variant's archive leaked into the formula: %q", p.URL)
+		}
+	}
+}

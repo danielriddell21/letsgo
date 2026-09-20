@@ -183,6 +183,13 @@ type Artifact struct {
 	SHA256       string `json:"sha256"`
 	BinarySHA256 string `json:"binary_sha256,omitempty"`
 
+	// Variant names the variant this archive came from, empty for the
+	// release's own build. Written down because nothing else in here tells
+	// the two apart: a variant ships the same commands compiled differently,
+	// and anything regenerating a package definition from a published release
+	// has to know which of the two it is looking at.
+	Variant string `json:"variant,omitempty"`
+
 	Build Build `json:"build"`
 }
 

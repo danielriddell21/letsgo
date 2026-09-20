@@ -185,12 +185,14 @@ func describe(
 	}
 
 	for _, a := range artifacts {
+		group := groupFor(p, a)
 		record := manifest.Artifact{
 			Name: a.Archive, OS: a.OS, Arch: a.Arch,
 			Size: a.Size, BinarySize: a.BinarySize,
-			SHA256: a.ArchiveSHA256,
+			SHA256:  a.ArchiveSHA256,
+			Variant: group.Variant,
 			Build: manifest.Build{
-				Flags:   buildFlags(groupFor(p, a)),
+				Flags:   buildFlags(group),
 				LDFlags: a.LDFlags,
 				Env:     map[string]string{"CGO_ENABLED": "0", "GOOS": a.OS, "GOARCH": a.Arch},
 			},
@@ -281,9 +283,10 @@ func buildCommands(ctx context.Context, p *plan.Plan, dir string, warnf func(str
 			commands[i] = build.Command{Package: cmd.RelPath, Binary: cmd.BinaryName}
 		}
 		// A single-command group is named after the project, not the command,
-		// so the binary inside it follows the archive.
+		// so the binary inside it follows the archive — minus a variant's
+		// suffix, which names the archive rather than the program.
 		if len(commands) == 1 {
-			commands[0].Binary = group.Name
+			commands[0].Binary = group.Program()
 		}
 
 		produced, err := build.Run(ctx, build.Options{

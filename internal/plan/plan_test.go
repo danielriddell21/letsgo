@@ -735,3 +735,24 @@ func TestVariantWithAnUnknownTargetFails(t *testing.T) {
 		t.Errorf("no failing variants check naming gui: %+v", p.Checks)
 	}
 }
+
+// The suffix belongs to the archive, not to the program. A user who installs
+// the windowed build still types the command the repository is named after.
+func TestGroupProgramDropsTheVariantSuffix(t *testing.T) {
+	tests := []struct {
+		name  string
+		group plan.Group
+		want  string
+	}{
+		{"the release's own build", plan.Group{Name: "gambit"}, "gambit"},
+		{"a variant of it", plan.Group{Name: "gambit-gui", Variant: "gui"}, "gambit"},
+		{"a variant whose name repeats", plan.Group{Name: "gui-gui", Variant: "gui"}, "gui"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.group.Program(); got != tt.want {
+				t.Errorf("Program() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

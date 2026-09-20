@@ -133,6 +133,18 @@ type Group struct {
 	Variant string
 }
 
+// Program is the name the binary inside this group's archive carries.
+//
+// A variant's suffix tells two archives apart, which is all it is for.
+// Carrying it into the binary would rename the program, and the command
+// somebody types should not depend on which of two builds they installed.
+func (g Group) Program() string {
+	if g.Variant == "" {
+		return g.Name
+	}
+	return strings.TrimSuffix(g.Name, "-"+g.Variant)
+}
+
 // resolvePlugins reads the pinned plugins, without running any.
 //
 // Whether a plugin is installed and matches its pin is checked when it runs;
