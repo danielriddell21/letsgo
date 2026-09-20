@@ -200,6 +200,21 @@ func Propose(previous, modulePath string, signals ...Signal) (Proposal, error) {
 	return p, nil
 }
 
+// Signalled reports whether anything actually called for a release.
+//
+// A proposal with no signal behind it is still a valid patch — someone who
+// asks for a version gets one — but an unattended tagger has nothing to act
+// on, and tagging on a documentation commit publishes a release nobody
+// intended.
+func (p Proposal) Signalled() bool {
+	for _, s := range p.Signals {
+		if s.Level != None {
+			return true
+		}
+	}
+	return false
+}
+
 // Disagree reports whether the signals reached different conclusions, which is
 // worth showing: a removal labelled as a fix is a mislabelling, and a breaking
 // commit with an unchanged API is usually a command-line change the diff

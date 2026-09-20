@@ -203,3 +203,52 @@ func TestDisagreementIsDetected(t *testing.T) {
 		t.Error("a silent signal was treated as disagreement")
 	}
 }
+
+// An unattended tagger needs to tell "nothing claims to be a release" apart
+// from "a patch was asked for", and the proposal's level cannot: with no
+// signal at all it still reads patch, because someone asking for a version by
+// hand should get one.
+func TestSignalledSeparatesAPatchFromNoClaimAtAll(t *testing.T) {
+	tests := []struct {
+		name    string
+		signals []Signal
+		want    bool
+	}{
+		{
+			name: "nothing labelled",
+			signals: []Signal{
+				{Source: "commit messages", Level: None},
+				{Source: "exported API", Level: None},
+			},
+		},
+		{
+			name:    "no signals gathered at all",
+			signals: nil,
+		},
+		{
+			name: "a fix",
+			signals: []Signal{
+				{Source: "commit messages", Level: Patch},
+				{Source: "exported API", Level: None},
+			},
+			want: true,
+		},
+		{
+			name:    "asked for on the command line",
+			signals: []Signal{{Source: "you", Level: Minor}},
+			want:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, err := Propose("v1.2.3", "github.com/you/tool", tt.signals...)
+			if err != nil {
+				t.Fatalf("Propose() error = %v", err)
+			}
+			if got := p.Signalled(); got != tt.want {
+				t.Errorf("Signalled() = %v, want %v (level %s, next %s)", got, tt.want, p.Level, p.Next)
+			}
+		})
+	}
+}

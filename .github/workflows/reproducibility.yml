@@ -118,3 +118,81 @@ jobs:
             exit 1
           fi
           echo "all machines produced byte-identical artifacts"
+
+  # Tag trunk with letsgo's own tagger.
+  #
+  # The shared workflow's tag job is off (above) because letsgo has a `tag`
+  # verb of its own, and a release tool that reached for someone else's action
+  # to decide its own version would be saying it does not trust its answer.
+  #
+  # It reads the same conventional commits a tag action would. Its second
+  # signal, the exported API diff, has nothing to say here: letsgo is one main
+  # package and the rest internal, so no dependant can be broken by it, and
+  # apidiff is deliberately not installed for a comparison that would always
+  # be empty. In a repository with an importable surface that signal is what
+  # catches a removal no commit message confessed to.
+  tag:
+    name: tag
+    # A tag starts a release, so it must never name a commit CI has rejected.
+    needs: [same-machine, compare]
+    # Only a push to trunk. `on: push` fires for the tag this job creates too,
+    # and tagging a tag is how a loop starts.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/trunk'
+    runs-on: ubuntu-latest
+    # Nothing is written with the workflow token; the push below uses its own.
+    permissions:
+      contents: read
+    steps:
+      # Checked before the clone so a missing secret fails here, saying what
+      # is missing, rather than as an unauthenticated checkout further down.
+      - name: the token must exist
+        env:
+          TOKEN: ${{ secrets.LETSGO_TOKEN }}
+        run: |
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::LETSGO_TOKEN is not set; a tag pushed with the workflow token starts no release"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          # letsgo tag looks for the previous tag and compares this tree's
+          # exported API against that one's, so the usual shallow clone with
+          # no tags is not enough.
+          fetch-depth: 0
+
+          # A tag pushed with the workflow token starts no workflow, so
+          # release.yml would never fire. A token of its own does.
+          token: ${{ secrets.LETSGO_TOKEN }}
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: false
+
+      - name: tag and push
+        run: |
+          set -euo pipefail
+
+          # A commit that already carries a tag has been released. letsgo
+          # ignores tags on HEAD when it looks for the previous one, so without
+          # this it would propose a second version for the same commit.
+          if [ -n "$(git tag --points-at HEAD)" ]; then
+            echo "HEAD is already tagged; nothing to do"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # --warranted: no feat, fix or API change means no release. Without
+          # it letsgo falls back to a patch, which is the right answer when a
+          # person asks for a version and the wrong one when a documentation
+          # commit does.
+          go run ./cmd/letsgo tag --yes --warranted
+
+          tag=$(git tag --points-at HEAD)
+          if [ -z "${tag}" ]; then
+            exit 0
+          fi
+          git push origin "${tag}"

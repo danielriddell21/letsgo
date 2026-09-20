@@ -552,6 +552,8 @@ func isManifestPath(ref string) bool {
 func runTag(args []string) error {
 	fs := flag.NewFlagSet("tag", flag.ExitOnError)
 	yes := fs.Bool("yes", false, "create the tag without asking")
+	warranted := fs.Bool("warranted", false,
+		"tag only if a commit or an API change calls for a release")
 	major := fs.Bool("major", false, "force a major bump")
 	minor := fs.Bool("minor", false, "force a minor bump")
 	patch := fs.Bool("patch", false, "force a patch bump")
@@ -584,6 +586,14 @@ func runTag(args []string) error {
 	}
 
 	reportProposal(proposal, previous)
+
+	// Unattended, the absence of a signal is an answer: nothing here claims to
+	// be a release, so making one would put a version on a commit whose author
+	// did not ask for it.
+	if *warranted && !proposal.Signalled() {
+		fmt.Println("\n  nothing was tagged: no commit or API change calls for a release")
+		return nil
+	}
 
 	if discover.TagExists(ctx, module.Dir, proposal.Next) {
 		return fmt.Errorf("%s already exists", proposal.Next)
