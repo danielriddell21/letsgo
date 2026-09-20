@@ -360,10 +360,16 @@ func (o Options) compileAll(
 		// in here. o.Toolchain alone is not enough: it is usually empty, and
 		// an entry compiled by one Go release would then be handed back to
 		// another.
+		//
+		// The tags are in here for the same reason, and they are the one input
+		// a release can now vary within itself: a variant compiles the same
+		// package for the same target with a different tag set, and two builds
+		// that select different files are not interchangeable.
 		var key string
 		if o.CacheKey != "" {
 			key = CacheKey(o.CacheKey, cmd.Package, target.String(),
-				strings.Join(ldflags, " "), o.Toolchain, goVersion, binName)
+				strings.Join(o.Tags, ","), strings.Join(ldflags, " "),
+				o.Toolchain, goVersion, binName)
 		}
 
 		reused, err := o.compile(ctx, cmd.Package, target, binPath, key, ldflags)

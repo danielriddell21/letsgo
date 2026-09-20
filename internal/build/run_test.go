@@ -176,3 +176,59 @@ func zipEntries(t *testing.T, path string) []string {
 	}
 	return names
 }
+
+// Two builds of the same package for the same target, differing only in build
+// tags, select different files and are not interchangeable. The cache key has
+// to say so.
+//
+// A variant compiles exactly that way, and its archive usually holds a binary
+// with the same name as the release's own — so a key blind to tags hands the
+// second build the first one's binary and ships it under the variant's name.
+func TestRunCachesTagSetsSeparately(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/prog\n\ngo 1.24\n")
+	write("main.go", "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(mode) }\n")
+	write("mode_plain.go", "//go:build !gui\n\npackage main\n\nconst mode = \"plain\"\n")
+	write("mode_gui.go", "//go:build gui\n\npackage main\n\nconst mode = \"gui\"\n")
+
+	cache := build.OpenCache(t.TempDir())
+	target := gobuild.Host()
+
+	// One cache key for both, as a single release gives every build of one
+	// commit.
+	run := func(name string, tags []string) build.Artifact {
+		t.Helper()
+		artifacts, err := build.Run(t.Context(), build.Options{
+			ModuleDir: dir,
+			Commands:  []build.Command{{Package: ".", Binary: "prog"}},
+			Name:      name,
+			Version:   "1.2.3",
+			ModTime:   commitTime,
+			Targets:   []gobuild.Target{target},
+			Tags:      tags,
+			WorkDir:   t.TempDir(),
+			CacheKey:  "one-commit",
+			Cache:     cache,
+		})
+		if err != nil {
+			t.Fatalf("Run(%v): %v", tags, err)
+		}
+		if len(artifacts) != 1 || len(artifacts[0].Binaries) != 1 {
+			t.Fatalf("Run(%v) produced %+v", tags, artifacts)
+		}
+		return artifacts[0]
+	}
+
+	plain := run("prog", nil)
+	tagged := run("prog-gui", []string{"gui"})
+
+	if plain.Binaries[0].SHA256 == tagged.Binaries[0].SHA256 {
+		t.Error("the tagged build was handed the untagged build's binary from the cache")
+	}
+}
