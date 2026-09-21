@@ -28,6 +28,13 @@ archive's SHA-256 and fails rather than installing a substituted one:
 curl -fsSL https://github.com/danielriddell21/letsgo/releases/latest/download/install.sh | sh
 ```
 
+Or from the tap. letsgo writes the formula from the manifest it just
+published, so what brew installs is the archive the release attests to:
+
+```sh
+brew install danielriddell21/tap/letsgo
+```
+
 ## Usage
 
 ```
