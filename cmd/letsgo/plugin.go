@@ -96,12 +96,23 @@ func runPluginInstall(args []string) error {
 		options.Tag = requested
 	}
 
+	return installPlugin(ctx, os.Stdout, name, dest, options)
+}
+
+// installPlugin resolves the release, checks what it downloads and puts the
+// executable in dest.
+//
+// Separated from the flags and from os.Stdout so that the behaviour worth
+// asserting — that a verified binary lands where it was asked to, and that the
+// pin printed afterwards names its digest — can be tested against a forge
+// rather than against the network.
+func installPlugin(ctx context.Context, w io.Writer, name, dest string, options selfupdate.Options) error {
 	release, err := selfupdate.Check(ctx, options)
 	if err != nil {
 		return err
 	}
 	if release == nil {
-		return fmt.Errorf("letsgo plugin install: %s has no releases", *repo)
+		return fmt.Errorf("letsgo plugin install: %s has no releases", options.Repo)
 	}
 
 	binary, err := release.Download(ctx)
@@ -114,10 +125,10 @@ func runPluginInstall(args []string) error {
 		return err
 	}
 
-	fmt.Printf("installed %s %s\n", name, release.Tag)
-	fmt.Printf("  %s\n", path)
-	fmt.Printf("  archive %s\n  binary  %s\n", short(release.SHA256), short(release.BinarySHA256))
-	describePin(os.Stdout, name, release)
+	fmt.Fprintf(w, "installed %s %s\n", name, release.Tag)
+	fmt.Fprintf(w, "  %s\n", path)
+	fmt.Fprintf(w, "  archive %s\n  binary  %s\n", short(release.SHA256), short(release.BinarySHA256))
+	describePin(w, name, release)
 	return nil
 }
 
@@ -163,20 +174,27 @@ func pinnedHook(name string) string {
 	return ""
 }
 
-// runPluginList answers the question that follows every pin: is the program
-// this file names actually here, and is it the one the file means?
 func runPluginList(args []string) error {
 	fs := flag.NewFlagSet("plugin list", flag.ExitOnError)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	return listPlugins(os.Stdout)
+}
 
+// listPlugins answers the question that follows every pin: is the program this
+// file names actually here, and is it the one the file means?
+//
+// Takes a writer for the same reason the updater does: what it reports is the
+// behaviour worth testing, and that is not checkable while it is tangled up
+// with os.Stdout.
+func listPlugins(w io.Writer) error {
 	cfg, err := loadPluginConfig()
 	if err != nil {
 		return err
 	}
 	if len(cfg.Plugins) == 0 {
-		fmt.Printf("%s pins no plugins\n", plan.ConfigFile)
+		fmt.Fprintf(w, "%s pins no plugins\n", plan.ConfigFile)
 		return nil
 	}
 
@@ -186,13 +204,13 @@ func runPluginList(args []string) error {
 		if !ok {
 			unmet = true
 		}
-		fmt.Printf("%-14s %-14s %-9s %s\n", p.Hook, p.Command, p.Version, status)
+		fmt.Fprintf(w, "%-14s %-14s %-9s %s\n", p.Hook, p.Command, p.Version, status)
 	}
 
 	if unmet {
-		fmt.Println()
-		fmt.Println("  install a missing or mismatched plugin with")
-		fmt.Println("  letsgo plugin install <name>@<version>")
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "  install a missing or mismatched plugin with")
+		fmt.Fprintln(w, "  letsgo plugin install <name>@<version>")
 	}
 	return nil
 }

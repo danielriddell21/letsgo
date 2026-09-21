@@ -1,7 +1,17 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,6 +19,8 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
 
@@ -150,10 +162,7 @@ func TestWriteExecutableReplacesAtomically(t *testing.T) {
 func writeProgram(t *testing.T, dir, name, content string) string {
 	t.Helper()
 
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	path := filepath.Join(dir, name)
+	path := filepath.Join(dir, executableName(name))
 	write(t, path, content)
 
 	if err := os.Chmod(path, 0o755); err != nil {
@@ -162,9 +171,375 @@ func writeProgram(t *testing.T, dir, name, content string) string {
 	return path
 }
 
+// executableName is what a file has to be called for LookPath to consider it
+// at all: on Windows, one of the extensions PATHEXT lists.
+func executableName(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
+}
+
 func write(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestListPluginsReportsEveryPin(t *testing.T) {
+	dir := t.TempDir()
+	writeProgram(t, dir, "letsgo-multi", "the multi plugin")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	digest, err := plugin.DigestOf(filepath.Join(dir, executableName("letsgo-multi")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Chdir(t.TempDir())
+	write(t, "letsgo.mod", "build linux/amd64\n"+
+		"plugin archive-layout letsgo-multi v0.2.0 "+digest+"\n"+
+		"plugin ldflags letsgo-env v0.2.0 sha256:"+strings.Repeat("f", 64)+"\n")
+
+	var out bytes.Buffer
+	if err := listPlugins(&out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+
+	// The pin that is satisfied, and the one that is not.
+	if !strings.Contains(got, "archive-layout") || !strings.Contains(got, "ok  ") {
+		t.Errorf("a satisfied pin should be reported ok:\n%s", got)
+	}
+	if !strings.Contains(got, "letsgo-env") || !strings.Contains(got, "not installed") {
+		t.Errorf("a missing plugin should be reported:\n%s", got)
+	}
+	// An unmet pin is worth telling the reader how to fix.
+	if !strings.Contains(got, "letsgo plugin install") {
+		t.Errorf("an unmet pin should name the remedy:\n%s", got)
+	}
+}
+
+// A repository with no plugins is not an error, and should not print a table.
+func TestListPluginsWithNoPins(t *testing.T) {
+	t.Chdir(t.TempDir())
+	write(t, "letsgo.mod", "build linux/amd64\n")
+
+	var out bytes.Buffer
+	if err := listPlugins(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "pins no plugins") {
+		t.Errorf("out = %q", out.String())
+	}
+}
+
+func TestListPluginsReportsAMissingConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var out bytes.Buffer
+	if err := listPlugins(&out); err == nil {
+		t.Fatal("no letsgo.mod should be an error for list, which has nothing to report without one")
+	}
+}
+
+func TestInstallDirPrefersTheOverride(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bin")
+
+	got, err := installDir(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != dir {
+		t.Errorf("installDir = %q, want %q", got, dir)
+	}
+	// It has to exist afterwards, or the install that follows cannot write.
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Errorf("installDir did not create %s: %v", dir, err)
+	}
+}
+
+func TestInstallDirFallsBackToGOBIN(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GOBIN", dir)
+
+	got, err := installDir(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != dir {
+		t.Errorf("installDir = %q, want GOBIN %q", got, dir)
+	}
+}
+
+func TestInstallDirFallsBackToGOPATHBin(t *testing.T) {
+	gopath := t.TempDir()
+	t.Setenv("GOBIN", "")
+	t.Setenv("GOPATH", gopath)
+
+	got, err := installDir(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(gopath, "bin"); got != want {
+		t.Errorf("installDir = %q, want %q", got, want)
+	}
+}
+
+// The environment wins without shelling out, which is what makes the fallback
+// to `go env` affordable.
+func TestGoEnvPrefersTheEnvironment(t *testing.T) {
+	t.Setenv("GOBIN", "/somewhere/particular")
+
+	if got := goEnv(context.Background(), "GOBIN"); got != "/somewhere/particular" {
+		t.Errorf("goEnv = %q", got)
+	}
+}
+
+func TestRunPluginHelp(t *testing.T) {
+	if err := runPlugin([]string{"help"}); err != nil {
+		t.Errorf("runPlugin(help) = %v", err)
+	}
+}
+
+// Every verb in the usage text has to be reachable, and every alias has to
+// reach the same place as the name it aliases.
+func TestCommandsCoverTheUsage(t *testing.T) {
+	for _, name := range []string{
+		"plan", "build", "release", "verify", "diff",
+		"yank", "update", "plugin", "tag", "fmt", "version", "help",
+	} {
+		if commands[name] == nil {
+			t.Errorf("no command registered for %q", name)
+		}
+	}
+	for _, alias := range []string{"--version", "-version", "-v"} {
+		if commands[alias] == nil {
+			t.Errorf("no command registered for %q", alias)
+		}
+	}
+	if err := runVersion(nil); err != nil {
+		t.Error(err)
+	}
+	if err := runHelp(nil); err != nil {
+		t.Error(err)
+	}
+}
+
+// pluginForge serves a letsgo-published release the way GitHub does, so the
+// install path is exercised against the shape it actually meets.
+type pluginForge struct {
+	t        *testing.T
+	tag      string
+	manifest []byte
+	archives map[string][]byte
+	server   *httptest.Server
+}
+
+func newPluginForge(t *testing.T, tag string, binaries ...string) *pluginForge {
+	t.Helper()
+	f := &pluginForge{t: t, tag: tag, archives: map[string][]byte{}}
+
+	m := &manifest.Manifest{
+		Schema: manifest.Schema, Project: "letsgo-plugins",
+		Version: strings.TrimPrefix(tag, "v"), Tag: tag,
+	}
+	for _, binary := range binaries {
+		name := fmt.Sprintf("%s_%s_linux_amd64.tar.gz", binary, m.Version)
+		content := binary + " bytes"
+		archive := tarGzOne(t, binary, content)
+		f.archives[name] = archive
+
+		m.Artifacts = append(m.Artifacts, manifest.Artifact{
+			Name: name, OS: "linux", Arch: "amd64", Binary: binary,
+			SHA256:       sha256Hex(archive),
+			BinarySHA256: sha256Hex([]byte(content)),
+		})
+	}
+	data, err := m.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.manifest = data
+
+	release := func(w http.ResponseWriter, _ *http.Request) {
+		assets := []map[string]string{{
+			"name":                 manifest.FileName,
+			"browser_download_url": f.server.URL + "/download/" + manifest.FileName,
+		}}
+		for name := range f.archives {
+			assets = append(assets, map[string]string{
+				"name":                 name,
+				"browser_download_url": f.server.URL + "/download/" + name,
+			})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tag_name": f.tag,
+			"html_url": "https://example.test/releases/" + f.tag,
+			"assets":   assets,
+		})
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/you/plugins/releases/latest", release)
+	mux.HandleFunc("/repos/you/plugins/releases/tags/"+tag, release)
+	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/download/")
+		if name == manifest.FileName {
+			_, _ = w.Write(f.manifest)
+			return
+		}
+		content, ok := f.archives[name]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(content)
+	})
+
+	f.server = httptest.NewServer(mux)
+	t.Cleanup(f.server.Close)
+	return f
+}
+
+func (f *pluginForge) options(binary string) selfupdate.Options {
+	return selfupdate.Options{
+		Repo: "you/plugins", Binary: binary,
+		APIEndpoint: f.server.URL,
+		OS:          "linux", Arch: "amd64",
+	}
+}
+
+func tarGzOne(t *testing.T, name, content string) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+
+	body := []byte(content)
+	if err := tw.WriteHeader(&tar.Header{
+		Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// The whole point of the command: the executable that lands on disk is the one
+// the release's manifest describes.
+func TestInstallPluginWritesTheVerifiedBinary(t *testing.T) {
+	f := newPluginForge(t, "v0.2.0", "letsgo-multi", "letsgo-env")
+	dest := t.TempDir()
+	t.Chdir(t.TempDir())
+
+	var out bytes.Buffer
+	if err := installPlugin(context.Background(), &out, "letsgo-env", dest, f.options("letsgo-env")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The named plugin, not whichever artifact the platform matched first.
+	got, err := os.ReadFile(filepath.Join(dest, "letsgo-env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "letsgo-env bytes" {
+		t.Errorf("installed %q", got)
+	}
+
+	// The pin it prints has to carry the digest of what it just wrote.
+	want := "sha256:" + sha256Hex([]byte("letsgo-env bytes"))
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("printed:\n%s\nwant the pin to name %s", out.String(), want)
+	}
+	if !strings.Contains(out.String(), "installed letsgo-env v0.2.0") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+}
+
+// A tampered archive must not reach the disk at all.
+func TestInstallPluginRefusesATamperedArchive(t *testing.T) {
+	f := newPluginForge(t, "v0.2.0", "letsgo-multi")
+	for name := range f.archives {
+		f.archives[name] = []byte("not the archive that was published")
+	}
+
+	dest := t.TempDir()
+	t.Chdir(t.TempDir())
+
+	err := installPlugin(context.Background(), io.Discard, "letsgo-multi", dest, f.options("letsgo-multi"))
+	if err == nil {
+		t.Fatal("a tampered archive should be refused")
+	}
+	if _, err := os.Stat(filepath.Join(dest, "letsgo-multi")); !os.IsNotExist(err) {
+		t.Error("nothing should have been written")
+	}
+}
+
+// Installing an exact version is the pinned-plugin workflow, and must not be
+// treated as an update check.
+func TestInstallPluginByTag(t *testing.T) {
+	f := newPluginForge(t, "v0.1.0", "letsgo-multi")
+	dest := t.TempDir()
+	t.Chdir(t.TempDir())
+
+	options := f.options("letsgo-multi")
+	options.Tag = "v0.1.0"
+
+	var out bytes.Buffer
+	if err := installPlugin(context.Background(), &out, "letsgo-multi", dest, options); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "v0.1.0") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+}
+
+func TestRunPluginInstallNeedsExactlyOnePlugin(t *testing.T) {
+	for _, args := range [][]string{{}, {"letsgo-multi", "letsgo-env"}} {
+		if err := runPluginInstall(args); err == nil {
+			t.Errorf("runPluginInstall(%q) should have failed", args)
+		}
+	}
+}
+
+func TestRunPluginInstallNeedsAName(t *testing.T) {
+	err := runPluginInstall([]string{"@v0.2.0"})
+	if err == nil || !strings.Contains(err.Error(), "no plugin name") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// The wrapper's job is to find letsgo.mod relative to the working directory,
+// and to report it when there is none.
+func TestRunPluginListWithoutAConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	if err := runPluginList(nil); err == nil {
+		t.Fatal("list without a letsgo.mod should be an error")
+	}
+}
+
+// An unwritable destination has to fail before anything is reported installed.
+func TestWriteExecutableReportsAnUnwritableDir(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-dir", "letsgo-multi")
+
+	if err := writeExecutable(missing, []byte("bytes")); err == nil {
+		t.Fatal("writing into a directory that does not exist should fail")
 	}
 }
