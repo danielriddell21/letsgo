@@ -134,7 +134,7 @@ func resolve(p Plugin) (string, error) {
 		return "", fmt.Errorf("plugin %s: not installed: %w", p.Command, err)
 	}
 
-	digest, err := digestOf(path)
+	digest, err := DigestOf(path)
 	if err != nil {
 		return "", err
 	}
@@ -148,7 +148,12 @@ func resolve(p Plugin) (string, error) {
 	return path, nil
 }
 
-func digestOf(path string) (string, error) {
+// DigestOf is the SHA-256 of the file at path, as "sha256:…".
+//
+// Exported so that anything reporting on a pin computes the digest the same
+// way resolve does. Two implementations of this would be two answers to the
+// question the pin exists to settle.
+func DigestOf(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("plugin: reading %s: %w", path, err)

@@ -40,6 +40,8 @@ letsgo diff <from> [to]                compare two releases: size, dependencies,
 letsgo tag [--major|--minor|--patch]   work out the next version and tag it
 letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
 letsgo update [--check]                update letsgo itself, verified against its manifest
+letsgo plugin install <name>           install a plugin, verified against its manifest
+letsgo plugin list                     the plugins this repository pins, and what is installed
 letsgo fmt [file]                      format letsgo.mod
 letsgo version                         print the version (also --version)
 ```
@@ -57,6 +59,25 @@ letsgo plan            # no side effects; --explain shows where each value came 
 letsgo release         # idempotent, so a failed run resumes rather than restarts
 letsgo verify v1.3.0   # rebuild it and check it against what was published
 ```
+
+## In GitHub Actions
+
+[letsgo-action][action] installs letsgo and runs it on a runner:
+
+```yaml
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: danielriddell21/letsgo-action@v1
+```
+
+Go is a prerequisite rather than something the action installs: the Go version
+changes the bytes you ship, so choosing it belongs to the workflow that knows
+which one the project releases with. The action installs the latest letsgo by
+default; pin `version:` to a tag when the release has to be reproducible.
+
+[action]: https://github.com/danielriddell21/letsgo-action
 
 ## Self-update
 
@@ -83,5 +104,7 @@ take it. `letsgo update` is the same package, pointed at letsgo.
 
 Full documentation lives in the [letsgo wiki](https://github.com/danielriddell21/letsgo/wiki) —
 the commands, the config format, the reproducibility guarantee, publishing to
-Homebrew and container registries, migrating from GoReleaser, and the design
-rationale behind all of it.
+Homebrew and container registries, [plugins][], the [GitHub Action][action],
+migrating from GoReleaser, and the design rationale behind all of it.
+
+[plugins]: https://github.com/danielriddell21/letsgo/wiki/Plugins
