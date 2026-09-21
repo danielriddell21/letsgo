@@ -82,8 +82,7 @@ func TestPinnedHookToleratesNoConfig(t *testing.T) {
 
 func TestPluginStatusReportsAMismatch(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, executable("letsgo-fake"))
-	write(t, path, "the wrong bytes")
+	writeProgram(t, dir, "letsgo-fake", "the wrong bytes")
 
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -142,13 +141,25 @@ func TestWriteExecutableReplacesAtomically(t *testing.T) {
 	}
 }
 
-// executable names a file LookPath will find: on Windows that means one of
-// the extensions PATHEXT lists, and a bare name is not a program.
-func executable(name string) string {
+// writeProgram creates a file LookPath will actually find, and returns its
+// path.
+//
+// The two platforms disagree about what makes a file a program, and a test
+// that satisfies only one of them passes only on one of them: Windows wants an
+// extension from PATHEXT, and Unix wants the execute bit.
+func writeProgram(t *testing.T, dir, name, content string) string {
+	t.Helper()
+
 	if runtime.GOOS == "windows" {
-		return name + ".exe"
+		name += ".exe"
 	}
-	return name
+	path := filepath.Join(dir, name)
+	write(t, path, content)
+
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func write(t *testing.T, path, content string) {
