@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -13,7 +11,9 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
 
@@ -45,12 +45,11 @@ func runPlugin(args []string) error {
 		return runPluginList(args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(pluginUsage)
-		return nil
 	default:
 		fmt.Fprintf(os.Stderr, "letsgo plugin: unknown subcommand %q\n\n%s", command, pluginUsage)
 		os.Exit(2)
-		return nil
 	}
+	return nil
 }
 
 // runPluginInstall downloads a plugin and proves it is the one the release
@@ -75,7 +74,9 @@ func runPluginInstall(args []string) error {
 		return fmt.Errorf("letsgo plugin install: no plugin name in %q", fs.Arg(0))
 	}
 
-	dest, err := installDir(*dir)
+	ctx := context.Background()
+
+	dest, err := installDir(ctx, *dir)
 	if err != nil {
 		return err
 	}
@@ -94,8 +95,6 @@ func runPluginInstall(args []string) error {
 	if requested != "" && requested != "latest" {
 		options.Tag = requested
 	}
-
-	ctx := context.Background()
 
 	release, err := selfupdate.Check(ctx, options)
 	if err != nil {
@@ -205,7 +204,7 @@ func pluginStatus(p config.Plugin) (string, bool) {
 		return "not installed", false
 	}
 
-	digest, err := digestOfFile(path)
+	digest, err := plugin.DigestOf(path)
 	if err != nil {
 		return "unreadable: " + path, false
 	}
@@ -240,20 +239,20 @@ func splitPluginRef(ref string) (name, version string) {
 // The same place go install puts things, because that is the directory a Go
 // developer already has on PATH — and a plugin letsgo cannot find on PATH is a
 // plugin that was not installed, however carefully it was downloaded.
-func installDir(override string) (string, error) {
+func installDir(ctx context.Context, override string) (string, error) {
 	dir := override
 	if dir == "" {
-		dir = goEnv("GOBIN")
+		dir = goEnv(ctx, "GOBIN")
 	}
 	if dir == "" {
-		if gopath := goEnv("GOPATH"); gopath != "" {
+		if gopath := goEnv(ctx, "GOPATH"); gopath != "" {
 			dir = filepath.Join(gopath, "bin")
 		}
 	}
 	if dir == "" {
 		return "", fmt.Errorf("letsgo plugin install: nowhere to install: set GOBIN or GOPATH, or pass -o")
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", fmt.Errorf("letsgo plugin install: %w", err)
 	}
 	return dir, nil
@@ -262,11 +261,18 @@ func installDir(override string) (string, error) {
 // goEnv asks the go command when the environment is silent: both of these have
 // defaults that no environment variable carries, and the answer that matters
 // is the one go itself would give.
-func goEnv(name string) string {
+//
+// A silent failure is the right one here. Not knowing GOBIN is not an error;
+// it only means the caller has to be told to pass -o.
+func goEnv(ctx context.Context, name string) string {
 	if value := os.Getenv(name); value != "" {
 		return value
 	}
-	out, err := exec.Command("go", "env", name).Output()
+	goBin, err := gobuild.Toolchain()
+	if err != nil {
+		return ""
+	}
+	out, err := exec.CommandContext(ctx, goBin, "env", name).Output()
 	if err != nil {
 		return ""
 	}
@@ -292,27 +298,13 @@ func writeExecutable(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("letsgo plugin install: writing %s: %w", name, err)
 	}
-	if err := os.Chmod(name, 0o755); err != nil {
+	if err := os.Chmod(name, 0o755); err != nil { //nolint:gosec // a plugin must be executable
 		return fmt.Errorf("letsgo plugin install: %w", err)
 	}
 	if err := os.Rename(name, path); err != nil {
 		return fmt.Errorf("letsgo plugin install: installing %s: %w", path, err)
 	}
 	return nil
-}
-
-func digestOfFile(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }()
-
-	sum := sha256.New()
-	if _, err := io.Copy(sum, f); err != nil {
-		return "", err
-	}
-	return "sha256:" + hex.EncodeToString(sum.Sum(nil)), nil
 }
 
 func shortDigest(digest string) string {
