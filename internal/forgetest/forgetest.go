@@ -60,8 +60,8 @@ type Forge struct {
 
 // New starts a forge serving one release of repo at tag, with nothing
 // published into it yet.
-func New(t testing.TB, repo, tag string) *Forge {
-	t.Helper()
+func New(tb testing.TB, repo, tag string) *Forge {
+	tb.Helper()
 
 	f := &Forge{Repo: repo, Tag: tag, Body: Notes, Archives: map[string][]byte{}}
 
@@ -100,7 +100,7 @@ func New(t testing.TB, repo, tag string) *Forge {
 	})
 
 	f.server = httptest.NewServer(mux)
-	t.Cleanup(f.server.Close)
+	tb.Cleanup(f.server.Close)
 	return f
 }
 
@@ -126,14 +126,14 @@ func (f *Forge) Options() selfupdate.Options {
 }
 
 // Publish publishes a linux/amd64 release holding one executable.
-func (f *Forge) Publish(t testing.TB, project, version, binary, content string) {
-	t.Helper()
+func (f *Forge) Publish(tb testing.TB, project, version, binary, content string) {
+	tb.Helper()
 
 	name := fmt.Sprintf("%s_%s_linux_amd64.tar.gz", project, version)
-	data := TarGz(t, binary, content)
+	data := TarGz(tb, binary, content)
 	f.Archives[name] = data
 
-	f.SetManifest(t, &manifest.Manifest{
+	f.SetManifest(tb, &manifest.Manifest{
 		Schema: manifest.Schema, Project: project, Version: version, Tag: f.Tag,
 		Artifacts: []manifest.Artifact{{
 			Name: name, OS: "linux", Arch: "amd64", Binary: binary,
@@ -149,8 +149,8 @@ func (f *Forge) Publish(t testing.TB, project, version, binary, content string) 
 //
 // Each binary's content is its own name plus " bytes", so a test can tell
 // which one it got.
-func (f *Forge) PublishCommands(t testing.TB, project, version string, binaries ...string) {
-	t.Helper()
+func (f *Forge) PublishCommands(tb testing.TB, project, version string, binaries ...string) {
+	tb.Helper()
 
 	m := &manifest.Manifest{
 		Schema: manifest.Schema, Project: project, Version: version, Tag: f.Tag,
@@ -158,7 +158,7 @@ func (f *Forge) PublishCommands(t testing.TB, project, version string, binaries 
 	for _, binary := range binaries {
 		name := fmt.Sprintf("%s_%s_linux_amd64.tar.gz", binary, version)
 		content := Content(binary)
-		data := TarGz(t, binary, content)
+		data := TarGz(tb, binary, content)
 		f.Archives[name] = data
 
 		m.Artifacts = append(m.Artifacts, manifest.Artifact{
@@ -167,19 +167,19 @@ func (f *Forge) PublishCommands(t testing.TB, project, version string, binaries 
 			BinarySHA256: Sum([]byte(content)),
 		})
 	}
-	f.SetManifest(t, m)
+	f.SetManifest(tb, m)
 }
 
 // PublishZip publishes a Windows release: a zip, and a binary carrying the
 // .exe the manifest does not record but the archive does.
-func (f *Forge) PublishZip(t testing.TB, project, version, binary, content string) {
-	t.Helper()
+func (f *Forge) PublishZip(tb testing.TB, project, version, binary, content string) {
+	tb.Helper()
 
 	name := fmt.Sprintf("%s_%s_windows_amd64.zip", project, version)
-	data := Zip(t, binary+".exe", content)
+	data := Zip(tb, binary+".exe", content)
 	f.Archives[name] = data
 
-	f.SetManifest(t, &manifest.Manifest{
+	f.SetManifest(tb, &manifest.Manifest{
 		Schema: manifest.Schema, Project: project, Version: version, Tag: f.Tag,
 		Artifacts: []manifest.Artifact{{
 			Name: name, OS: "windows", Arch: "amd64", Binary: binary,
@@ -190,24 +190,24 @@ func (f *Forge) PublishZip(t testing.TB, project, version, binary, content strin
 }
 
 // SetManifest encodes m and serves it as the release's letsgo.json.
-func (f *Forge) SetManifest(t testing.TB, m *manifest.Manifest) {
-	t.Helper()
+func (f *Forge) SetManifest(tb testing.TB, m *manifest.Manifest) {
+	tb.Helper()
 
 	data, err := m.Encode()
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	f.Manifest = data
 }
 
 // DecodeManifest reads back the manifest currently being served, for a test
 // that wants to corrupt one field of it.
-func (f *Forge) DecodeManifest(t testing.TB) *manifest.Manifest {
-	t.Helper()
+func (f *Forge) DecodeManifest(tb testing.TB) *manifest.Manifest {
+	tb.Helper()
 
 	var m manifest.Manifest
 	if err := json.Unmarshal(f.Manifest, &m); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return &m
 }
@@ -216,26 +216,26 @@ func (f *Forge) DecodeManifest(t testing.TB) *manifest.Manifest {
 func Content(binary string) string { return binary + " bytes" }
 
 // TarGz builds a release archive holding one executable.
-func TarGz(t testing.TB, name, content string) []byte {
-	t.Helper()
-	return write(t, archive.FormatTarGz, name, content)
+func TarGz(tb testing.TB, name, content string) []byte {
+	tb.Helper()
+	return write(tb, archive.FormatTarGz, name, content)
 }
 
 // Zip builds a Windows-shaped release archive.
-func Zip(t testing.TB, name, content string) []byte {
-	t.Helper()
-	return write(t, archive.FormatZip, name, content)
+func Zip(tb testing.TB, name, content string) []byte {
+	tb.Helper()
+	return write(tb, archive.FormatZip, name, content)
 }
 
 // write builds the archive through letsgo's own writer, so a fixture is made
 // by the code that makes the real thing.
-func write(t testing.TB, format archive.Format, name, content string) []byte {
-	t.Helper()
+func write(tb testing.TB, format archive.Format, name, content string) []byte {
+	tb.Helper()
 
 	var buf bytes.Buffer
 	entries := []archive.Entry{archive.FromBytes(name, true, []byte(content))}
 	if err := archive.Write(&buf, format, entries, modTime); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	return buf.Bytes()
 }
