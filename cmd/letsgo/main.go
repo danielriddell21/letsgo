@@ -53,6 +53,34 @@ usage:
 run a command with -h for its options.
 `
 
+// commands is the whole surface of the tool: one verb to the function that
+// runs it.
+//
+// A table rather than a switch, so that adding a verb is an entry here and not
+// a change to the program's entry point. It is also why the aliases sit beside
+// the names they alias instead of sharing a case.
+var commands = map[string]func([]string) error{
+	"plan":    runPlan,
+	"build":   runBuild,
+	"release": runRelease,
+	"verify":  runVerify,
+	"diff":    runDiff,
+	"yank":    runYank,
+	"update":  runUpdate,
+	"plugin":  runPlugin,
+	"tag":     runTag,
+	"fmt":     runFmt,
+
+	"version":   runVersion,
+	"--version": runVersion,
+	"-version":  runVersion,
+	"-v":        runVersion,
+
+	"help":   runHelp,
+	"-h":     runHelp,
+	"--help": runHelp,
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, usage)
@@ -61,41 +89,26 @@ func main() {
 
 	command, args := os.Args[1], os.Args[2:]
 
-	var err error
-	switch command {
-	case "plan":
-		err = runPlan(args)
-	case "build":
-		err = runBuild(args)
-	case "release":
-		err = runRelease(args)
-	case "verify":
-		err = runVerify(args)
-	case "diff":
-		err = runDiff(args)
-	case "yank":
-		err = runYank(args)
-	case "update":
-		err = runUpdate(args)
-	case "plugin":
-		err = runPlugin(args)
-	case "tag":
-		err = runTag(args)
-	case "fmt":
-		err = runFmt(args)
-	case "version", "--version", "-version", "-v":
-		fmt.Println("letsgo", version)
-	case "help", "-h", "--help":
-		fmt.Print(usage)
-	default:
+	run, ok := commands[command]
+	if !ok {
 		fmt.Fprintf(os.Stderr, "letsgo: unknown command %q\n\n%s", command, usage)
 		os.Exit(2)
 	}
 
-	if err != nil {
+	if err := run(args); err != nil {
 		fmt.Fprintln(os.Stderr, "letsgo:", err)
 		os.Exit(1)
 	}
+}
+
+func runVersion([]string) error {
+	fmt.Println("letsgo", version)
+	return nil
+}
+
+func runHelp([]string) error {
+	fmt.Print(usage)
+	return nil
 }
 
 // parseFlags parses a command's flags.
