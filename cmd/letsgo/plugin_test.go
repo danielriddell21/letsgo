@@ -3,23 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/danielriddell21/letsgo/internal/archive"
 	"github.com/danielriddell21/letsgo/internal/config"
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/forgetest"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
@@ -327,120 +319,20 @@ func TestCommandsCoverTheUsage(t *testing.T) {
 	}
 }
 
-// pluginForge serves a letsgo-published release the way GitHub does, so the
-// install path is exercised against the shape it actually meets.
-type pluginForge struct {
-	t        *testing.T
-	tag      string
-	manifest []byte
-	archives map[string][]byte
-	server   *httptest.Server
-}
-
-func newPluginForge(t *testing.T, tag string, binaries ...string) *pluginForge {
-	t.Helper()
-	f := &pluginForge{t: t, tag: tag, archives: map[string][]byte{}}
-
-	m := &manifest.Manifest{
-		Schema: manifest.Schema, Project: "letsgo-plugins",
-		Version: strings.TrimPrefix(tag, "v"), Tag: tag,
-	}
-	for _, binary := range binaries {
-		name := fmt.Sprintf("%s_%s_linux_amd64.tar.gz", binary, m.Version)
-		content := binary + " bytes"
-		archive := tarGzOne(t, binary, content)
-		f.archives[name] = archive
-
-		m.Artifacts = append(m.Artifacts, manifest.Artifact{
-			Name: name, OS: "linux", Arch: "amd64", Binary: binary,
-			SHA256:       sha256Hex(archive),
-			BinarySHA256: sha256Hex([]byte(content)),
-		})
-	}
-	data, err := m.Encode()
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.manifest = data
-
-	release := func(w http.ResponseWriter, _ *http.Request) {
-		assets := []map[string]string{{
-			"name":                 manifest.FileName,
-			"browser_download_url": f.server.URL + "/download/" + manifest.FileName,
-		}}
-		for name := range f.archives {
-			assets = append(assets, map[string]string{
-				"name":                 name,
-				"browser_download_url": f.server.URL + "/download/" + name,
-			})
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"tag_name": f.tag,
-			"html_url": "https://example.test/releases/" + f.tag,
-			"assets":   assets,
-		})
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/you/plugins/releases/latest", release)
-	mux.HandleFunc("/repos/you/plugins/releases/tags/"+tag, release)
-	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
-		name := strings.TrimPrefix(r.URL.Path, "/download/")
-		if name == manifest.FileName {
-			_, _ = w.Write(f.manifest)
-			return
-		}
-		content, ok := f.archives[name]
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		_, _ = w.Write(content)
-	})
-
-	f.server = httptest.NewServer(mux)
-	t.Cleanup(f.server.Close)
-	return f
-}
-
-func (f *pluginForge) options(binary string) selfupdate.Options {
-	return selfupdate.Options{
-		Repo: "you/plugins", Binary: binary,
-		APIEndpoint: f.server.URL,
-		OS:          "linux", Arch: "amd64",
-	}
-}
-
-// tarGzOne builds a release archive holding one executable.
-//
-// Through letsgo's own archive writer rather than a hand-rolled tar stream:
-// the thing under test reads archives letsgo published, so the fixture should
-// be made by the code that publishes them.
-func tarGzOne(t *testing.T, name, content string) []byte {
-	t.Helper()
-
-	var buf bytes.Buffer
-	entries := []archive.Entry{archive.FromBytes(name, true, []byte(content))}
-	if err := archive.Write(&buf, archive.FormatTarGz, entries, time.Unix(0, 0)); err != nil {
-		t.Fatal(err)
-	}
-	return buf.Bytes()
-}
-
-func sha256Hex(data []byte) string {
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])
-}
-
 // The whole point of the command: the executable that lands on disk is the one
 // the release's manifest describes.
 func TestInstallPluginWritesTheVerifiedBinary(t *testing.T) {
-	f := newPluginForge(t, "v0.2.0", "letsgo-multi", "letsgo-env")
+	f := forgetest.New(t, "you/plugins", "v0.2.0")
+	f.PublishCommands(t, "letsgo-plugins", "0.2.0", "letsgo-multi", "letsgo-env")
+
 	dest := t.TempDir()
 	t.Chdir(t.TempDir())
 
+	options := f.Options()
+	options.Binary = "letsgo-env"
+
 	var out bytes.Buffer
-	if err := installPlugin(context.Background(), &out, "letsgo-env", dest, f.options("letsgo-env")); err != nil {
+	if err := installPlugin(context.Background(), &out, "letsgo-env", dest, options); err != nil {
 		t.Fatal(err)
 	}
 
@@ -449,12 +341,12 @@ func TestInstallPluginWritesTheVerifiedBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "letsgo-env bytes" {
+	if string(got) != forgetest.Content("letsgo-env") {
 		t.Errorf("installed %q", got)
 	}
 
 	// The pin it prints has to carry the digest of what it just wrote.
-	want := "sha256:" + sha256Hex([]byte("letsgo-env bytes"))
+	want := "sha256:" + forgetest.Sum([]byte(forgetest.Content("letsgo-env")))
 	if !strings.Contains(out.String(), want) {
 		t.Errorf("printed:\n%s\nwant the pin to name %s", out.String(), want)
 	}
@@ -465,15 +357,19 @@ func TestInstallPluginWritesTheVerifiedBinary(t *testing.T) {
 
 // A tampered archive must not reach the disk at all.
 func TestInstallPluginRefusesATamperedArchive(t *testing.T) {
-	f := newPluginForge(t, "v0.2.0", "letsgo-multi")
-	for name := range f.archives {
-		f.archives[name] = []byte("not the archive that was published")
+	f := forgetest.New(t, "you/plugins", "v0.2.0")
+	f.PublishCommands(t, "letsgo-plugins", "0.2.0", "letsgo-multi")
+	for name := range f.Archives {
+		f.Archives[name] = []byte("not the archive that was published")
 	}
 
 	dest := t.TempDir()
 	t.Chdir(t.TempDir())
 
-	err := installPlugin(context.Background(), io.Discard, "letsgo-multi", dest, f.options("letsgo-multi"))
+	options := f.Options()
+	options.Binary = "letsgo-multi"
+
+	err := installPlugin(context.Background(), io.Discard, "letsgo-multi", dest, options)
 	if err == nil {
 		t.Fatal("a tampered archive should be refused")
 	}
@@ -485,11 +381,14 @@ func TestInstallPluginRefusesATamperedArchive(t *testing.T) {
 // Installing an exact version is the pinned-plugin workflow, and must not be
 // treated as an update check.
 func TestInstallPluginByTag(t *testing.T) {
-	f := newPluginForge(t, "v0.1.0", "letsgo-multi")
+	f := forgetest.New(t, "you/plugins", "v0.1.0")
+	f.PublishCommands(t, "letsgo-plugins", "0.1.0", "letsgo-multi")
+
 	dest := t.TempDir()
 	t.Chdir(t.TempDir())
 
-	options := f.options("letsgo-multi")
+	options := f.Options()
+	options.Binary = "letsgo-multi"
 	options.Tag = "v0.1.0"
 
 	var out bytes.Buffer
