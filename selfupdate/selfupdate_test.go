@@ -36,7 +36,7 @@ func newForge(t *testing.T, tag string) *forge {
 	f := &forge{tag: tag, archives: map[string][]byte{}}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/you/tool/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
+	release := func(w http.ResponseWriter, _ *http.Request) {
 		var assets []map[string]string
 		// Only a release published by letsgo carries a manifest.
 		if f.manifest != nil {
@@ -57,7 +57,9 @@ func newForge(t *testing.T, tag string) *forge {
 			"html_url": "https://example.test/releases/" + f.tag,
 			"assets":   assets,
 		})
-	})
+	}
+	mux.HandleFunc("/repos/you/tool/releases/latest", release)
+	mux.HandleFunc("/repos/you/tool/releases/tags/"+f.tag, release)
 	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
 		name := strings.TrimPrefix(r.URL.Path, "/download/")
 		if name == manifest.FileName {
@@ -495,5 +497,115 @@ func TestApplyToReportsAnUnwritableTarget(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "no-such-directory", "tool")
 	if err := update.ApplyTo(context.Background(), target); err == nil {
 		t.Fatal("want an error for an unwritable target")
+	}
+}
+
+// publishCommands builds a release the way a repository with several commands
+// publishes one: an archive per command per platform, so that os and arch
+// alone no longer say which artifact is meant.
+func (f *forge) publishCommands(t *testing.T, version string, binaries ...string) {
+	t.Helper()
+
+	m := &manifest.Manifest{
+		Schema: manifest.Schema, Project: "tool", Version: version, Tag: f.tag,
+	}
+	for _, binary := range binaries {
+		name := fmt.Sprintf("%s_%s_linux_amd64.tar.gz", binary, version)
+		content := binary + " bytes"
+		archive := tarGz(t, binary, content)
+		f.archives[name] = archive
+
+		m.Artifacts = append(m.Artifacts, manifest.Artifact{
+			Name: name, OS: "linux", Arch: "amd64", Binary: binary,
+			SHA256:       sum(archive),
+			BinarySHA256: sum([]byte(content)),
+		})
+	}
+
+	data, err := m.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.manifest = data
+}
+
+// A repository shipping three commands publishes three archives for one
+// platform, and the caller has to be able to say which one it wants.
+func TestCheckPicksTheNamedBinary(t *testing.T) {
+	f := newForge(t, "v0.2.0")
+	f.publishCommands(t, "0.2.0", "letsgo-multi", "letsgo-env", "letsgo-cask")
+
+	options := f.options("")
+	options.Binary = "letsgo-env"
+
+	update, err := selfupdate.Check(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if update == nil {
+		t.Fatal("no release offered")
+	}
+	if update.Binary != "letsgo-env" {
+		t.Errorf("Binary = %q, want letsgo-env", update.Binary)
+	}
+	if !strings.HasPrefix(update.Archive, "letsgo-env_") {
+		t.Errorf("Archive = %q, want the letsgo-env archive", update.Archive)
+	}
+
+	binary, err := update.Download(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(binary) != "letsgo-env bytes" {
+		t.Errorf("downloaded %q", binary)
+	}
+}
+
+func TestCheckReportsAMissingBinary(t *testing.T) {
+	f := newForge(t, "v0.2.0")
+	f.publishCommands(t, "0.2.0", "letsgo-multi")
+
+	options := f.options("")
+	options.Binary = "letsgo-nope"
+
+	_, err := selfupdate.Check(context.Background(), options)
+	if err == nil {
+		t.Fatal("a plugin the release does not build should be an error")
+	}
+	if !strings.Contains(err.Error(), "letsgo-nope") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// Asking for a tag is asking for that tag, including one older than what is
+// running: installing a pinned plugin version is not an update check.
+func TestCheckByTagIgnoresTheVersionComparison(t *testing.T) {
+	f := newForge(t, "v1.0.0")
+	f.publish(t, "1.0.0", "tool", "old binary bytes")
+
+	options := f.options("2.0.0")
+	options.Tag = "v1.0.0"
+
+	update, err := selfupdate.Check(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if update == nil {
+		t.Fatal("an explicit tag should be offered even when it is older")
+	}
+	if update.Tag != "v1.0.0" {
+		t.Errorf("Tag = %q", update.Tag)
+	}
+}
+
+func TestCheckReportsAnUnknownTag(t *testing.T) {
+	f := newForge(t, "v1.0.0")
+	f.publish(t, "1.0.0", "tool", "bytes")
+
+	options := f.options("")
+	options.Tag = "v9.9.9"
+
+	if _, err := selfupdate.Check(context.Background(), options); err == nil {
+		t.Fatal("an unknown tag should be an error")
 	}
 }

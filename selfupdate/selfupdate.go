@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"time"
@@ -67,6 +68,16 @@ type Options struct {
 
 	// OS and Arch override the platform to update to. Empty means this one.
 	OS, Arch string
+
+	// Tag selects one exact release instead of the newest. When it is set the
+	// version comparison is skipped, because asking for a tag is asking for
+	// that tag — including an older one.
+	Tag string
+
+	// Binary names the executable to fetch, for a repository that releases
+	// several from one module. Empty takes the only one built for the
+	// platform, which is what a single-command repository publishes.
+	Binary string
 }
 
 // Update is a release newer than the running binary.
@@ -113,11 +124,11 @@ func Check(ctx context.Context, o Options) (*Update, error) {
 		o.Arch = runtime.GOARCH
 	}
 
-	release, err := latestRelease(ctx, o)
+	release, err := resolveRelease(ctx, o)
 	if err != nil {
 		return nil, err
 	}
-	if !newer(o.Current, release.TagName) {
+	if o.Tag == "" && !newer(o.Current, release.TagName) {
 		return nil, nil
 	}
 
@@ -126,8 +137,12 @@ func Check(ctx context.Context, o Options) (*Update, error) {
 		return nil, err
 	}
 
-	artifact, ok := artifactFor(m, o.OS, o.Arch)
+	artifact, ok := artifactFor(m, o.OS, o.Arch, o.Binary)
 	if !ok {
+		if o.Binary != "" {
+			return nil, fmt.Errorf("selfupdate: %s has no %s/%s build of %s",
+				release.TagName, o.OS, o.Arch, o.Binary)
+		}
 		return nil, fmt.Errorf("selfupdate: %s has no %s/%s build", release.TagName, o.OS, o.Arch)
 	}
 
@@ -168,11 +183,18 @@ func newer(current, tag string) bool {
 	return semver.Compare(next, now) > 0
 }
 
-func artifactFor(m *manifest.Manifest, goos, arch string) (manifest.Artifact, bool) {
+// artifactFor picks the build for a platform, and for one named executable
+// when the release carries several — a repository shipping three commands
+// publishes three archives per platform, and os/arch alone does not say which.
+func artifactFor(m *manifest.Manifest, goos, arch, binary string) (manifest.Artifact, bool) {
 	for _, a := range m.Artifacts {
-		if a.OS == goos && a.Arch == arch {
-			return a, true
+		if a.OS != goos || a.Arch != arch {
+			continue
 		}
+		if binary != "" && a.Binary != binary {
+			continue
+		}
+		return a, true
 	}
 	return manifest.Artifact{}, false
 }
@@ -262,6 +284,34 @@ func (r *release) asset(name string) (asset, bool) {
 		}
 	}
 	return asset{}, false
+}
+
+// resolveRelease fetches the release asked for: one exact tag, or the newest.
+func resolveRelease(ctx context.Context, o Options) (*release, error) {
+	if o.Tag != "" {
+		return releaseByTag(ctx, o)
+	}
+	return latestRelease(ctx, o)
+}
+
+func releaseByTag(ctx context.Context, o Options) (*release, error) {
+	resp, err := o.get(ctx, fmt.Sprintf("%s/repos/%s/releases/tags/%s", o.api(), o.Repo, url.PathEscape(o.Tag)))
+	if err != nil {
+		return nil, err
+	}
+	data, err := read(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	var out release
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("selfupdate: parsing release %s: %w", o.Tag, err)
+	}
+	if out.TagName == "" {
+		return nil, fmt.Errorf("selfupdate: %s has no release %s", o.Repo, o.Tag)
+	}
+	return &out, nil
 }
 
 func latestRelease(ctx context.Context, o Options) (*release, error) {

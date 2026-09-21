@@ -45,6 +45,8 @@ usage:
   letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
   letsgo tag [--major|--minor|--patch]   work out the next version and tag it
   letsgo update [--check]                update letsgo itself, verified against its manifest
+  letsgo plugin install <name>           install a plugin, verified against its manifest
+  letsgo plugin list                     the plugins this repository pins, and what is installed
   letsgo fmt [file]                      format letsgo.mod
   letsgo version                         print the version (also --version)
 
@@ -75,6 +77,8 @@ func main() {
 		err = runYank(args)
 	case "update":
 		err = runUpdate(args)
+	case "plugin":
+		err = runPlugin(args)
 	case "tag":
 		err = runTag(args)
 	case "fmt":
