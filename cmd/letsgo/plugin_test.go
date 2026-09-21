@@ -1,9 +1,7 @@
 package main
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,7 +15,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/danielriddell21/letsgo/internal/archive"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plugin"
@@ -411,26 +411,17 @@ func (f *pluginForge) options(binary string) selfupdate.Options {
 	}
 }
 
+// tarGzOne builds a release archive holding one executable.
+//
+// Through letsgo's own archive writer rather than a hand-rolled tar stream:
+// the thing under test reads archives letsgo published, so the fixture should
+// be made by the code that publishes them.
 func tarGzOne(t *testing.T, name, content string) []byte {
 	t.Helper()
 
 	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(zw)
-
-	body := []byte(content)
-	if err := tw.WriteHeader(&tar.Header{
-		Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tw.Write(body); err != nil {
-		t.Fatal(err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := zw.Close(); err != nil {
+	entries := []archive.Entry{archive.FromBytes(name, true, []byte(content))}
+	if err := archive.Write(&buf, archive.FormatTarGz, entries, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
