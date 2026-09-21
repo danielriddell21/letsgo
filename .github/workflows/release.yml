@@ -56,18 +56,31 @@ jobs:
           go-version-file: go.mod
           check-latest: false
 
+      # letsgo publishes the release and the tap formula with one token, and a
+      # workflow token cannot write to another repository at all. The App
+      # token is therefore scoped to this repository as well as the tap.
+      - uses: actions/create-github-app-token@v3
+        id: token
+        with:
+          app-id: ${{ vars.TAP_APP_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            ${{ github.event.repository.name }}
+            homebrew-tap
+
       # Everything cheap happens before anything expensive. A misconfigured
       # release fails here, in seconds, with nothing built and nothing
       # published.
       - name: plan
         run: go run ./cmd/letsgo plan --publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
 
       - name: release
         run: go run ./cmd/letsgo release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
 
       # Records which workflow built these bytes. Keyed by digest, so it
       # applies equally to the copies already uploaded.

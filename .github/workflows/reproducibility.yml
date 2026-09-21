@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-    uses: danielriddell21/github-actions/.github/workflows/ci.yaml@v1
+    uses: danielriddell21/github-actions/.github/workflows/ci.yaml@v2
     # Nothing here writes: tagging is letsgo's own job, not this workflow's.
     permissions:
       contents: read
