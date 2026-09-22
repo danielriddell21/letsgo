@@ -198,3 +198,51 @@ func TestFormulasCarryTheConfiguredCaveats(t *testing.T) {
 		t.Errorf("Caveats = %q", got[0].Caveats)
 	}
 }
+
+// The release client is reused when no tap token is configured. A second
+// client holding the same token would mean a second connection pool for no
+// reason, and it would make the single-credential arrangement look like a
+// different code path than it is.
+func TestTapClientForReusesTheReleaseClient(t *testing.T) {
+	t.Setenv("LETSGO_TAP_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+
+	client := github.New("release-token")
+	client.UserAgent = "letsgo/test"
+
+	if got := tapClientFor(client, "", "release-token"); got != client {
+		t.Error("a tap with no token of its own got a second client")
+	}
+}
+
+func TestTapClientForSplitsWhenTheTapHasItsOwnToken(t *testing.T) {
+	t.Setenv("LETSGO_TAP_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+
+	client := github.New("release-token")
+	client.UserAgent = "letsgo/test"
+
+	got := tapClientFor(client, "tap-token", "release-token")
+	if got == client {
+		t.Fatal("the tap token did not produce a client of its own")
+	}
+	// The user agent has to carry over, or the tap's requests arrive
+	// unidentified and GitHub is entitled to refuse them.
+	if got.UserAgent != client.UserAgent {
+		t.Errorf("UserAgent = %q, want %q", got.UserAgent, client.UserAgent)
+	}
+}
+
+// The environment is read when the flag is absent, which is how CI passes it.
+func TestTapClientForReadsTheEnvironment(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("LETSGO_TAP_TOKEN", "from-env")
+
+	client := github.New("release-token")
+	if got := tapClientFor(client, "", "release-token"); got == client {
+		t.Error("LETSGO_TAP_TOKEN did not produce a client of its own")
+	}
+}

@@ -99,3 +99,46 @@ func TestPublishReportsAForgeFailure(t *testing.T) {
 		t.Fatal("want an error")
 	}
 }
+
+// The identity is letsgo's, not the token's. A repository publishing a formula
+// with its own App token must still leave a tap entry that says letsgo wrote
+// it, or a tap shared by several projects ends up with one author per
+// credential rather than one per tool.
+func TestPublishCommitsAsLetsgo(t *testing.T) {
+	tap := &fakeTap{}
+	if _, err := brew.Publish(context.Background(), tap, github.Repo{Owner: "you", Name: "homebrew-tap"},
+		sample()); err != nil {
+		t.Fatal(err)
+	}
+	if len(tap.writes) != 1 {
+		t.Fatalf("writes = %d, want 1", len(tap.writes))
+	}
+
+	got := tap.writes[0].Author
+	if got == nil {
+		t.Fatal("no committer was sent, so the forge would attribute the commit to the token")
+	}
+	if *got != brew.Author {
+		t.Errorf("committer = %+v, want %+v", *got, brew.Author)
+	}
+	if got.Name == "" || got.Email == "" {
+		t.Errorf("committer = %+v, want both fields set: GitHub rejects a partial one", *got)
+	}
+}
+
+// Overriding it must reach the write, since that is the whole point of it
+// being a variable rather than a constant.
+func TestPublishHonoursAnOverriddenAuthor(t *testing.T) {
+	original := brew.Author
+	t.Cleanup(func() { brew.Author = original })
+	brew.Author = github.Committer{Name: "tap-bot", Email: "bot@example.com"}
+
+	tap := &fakeTap{}
+	if _, err := brew.Publish(context.Background(), tap, github.Repo{Owner: "you", Name: "homebrew-tap"},
+		sample()); err != nil {
+		t.Fatal(err)
+	}
+	if got := tap.writes[0].Author; got == nil || got.Name != "tap-bot" {
+		t.Errorf("committer = %+v, want tap-bot", got)
+	}
+}

@@ -203,3 +203,84 @@ func TestTapTokenResolution(t *testing.T) {
 		})
 	}
 }
+
+// forgeFor serves a healthy release repository and delegates the tap to answer.
+//
+// The release repository has to pass: checkForge stops at a token it cannot
+// use, so a server that failed both would never reach the tap gate at all —
+// which is what makes a same-answer-for-everything fake useless here.
+func forgeFor(t *testing.T, answer http.HandlerFunc) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "probe"})
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/you/foo") {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"archived": false, "permissions": map[string]bool{"push": true},
+			})
+			return
+		}
+		answer(w, r)
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// The three remaining answers the gate can give about a tap.
+func TestTapGateOnArchivedAndUnconfirmed(t *testing.T) {
+	t.Run("an archived tap cannot receive a formula", func(t *testing.T) {
+		noAmbientTokens(t)
+		endpoint := forgeFor(t, func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"archived": true, "permissions": map[string]bool{"push": true},
+			})
+		})
+
+		r := withTap(t)
+		if got := tapCheck(t, r, plan.Options{Token: "t", APIEndpoint: endpoint}).Status; got != plan.Fail {
+			t.Errorf("brew tap check = %q, want %q", got, plan.Fail)
+		}
+	})
+
+	// Under Actions an installation token's permissions are not described by
+	// the repository endpoint, so "no push" is unknown rather than refused.
+	// Blocking here would fail correctly configured releases on no evidence.
+	t.Run("an unconfirmed permission under Actions warns", func(t *testing.T) {
+		noAmbientTokens(t)
+		t.Setenv("GITHUB_ACTIONS", "true")
+
+		endpoint := forgeFor(t, func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"archived": false, "permissions": map[string]bool{"push": false},
+			})
+		})
+
+		r := withTap(t)
+		check := tapCheck(t, r, plan.Options{Token: "t", APIEndpoint: endpoint})
+		if check.Status != plan.Warn {
+			t.Errorf("brew tap check = %q, want %q", check.Status, plan.Warn)
+		}
+		// The message has to say what to set, or the warning leaves somebody
+		// with a tap they cannot write to and no next step.
+		if !strings.Contains(check.Detail, plan.TapTokenEnvVars[0]) {
+			t.Errorf("detail = %q, want it to name %s", check.Detail, plan.TapTokenEnvVars[0])
+		}
+	})
+
+	// An unreachable tap is conclusive: private to this token, renamed, or gone.
+	t.Run("an unreachable tap fails", func(t *testing.T) {
+		noAmbientTokens(t)
+		endpoint := forgeFor(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "Not Found"})
+		})
+
+		r := withTap(t)
+		if got := tapCheck(t, r, plan.Options{Token: "t", APIEndpoint: endpoint}).Status; got != plan.Fail {
+			t.Errorf("brew tap check = %q, want %q", got, plan.Fail)
+		}
+	})
+}

@@ -96,6 +96,24 @@ func (c *Client) ReadFile(ctx context.Context, repo Repo, path string) (*File, e
 	return &File{Path: path, SHA: result.SHA, Content: content}, nil
 }
 
+// Committer names who a commit is recorded as having made.
+//
+// Sent explicitly rather than left to the forge, which would otherwise
+// attribute the commit to whatever identity the token belongs to. A tap's
+// history should say which tool wrote the entry, and that answer must not
+// change because a repository publishes with its own credential.
+type Committer struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+// escapePath and the rest of this file aside, note what is deliberately not
+// sent: a committer. GitHub creates a contents-API commit itself, records
+// itself as the committer and signs it, which is what makes these commits
+// Verified. Supplying one replaces that field and forfeits the signature.
+// The author is the field GitHub displays as who made the commit, so setting
+// only the author gets the attribution without paying for it.
+
 // FileInput describes a file to write.
 type FileInput struct {
 	Path    string
@@ -105,18 +123,24 @@ type FileInput struct {
 	// SHA is the blob being replaced. Empty creates the file, and the write
 	// then fails if it already exists.
 	SHA string
+
+	// Author records who the commit is attributed to. Nil leaves it to the
+	// forge, which uses the token's own identity.
+	Author *Committer
 }
 
 // WriteFile creates or replaces a file, as a commit on the default branch.
 func (c *Client) WriteFile(ctx context.Context, repo Repo, in FileInput) error {
 	body := struct {
-		Message string `json:"message"`
-		Content string `json:"content"`
-		SHA     string `json:"sha,omitempty"`
+		Message string     `json:"message"`
+		Content string     `json:"content"`
+		SHA     string     `json:"sha,omitempty"`
+		Author  *Committer `json:"author,omitempty"`
 	}{
 		Message: in.Message,
 		Content: base64.StdEncoding.EncodeToString(in.Content),
 		SHA:     in.SHA,
+		Author:  in.Author,
 	}
 
 	encoded, err := json.Marshal(body)

@@ -33,6 +33,23 @@ type Result struct {
 	Status Status
 }
 
+// Author is the identity a formula is published under.
+//
+// Fixed rather than taken from the token: a tap's history should say that
+// letsgo wrote the entry, and that must not change because a repository
+// publishes with a credential of its own. It is a variable so that a
+// repository can override it, and so a test can assert what was sent.
+//
+// This names the letsgo-champ App, which is what publishes the formula. The
+// number is the App's bot user id, not its App id: the address GitHub resolves
+// to an account is "<bot user id>+<login>@users.noreply.github.com", and the
+// two are different namespaces — the App id there would look right and link to
+// nothing.
+var Author = github.Committer{
+	Name:  "letsgo-champ[bot]",
+	Email: "293666020+letsgo-champ[bot]@users.noreply.github.com",
+}
+
 // Publish writes the formula to the tap, unless it is already exactly right.
 //
 // Skipping an identical file is not an optimisation. A release that is re-run
@@ -58,11 +75,13 @@ func Publish(ctx context.Context, api FileAPI, tap github.Repo, f Formula) (Resu
 		status, sha = Updated, existing.SHA
 	}
 
+	author := Author
 	if err := api.WriteFile(ctx, tap, github.FileInput{
 		Path:    path,
 		Message: fmt.Sprintf("%s %s", f.Name, f.Version),
 		Content: content,
 		SHA:     sha,
+		Author:  &author,
 	}); err != nil {
 		return Result{}, fmt.Errorf("brew: publishing %s to %s: %w", path, tap, err)
 	}

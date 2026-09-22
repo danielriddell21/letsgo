@@ -121,3 +121,62 @@ func TestDownloadURL(t *testing.T) {
 		t.Errorf("DownloadURL = %q, want %q", got, want)
 	}
 }
+
+// The author is sent and the committer is not. GitHub records itself as the
+// committer of a contents-API commit and signs it, which is what makes these
+// commits Verified; supplying one replaces that field and forfeits the
+// signature, and the author is the field GitHub displays anyway.
+func TestWriteFileSendsTheAuthorAndNotTheCommitter(t *testing.T) {
+	var got struct {
+		Committer *Committer `json:"committer"`
+		Author    *Committer `json:"author"`
+	}
+
+	c := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		w.Write([]byte(`{}`))
+	})
+
+	want := Committer{Name: "letsgo-champ[bot]", Email: "293666020+letsgo-champ[bot]@users.noreply.github.com"}
+	err := c.WriteFile(context.Background(), Repo{"you", "homebrew-tap"}, FileInput{
+		Path: "Formula/x.rb", Message: "x 1.0.0", Content: []byte("class X\nend\n"), Author: &want,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Author == nil || *got.Author != want {
+		t.Errorf("author = %+v, want %+v", got.Author, want)
+	}
+	if got.Committer != nil {
+		t.Errorf("committer = %+v, want none: sending one loses GitHub's signature", got.Committer)
+	}
+}
+
+// Nil means "leave it to the forge", and the key has to be absent rather than
+// empty: GitHub rejects an author with no name.
+func TestWriteFileOmitsAnAbsentAuthor(t *testing.T) {
+	var raw map[string]any
+
+	c := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			t.Fatal(err)
+		}
+		w.Write([]byte(`{}`))
+	})
+
+	err := c.WriteFile(context.Background(), Repo{"you", "homebrew-tap"}, FileInput{
+		Path: "Formula/x.rb", Message: "x 1.0.0", Content: []byte("class X\nend\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, key := range []string{"committer", "author"} {
+		if _, present := raw[key]; present {
+			t.Errorf("%q was sent as %v, want the key absent", key, raw[key])
+		}
+	}
+}
