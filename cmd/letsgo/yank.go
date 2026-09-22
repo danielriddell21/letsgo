@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/config"
@@ -21,6 +22,7 @@ func runYank(args []string) error {
 	fs := flag.NewFlagSet("yank", flag.ExitOnError)
 	reason := fs.String("reason", "", "why the release should not be used; shown by `go list -m -retracted`")
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
+	tapToken := fs.String("tap-token", "", tapTokenUsage)
 	yes := fs.Bool("yes", false, "retract without asking")
 	keepTap := fs.Bool("keep-tap", false, "leave the Homebrew formula pointing at the retracted release")
 	if err := parseFlags(fs, args); err != nil {
@@ -71,7 +73,7 @@ func runYank(args []string) error {
 	}
 
 	if !*keepTap {
-		options.Tap, options.TapAPI = tapFor(module.Dir, client)
+		options.Tap, options.TapAPI = tapFor(module.Dir, tapClientFor(client, *tapToken, *token))
 	}
 
 	reportYank(tag, repo, previous, options)
@@ -102,6 +104,9 @@ func previousRelease(ctx context.Context, client *github.Client, repo github.Rep
 // tapFor reads the configured Homebrew tap, if there is one. A malformed
 // config is not worth failing a retraction over: the formula is the least
 // important of the four things yank does.
+//
+// The client is the tap's rather than the release's, for the same reason the
+// release path separates them: rolling a formula back writes to the tap only.
 func tapFor(moduleDir string, client *github.Client) (github.Repo, brew.FileAPI) {
 	p, err := plan.Resolve(context.Background(), plan.Options{Dir: moduleDir, Snapshot: true, AllowDirty: true})
 	if err != nil || p.Tap == (github.Repo{}) {
@@ -143,7 +148,7 @@ func confirmYank(tag string) bool {
 	return readYes()
 }
 
-func envList() string { return "GITHUB_TOKEN or GH_TOKEN" }
+func envList() string { return strings.Join(plan.TokenEnvVars, " or ") }
 
 // brewCaveats reads the formula's caveats from the config, so a rollback
 // republishes the formula the release published rather than one missing a

@@ -56,31 +56,37 @@ jobs:
           go-version-file: go.mod
           check-latest: false
 
-      # letsgo publishes the release and the tap formula with one token, and a
-      # workflow token cannot write to another repository at all. The App
-      # token is therefore scoped to this repository as well as the tap.
+      # A workflow token cannot write to another repository, so the tap needs
+      # an App token. It is scoped to the tap and nothing else: this
+      # repository's own release is published with the workflow token below,
+      # which means the App need not be installed here at all — and a
+      # repository that never has to be added to an installation is one that
+      # cannot fail its first release for having been forgotten.
       - uses: actions/create-github-app-token@v3
-        id: token
+        id: tap-token
         with:
           app-id: ${{ vars.TAP_APP_ID }}
           private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: |
-            ${{ github.event.repository.name }}
-            homebrew-tap
+          repositories: homebrew-tap
 
       # Everything cheap happens before anything expensive. A misconfigured
       # release fails here, in seconds, with nothing built and nothing
       # published.
+      # Two credentials, each scoped to the one repository it writes to. The
+      # plan gate probes both, so a tap the App cannot reach fails here rather
+      # than after everything has been built and published.
       - name: plan
         run: go run ./cmd/letsgo plan --publish
         env:
-          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          LETSGO_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
 
       - name: release
         run: go run ./cmd/letsgo release
         env:
-          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          LETSGO_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
 
       # Records which workflow built these bytes. Keyed by digest, so it
       # applies equally to the copies already uploaded.

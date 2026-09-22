@@ -12,6 +12,27 @@ import (
 	"github.com/danielriddell21/letsgo/internal/release"
 )
 
+// tapTokenUsage documents --tap-token once, for the three commands that reach
+// a tap.
+const tapTokenUsage = "token the Homebrew tap is written with (default: $LETSGO_TAP_TOKEN, else the release token)"
+
+// tapClientFor returns the client the tap is written with.
+//
+// It returns the release client itself when no tap token is configured, rather
+// than a second client holding the same token: one client means one connection
+// pool and one user agent, and it keeps the single-credential arrangement
+// exactly as it was.
+func tapClientFor(client *github.Client, tapToken, token string) *github.Client {
+	value, _ := plan.TapToken(tapToken, token)
+	current, _ := plan.Token(token)
+	if value == current {
+		return client
+	}
+	tapClient := github.New(value)
+	tapClient.UserAgent = client.UserAgent
+	return tapClient
+}
+
 // publishTap writes a formula to the configured Homebrew tap, one per command
 // the module builds.
 //

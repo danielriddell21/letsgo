@@ -56,6 +56,11 @@ type Options struct {
 	// Token overrides the token read from the environment.
 	Token string
 
+	// TapToken overrides the token the Homebrew tap is written with. Empty
+	// falls back to Token, which is what every repository did before the tap
+	// could be reached by a credential of its own.
+	TapToken string
+
 	// APIEndpoint overrides the forge API host. Empty means the real one.
 	APIEndpoint string
 
@@ -608,6 +613,15 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 // use gh needs no further configuration.
 var TokenEnvVars = []string{"GITHUB_TOKEN", "GH_TOKEN"}
 
+// TapTokenEnvVars are the environment variables consulted for the token the
+// Homebrew tap is written with.
+//
+// Separate from TokenEnvVars because the two credentials want different
+// scopes: the release is published to this repository, which the workflow
+// token already covers, and the tap lives in another one, which needs an App
+// token. Keeping them apart means the App need not be installed here at all.
+var TapTokenEnvVars = []string{"LETSGO_TAP_TOKEN"}
+
 // Token returns the resolved token, and where it came from.
 func Token(override string) (token, source string) {
 	if override != "" {
@@ -619,6 +633,25 @@ func Token(override string) (token, source string) {
 		}
 	}
 	return "", ""
+}
+
+// TapToken returns the token the Homebrew tap is written with, and where it
+// came from.
+//
+// It falls back to the release token so that a repository which has always
+// published with one credential keeps working unchanged. What the fallback
+// costs is stated where it is configured, not here: one token that can write
+// to both repositories is one token whose loss reaches both.
+func TapToken(override, tokenOverride string) (token, source string) {
+	if override != "" {
+		return override, "--tap-token"
+	}
+	for _, name := range TapTokenEnvVars {
+		if v := os.Getenv(name); v != "" {
+			return v, name
+		}
+	}
+	return Token(tokenOverride)
 }
 
 // checkVulnerabilities refuses to publish a binary that can reach known
@@ -871,7 +904,21 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 
 	p.note("token", source, "environment")
 
-	p.checkTap(ctx, client)
+	// The tap is probed with the credential that will actually write to it.
+	// Probing the release token instead is how a plan passes and the release
+	// then fails on its last step, which is the one failure this gate exists
+	// to prevent.
+	tapToken, tapSource := TapToken(opts.TapToken, opts.Token)
+	tapClient := client
+	if tapToken != token {
+		tapClient = github.New(tapToken)
+		if opts.APIEndpoint != "" {
+			tapClient.SetEndpoints(opts.APIEndpoint, opts.APIEndpoint)
+		}
+		p.note("tap token", tapSource, "environment")
+	}
+
+	p.checkTap(ctx, tapClient, tapSource)
 }
 
 // resolveTap parses the configured Homebrew tap.
@@ -1014,7 +1061,7 @@ func baseResult(reference string, target *ImageTarget, base *oci.Base, err error
 // checkTap establishes that the formula has somewhere to go before anything is
 // built. A release that succeeds and then cannot update the tap has left the
 // two out of step, which is worse than not starting.
-func (p *Plan) checkTap(ctx context.Context, client *github.Client) {
+func (p *Plan) checkTap(ctx context.Context, client *github.Client, source string) {
 	if p.Tap == (github.Repo{}) {
 		return
 	}
@@ -1026,17 +1073,17 @@ func (p *Plan) checkTap(ctx context.Context, client *github.Client) {
 	case access.Archived:
 		p.add("brew tap", Fail, "%s is archived and cannot receive a formula", p.Tap)
 	case access.CanPush:
-		p.add("brew tap", Pass, "%s can receive the formula", p.Tap)
+		p.add("brew tap", Pass, "%s can receive the formula, with %s", p.Tap, source)
 	case underActions():
 		// Same limitation as the release token: an installation token's
 		// permissions are not described by the repository endpoint, and a
 		// tap in another repository needs a token this one cannot inspect.
 		p.add("brew tap", Warn,
-			"whether this token can write to %s cannot be confirmed from inside Actions\n"+
-				"  a workflow token cannot write to another repository; the tap needs a PAT or an App token",
-			p.Tap)
+			"whether %s can write to %s cannot be confirmed from inside Actions\n"+
+				"  a workflow token cannot write to another repository; set %s to an App token scoped to the tap",
+			source, p.Tap, TapTokenEnvVars[0])
 	default:
-		p.add("brew tap", Fail, "this token cannot write to %s", p.Tap)
+		p.add("brew tap", Fail, "%s cannot write to %s", source, p.Tap)
 	}
 }
 

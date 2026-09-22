@@ -183,6 +183,7 @@ func runPlan(args []string) error {
 	publishGates := fs.Bool("publish", false, "also check the gates a release needs: a forge, and a token that may write to it")
 	analyse := fs.Bool("analyse", false, "also run the slower analysis gates, as a release does")
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
+	tapToken := fs.String("tap-token", "", tapTokenUsage)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -190,7 +191,7 @@ func runPlan(args []string) error {
 	started := time.Now()
 	p, err := plan.Resolve(context.Background(), plan.Options{
 		Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty,
-		Publish: *publishGates, Token: *token, Analyse: *analyse,
+		Publish: *publishGates, Token: *token, TapToken: *tapToken, Analyse: *analyse,
 	})
 	if err != nil {
 		return err
@@ -252,6 +253,7 @@ func runRelease(args []string) error {
 	fs := flag.NewFlagSet("release", flag.ExitOnError)
 	draft := fs.Bool("draft", false, "create the release without publishing it")
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
+	tapToken := fs.String("tap-token", "", tapTokenUsage)
 	out := fs.String("o", "dist", "output directory")
 	skipWarm := fs.Bool("no-proxy-warm", false, "skip priming the Go module proxy")
 	snapshot := fs.Bool("snapshot", false, "rehearse the release without publishing anything")
@@ -270,7 +272,7 @@ func runRelease(args []string) error {
 	p, dir, result, err := planAndBuild(ctx, planBuildOptions{
 		Out: *out,
 		Plan: plan.Options{
-			Dir: ".", Publish: !*snapshot, Token: *token, Snapshot: *snapshot,
+			Dir: ".", Publish: !*snapshot, Token: *token, TapToken: *tapToken, Snapshot: *snapshot,
 			Analyse: true, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
 		},
 		FailureNote: "nothing was built or published",
@@ -285,6 +287,12 @@ func runRelease(args []string) error {
 	client := github.New(tokenValue)
 	client.UserAgent = "letsgo/" + version
 
+	// The tap gets its own client, so that the credential which can write to
+	// another repository need not be one that can also write to this one. They
+	// are the same client when no tap token is configured, which is what makes
+	// the split opt-in rather than a migration.
+	tapClient := tapClientFor(client, *tapToken, *token)
+
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 
 	notes, err := releaseNotes(ctx, p, client, repo)
@@ -296,7 +304,7 @@ func runRelease(args []string) error {
 	// that writes to the world is exchanged.
 	var (
 		forge  publish.Forge = client
-		tapAPI brew.FileAPI  = client
+		tapAPI brew.FileAPI  = tapClient
 	)
 	if *snapshot {
 		fmt.Println("\n  rehearsal: the calls below would be made, and are not")
