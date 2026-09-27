@@ -711,6 +711,10 @@ func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 	p.add("vulnerabilities", Fail, "%s", strings.Join(lines, "\n"))
 }
 
+// apiCompatibility is the check name every step of checkAPICompatibility
+// reports under.
+const apiCompatibility = "api compatibility"
+
 // checkAPICompatibility refuses a release whose version promises more
 // compatibility than its API delivers.
 //
@@ -720,23 +724,23 @@ func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 // found by other people.
 func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 	if !p.Features.On("api-gate") {
-		p.add("api compatibility", Skip, "disabled by config")
+		p.add(apiCompatibility, Skip, "disabled by config")
 		return
 	}
 	if p.Tag == "" {
-		p.add("api compatibility", Skip, "not a tagged release")
+		p.add(apiCompatibility, Skip, "not a tagged release")
 		return
 	}
 
 	previous, err := discover.PreviousTag(ctx, p.RootDir)
 	if err != nil || previous == "" {
-		p.add("api compatibility", Skip, "no earlier release to compare against")
+		p.add(apiCompatibility, Skip, "no earlier release to compare against")
 		return
 	}
 
 	old, cleanup, err := checkoutTag(ctx, p.RootDir, previous)
 	if err != nil {
-		p.add("api compatibility", Warn, "could not check out %s: %v", previous, err)
+		p.add(apiCompatibility, Warn, "could not check out %s: %v", previous, err)
 		return
 	}
 	defer cleanup()
@@ -744,34 +748,34 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 	changes, err := gate.APIDiff(ctx, old, p.Module.Dir)
 	switch {
 	case errors.Is(err, gate.ErrToolMissing), errors.Is(err, gate.ErrNothingExported):
-		p.add("api compatibility", Skip, "%v", err)
+		p.add(apiCompatibility, Skip, "%v", err)
 		return
 	case err != nil:
-		p.add("api compatibility", Warn, "could not be checked: %v", err)
+		p.add(apiCompatibility, Warn, "could not be checked: %v", err)
 		return
 	}
 	p.APIChanges = changes
 
 	breaking := gate.Incompatibles(changes)
 	if len(breaking) == 0 {
-		p.add("api compatibility", Pass, "the exported API is backward compatible with %s", previous)
+		p.add(apiCompatibility, Pass, "the exported API is backward compatible with %s", previous)
 		return
 	}
 
 	// A major bump is exactly what an incompatible change calls for, so
 	// making one is the correct outcome rather than a problem.
 	if bumpBetween(previous, p.Tag) == "major" {
-		p.add("api compatibility", Pass, "%d incompatible change(s), and %s is a major release",
+		p.add(apiCompatibility, Pass, "%d incompatible change(s), and %s is a major release",
 			len(breaking), p.Tag)
 		return
 	}
 
 	if opts.AllowBreaking {
-		p.add("api compatibility", Warn, "%s\naccepted with --allow-breaking", describe(breaking))
+		p.add(apiCompatibility, Warn, "%s\naccepted with --allow-breaking", describe(breaking))
 		return
 	}
 
-	p.add("api compatibility", Fail,
+	p.add(apiCompatibility, Fail,
 		"%s is not a major release, but the API is not backward compatible with %s\n%s\n%s",
 		p.Tag, previous, describe(breaking),
 		"a breaking change needs a major version and a matching /vN module path\noverride with --allow-breaking")
