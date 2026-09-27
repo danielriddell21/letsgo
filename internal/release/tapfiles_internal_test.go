@@ -58,6 +58,18 @@ func basePlan(t *testing.T) *plan.Plan {
 	}
 }
 
+// pinnedPlan is basePlan with a tap-files plugin pinned to a fake script that
+// runs body.
+func pinnedPlan(t *testing.T, command, body string) *plan.Plan {
+	t.Helper()
+	digest := fakePlugin(t, command, body)
+	p := basePlan(t)
+	p.Plugins = map[plugin.Hook]plugin.Plugin{
+		plugin.HookTapFiles: {Hook: plugin.HookTapFiles, Command: command, Digest: digest},
+	}
+	return p
+}
+
 func TestApplyTapFilesPluginNoOpWhenUnpinned(t *testing.T) {
 	p := basePlan(t)
 	p.Plugins = map[plugin.Hook]plugin.Plugin{}
@@ -68,31 +80,65 @@ func TestApplyTapFilesPluginNoOpWhenUnpinned(t *testing.T) {
 	}
 }
 
-func TestApplyTapFilesPluginFailsWithoutATap(t *testing.T) {
-	digest := fakePlugin(t, "letsgo-cask", `cat > /dev/null; echo '{"files":[]}'`)
-	p := basePlan(t)
-	p.Tap = github.Repo{}
-	p.Plugins = map[plugin.Hook]plugin.Plugin{
-		plugin.HookTapFiles: {Hook: plugin.HookTapFiles, Command: "letsgo-cask", Digest: digest},
-	}
+// Every way a tap-files plugin's answer, or its situation, can be wrong: no
+// tap to write into, a path outside its lane, the same path twice, or the
+// plugin simply failing. All of it stops the release before anything is
+// built further.
+func TestApplyTapFilesPluginFails(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+		noTap            bool
+	}{
+		{
+			"without a tap", `cat > /dev/null; echo '{"files":[]}'`,
+			"no Homebrew tap is configured", true,
+		},
+		{
+			"a path that escapes the tap",
+			`cat > /dev/null; echo '{"files":[{"path":"../Formula/x.rb","content":"x"}]}'`,
+			"not a valid tap path", false,
+		},
+		{
+			"a path outside Casks",
+			`cat > /dev/null; echo '{"files":[{"path":"Formula/x.rb","content":"x"}]}'`,
+			"not a valid tap path", false,
+		},
+		{
+			"an absolute path",
+			`cat > /dev/null; echo '{"files":[{"path":"/Casks/x.rb","content":"x"}]}'`,
+			"not a valid tap path", false,
+		},
+		{
+			"a duplicate path", `cat > /dev/null; echo '{"files":[` +
+				`{"path":"Casks/x.rb","content":"a"},{"path":"Casks/x.rb","content":"b"}]}'`,
+			"more than once", false,
+		},
+		{
+			"the plugin's own error", `echo "no macOS build to cask" >&2; exit 1`,
+			"no macOS build to cask", false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := pinnedPlan(t, "letsgo-cask", tc.body)
+			if tc.noTap {
+				p.Tap = github.Repo{}
+			}
 
-	if _, err := applyTapFilesPlugin(context.Background(), p, nil); err == nil ||
-		!strings.Contains(err.Error(), "no Homebrew tap is configured") {
-		t.Errorf("err = %v", err)
+			if _, err := applyTapFilesPlugin(context.Background(), p, nil); err == nil ||
+				!strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v", err)
+			}
+		})
 	}
 }
 
 func TestApplyTapFilesPluginRendersFromTheArtifacts(t *testing.T) {
-	digest := fakePlugin(t, "letsgo-cask", `
-cat > "$LETSGO_FAKE_INPUT"
-echo '{"files":[{"path":"Casks/gambit-gui.rb","content":"cask \"gambit-gui\""}]}'`)
 	dir := t.TempDir()
 	t.Setenv("LETSGO_FAKE_INPUT", filepath.Join(dir, "input.json"))
 
-	p := basePlan(t)
-	p.Plugins = map[plugin.Hook]plugin.Plugin{
-		plugin.HookTapFiles: {Hook: plugin.HookTapFiles, Command: "letsgo-cask", Digest: digest},
-	}
+	p := pinnedPlan(t, "letsgo-cask", `
+cat > "$LETSGO_FAKE_INPUT"
+echo '{"files":[{"path":"Casks/gambit-gui.rb","content":"cask \"gambit-gui\""}]}'`)
 	artifacts := []build.Artifact{
 		{
 			Archive: "gambit-gui_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64",
@@ -123,57 +169,6 @@ echo '{"files":[{"path":"Casks/gambit-gui.rb","content":"cask \"gambit-gui\""}]}
 		if !strings.Contains(string(input), want) {
 			t.Errorf("input %s does not contain %q", input, want)
 		}
-	}
-}
-
-func TestApplyTapFilesPluginFailsOnAnInvalidPath(t *testing.T) {
-	for _, tc := range []struct {
-		name, path string
-	}{
-		{"escapes the tap", "../Formula/x.rb"},
-		{"outside Casks", "Formula/x.rb"},
-		{"absolute", "/Casks/x.rb"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			digest := fakePlugin(t, "letsgo-cask",
-				`cat > /dev/null; echo '{"files":[{"path":"`+tc.path+`","content":"x"}]}'`)
-			p := basePlan(t)
-			p.Plugins = map[plugin.Hook]plugin.Plugin{
-				plugin.HookTapFiles: {Hook: plugin.HookTapFiles, Command: "letsgo-cask", Digest: digest},
-			}
-
-			if _, err := applyTapFilesPlugin(context.Background(), p, nil); err == nil ||
-				!strings.Contains(err.Error(), "not a valid tap path") {
-				t.Errorf("err = %v", err)
-			}
-		})
-	}
-}
-
-func TestApplyTapFilesPluginFailsOnADuplicatePath(t *testing.T) {
-	digest := fakePlugin(t, "letsgo-cask", `cat > /dev/null; echo '{"files":[`+
-		`{"path":"Casks/x.rb","content":"a"},{"path":"Casks/x.rb","content":"b"}]}'`)
-	p := basePlan(t)
-	p.Plugins = map[plugin.Hook]plugin.Plugin{
-		plugin.HookTapFiles: {Hook: plugin.HookTapFiles, Command: "letsgo-cask", Digest: digest},
-	}
-
-	if _, err := applyTapFilesPlugin(context.Background(), p, nil); err == nil ||
-		!strings.Contains(err.Error(), "more than once") {
-		t.Errorf("err = %v", err)
-	}
-}
-
-func TestApplyTapFilesPluginFailsOnThePluginsOwnError(t *testing.T) {
-	digest := fakePlugin(t, "letsgo-cask", `echo "no macOS build to cask" >&2; exit 1`)
-	p := basePlan(t)
-	p.Plugins = map[plugin.Hook]plugin.Plugin{
-		plugin.HookTapFiles: {Hook: plugin.HookTapFiles, Command: "letsgo-cask", Digest: digest},
-	}
-
-	if _, err := applyTapFilesPlugin(context.Background(), p, nil); err == nil ||
-		!strings.Contains(err.Error(), "no macOS build to cask") {
-		t.Errorf("err = %v", err)
 	}
 }
 

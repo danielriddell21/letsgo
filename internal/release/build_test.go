@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -282,15 +283,15 @@ func TestBuildRefusesAFailedPlan(t *testing.T) {
 	}
 }
 
-// A release with a tap-files plugin pinned writes what it rendered into the
-// manifest, without publishing anything: publishing is a separate call, made
-// once the release's assets exist to be linked to.
-func TestBuildRecordsTapFiles(t *testing.T) {
+// caskFixturePlugin writes a shell-script stand-in for a tap-files plugin
+// that answers with a single file, and returns the letsgo.mod line pinning
+// it under the name cask-fixture.
+func caskFixturePlugin(t *testing.T, path, content string) string {
+	t.Helper()
 	scriptDir := t.TempDir()
 	script := filepath.Join(scriptDir, "cask-fixture")
-	if err := os.WriteFile(script, []byte(
-		"#!/bin/sh\ncat > /dev/null\necho '{\"files\":[{\"path\":\"Casks/demo.rb\",\"content\":\"cask demo\"}]}'\n",
-	), 0o700); err != nil {
+	body := fmt.Sprintf("#!/bin/sh\ncat > /dev/null\necho '{\"files\":[{\"path\":%q,\"content\":%q}]}'\n", path, content)
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -300,9 +301,15 @@ func TestBuildRecordsTapFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(data)
-	digest := "sha256:" + hex.EncodeToString(sum[:])
+	return "plugin tap-files cask-fixture v0.1.0 sha256:" + hex.EncodeToString(sum[:])
+}
 
-	p := fixture(t, "brew you/tap", "plugin tap-files cask-fixture v0.1.0 "+digest)
+// A release with a tap-files plugin pinned writes what it rendered into the
+// manifest, without publishing anything: publishing is a separate call, made
+// once the release's assets exist to be linked to.
+func TestBuildRecordsTapFiles(t *testing.T) {
+	pin := caskFixturePlugin(t, "Casks/demo.rb", "cask demo")
+	p := fixture(t, "brew you/tap", pin)
 
 	result, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil)
 	if err != nil {
@@ -324,23 +331,8 @@ func TestBuildRecordsTapFiles(t *testing.T) {
 // A tap-files plugin that reaches outside Casks/ must stop the release before
 // the manifest — or anything else — is written to disk.
 func TestBuildFailsOnAnInvalidTapFilePath(t *testing.T) {
-	scriptDir := t.TempDir()
-	script := filepath.Join(scriptDir, "cask-fixture")
-	if err := os.WriteFile(script, []byte(
-		"#!/bin/sh\ncat > /dev/null\necho '{\"files\":[{\"path\":\"../Formula/x.rb\",\"content\":\"x\"}]}'\n",
-	), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	data, err := os.ReadFile(script)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sum := sha256.Sum256(data)
-	digest := "sha256:" + hex.EncodeToString(sum[:])
-
-	p := fixture(t, "brew you/tap", "plugin tap-files cask-fixture v0.1.0 "+digest)
+	pin := caskFixturePlugin(t, "../Formula/x.rb", "x")
+	p := fixture(t, "brew you/tap", pin)
 
 	if _, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil); err == nil ||
 		!strings.Contains(err.Error(), "not a valid tap path") {
