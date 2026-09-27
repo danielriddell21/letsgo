@@ -63,6 +63,12 @@ type Options struct {
 	// could be reached by a credential of its own.
 	TapToken string
 
+	// ReleaseToken overrides the token the GitHub release itself is created
+	// and published with. Empty falls back to Token, which is what every
+	// repository did before the release could be published under the same
+	// bot identity as the tap commit.
+	ReleaseToken string
+
 	// APIEndpoint overrides the forge API host. Empty means the real one.
 	APIEndpoint string
 
@@ -697,6 +703,15 @@ var TokenEnvVars = []string{"GITHUB_TOKEN", "GH_TOKEN"}
 // token. Keeping them apart means the App need not be installed here at all.
 var TapTokenEnvVars = []string{"LETSGO_TAP_TOKEN"}
 
+// ReleaseTokenEnvVars are the environment variables consulted for the token
+// the GitHub release is published with.
+//
+// Separate from TokenEnvVars for the same reason TapTokenEnvVars is: a
+// repository that wants the release itself attributed to a bot identity,
+// distinct from whatever token ran the workflow, needs its own credential to
+// name.
+var ReleaseTokenEnvVars = []string{"LETSGO_RELEASE_TOKEN"}
+
 // Token returns the resolved token, and where it came from.
 func Token(override string) (token, source string) {
 	if override != "" {
@@ -722,6 +737,24 @@ func TapToken(override, tokenOverride string) (token, source string) {
 		return override, "--tap-token"
 	}
 	for _, name := range TapTokenEnvVars {
+		if v := os.Getenv(name); v != "" {
+			return v, name
+		}
+	}
+	return Token(tokenOverride)
+}
+
+// ReleaseToken returns the token the GitHub release is published with, and
+// where it came from.
+//
+// It falls back to the release token so that a repository which has always
+// published with one credential keeps working unchanged, exactly as
+// TapToken does for the tap.
+func ReleaseToken(override, tokenOverride string) (token, source string) {
+	if override != "" {
+		return override, "--release-token"
+	}
+	for _, name := range ReleaseTokenEnvVars {
 		if v := os.Getenv(name); v != "" {
 			return v, name
 		}
@@ -953,7 +986,8 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 	if opts.APIEndpoint != "" {
 		client.SetEndpoints(opts.APIEndpoint, opts.APIEndpoint)
 	}
-	access, err := client.CheckAccess(ctx, github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name})
+	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
+	access, err := client.CheckAccess(ctx, repo)
 	if err != nil {
 		// Unreachable is definitive: the repository is private to this token,
 		// renamed, or gone.
@@ -964,21 +998,45 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 		p.add("token", Fail, "%s is archived and cannot receive a release", p.Repo)
 		return
 	}
+	p.note("token", source, "environment")
+
+	// The release is probed with the credential that will actually create
+	// it — its own, if one is configured, otherwise the plain token. Probing
+	// the wrong one is how a plan passes and the release then fails on its
+	// last step, which is the one failure this gate exists to prevent.
+	releaseToken, releaseSource := ReleaseToken(opts.ReleaseToken, opts.Token)
+	releaseClient, releaseAccess := client, access
+	if releaseToken != token {
+		releaseClient = github.New(releaseToken)
+		if opts.APIEndpoint != "" {
+			releaseClient.SetEndpoints(opts.APIEndpoint, opts.APIEndpoint)
+		}
+		releaseAccess, err = releaseClient.CheckAccess(ctx, repo)
+		if err != nil {
+			p.add("token", Fail, "%v", err)
+			return
+		}
+		if releaseAccess.Archived {
+			p.add("token", Fail, "%s is archived and cannot receive a release", p.Repo)
+			return
+		}
+		p.note("release token", releaseSource, "environment")
+	}
 
 	switch {
-	case access.CanPush:
-		p.add("token", Pass, "%s can write to %s", source, p.Repo)
+	case releaseAccess.CanPush:
+		p.add("token", Pass, "%s can write to %s", releaseSource, p.Repo)
 
 	case !underActions():
 		// For a user token the reported permission is accurate, so this is a
 		// real answer and worth stopping for.
-		p.add("token", Fail, "%s", noWriteAccess(source, p.Repo.String()))
+		p.add("token", Fail, "%s", noWriteAccess(releaseSource, p.Repo.String()))
 		return
 
 	default:
 		// A workflow token is an installation token, whose permissions the
 		// repository endpoint does not describe. Ask the forge directly.
-		allowed, err := client.CanCreateRelease(ctx, github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name})
+		allowed, err := releaseClient.CanCreateRelease(ctx, repo)
 		switch {
 		case err != nil:
 			// Neither established nor refuted. Blocking here would refuse
@@ -986,19 +1044,17 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 			// attempt will give a definitive answer shortly.
 			p.add("token", Warn, "%s", unconfirmedUnderActions(p.Repo.String()))
 		case allowed:
-			p.add("token", Pass, "%s may create releases in %s", source, p.Repo)
+			p.add("token", Pass, "%s may create releases in %s", releaseSource, p.Repo)
 		default:
 			p.add("token", Fail, "%s", noActionsWriteAccess(p.Repo.String()))
 			return
 		}
 	}
 
-	p.note("token", source, "environment")
-
 	// The tap is probed with the credential that will actually write to it.
-	// Probing the release token instead is how a plan passes and the release
-	// then fails on its last step, which is the one failure this gate exists
-	// to prevent.
+	// Probing the release's credential instead is how a plan passes and the
+	// release then fails on its last step, which is the one failure this
+	// gate exists to prevent.
 	tapToken, tapSource := TapToken(opts.TapToken, opts.Token)
 	tapClient := client
 	if tapToken != token {

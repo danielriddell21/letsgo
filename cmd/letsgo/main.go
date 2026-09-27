@@ -256,6 +256,7 @@ func runRelease(args []string) error {
 	draft := fs.Bool("draft", false, "create the release without publishing it")
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	tapToken := fs.String("tap-token", "", tapTokenUsage)
+	releaseToken := fs.String("release-token", "", releaseTokenUsage)
 	out := fs.String("o", "dist", "output directory")
 	skipWarm := fs.Bool("no-proxy-warm", false, "skip priming the Go module proxy")
 	snapshot := fs.Bool("snapshot", false, "rehearse the release without publishing anything")
@@ -280,8 +281,8 @@ func runRelease(args []string) error {
 	p, dir, result, info, err := planAndBuild(ctx, planBuildOptions{
 		Out: *out,
 		Plan: plan.Options{
-			Dir: ".", Publish: !*snapshot, Token: *token, TapToken: *tapToken, Snapshot: *snapshot,
-			Analyse: true, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
+			Dir: ".", Publish: !*snapshot, Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken,
+			Snapshot: *snapshot, Analyse: true, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
 			DisableProxyWarm: *skipWarm,
 		},
 		FailureNote: "nothing was built or published",
@@ -304,6 +305,11 @@ func runRelease(args []string) error {
 	// the split opt-in rather than a migration.
 	tapClient := tapClientFor(client, *tapToken, *token)
 
+	// The release itself gets its own client the same way, so it can be
+	// published under the same bot identity as the tap commit instead of
+	// whatever token ran the workflow.
+	releaseClient := releaseClientFor(client, *releaseToken, *token)
+
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 
 	notes, err := releaseNotes(ctx, p, client, repo)
@@ -314,7 +320,7 @@ func runRelease(args []string) error {
 	// Everything above this line is identical in a rehearsal. Only the thing
 	// that writes to the world is exchanged.
 	var (
-		forge  publish.Forge = client
+		forge  publish.Forge = releaseClient
 		tapAPI brew.FileAPI  = tapClient
 	)
 	if *snapshot {

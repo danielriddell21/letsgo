@@ -246,3 +246,50 @@ func TestTapClientForReadsTheEnvironment(t *testing.T) {
 		t.Error("LETSGO_TAP_TOKEN did not produce a client of its own")
 	}
 }
+
+// releaseClientFor mirrors tapClientFor exactly, for the same reason: the
+// single-credential arrangement must not change until a repository opts into
+// publishing the release under a bot identity of its own.
+func TestReleaseClientForReusesTheMainClient(t *testing.T) {
+	t.Setenv("LETSGO_RELEASE_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+
+	client := github.New("workflow-token")
+	client.UserAgent = "letsgo/test"
+
+	if got := releaseClientFor(client, "", "workflow-token"); got != client {
+		t.Error("a release with no token of its own got a second client")
+	}
+}
+
+func TestReleaseClientForSplitsWhenTheReleaseHasItsOwnToken(t *testing.T) {
+	t.Setenv("LETSGO_RELEASE_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+
+	client := github.New("workflow-token")
+	client.UserAgent = "letsgo/test"
+
+	got := releaseClientFor(client, "release-token", "workflow-token")
+	if got == client {
+		t.Fatal("the release token did not produce a client of its own")
+	}
+	// The user agent has to carry over, or the release's requests arrive
+	// unidentified and GitHub is entitled to refuse them.
+	if got.UserAgent != client.UserAgent {
+		t.Errorf("UserAgent = %q, want %q", got.UserAgent, client.UserAgent)
+	}
+}
+
+// The environment is read when the flag is absent, which is how CI passes it.
+func TestReleaseClientForReadsTheEnvironment(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("LETSGO_RELEASE_TOKEN", "from-env")
+
+	client := github.New("workflow-token")
+	if got := releaseClientFor(client, "", "workflow-token"); got == client {
+		t.Error("LETSGO_RELEASE_TOKEN did not produce a client of its own")
+	}
+}

@@ -16,6 +16,9 @@ import (
 // a tap.
 const tapTokenUsage = "token the Homebrew tap is written with (default: $LETSGO_TAP_TOKEN, else the release token)"
 
+// releaseTokenUsage documents --release-token once.
+const releaseTokenUsage = "token the GitHub release is published with (default: $LETSGO_RELEASE_TOKEN, else --token)"
+
 // tapClientFor returns the client the tap is written with.
 //
 // It returns the release client itself when no tap token is configured, rather
@@ -31,6 +34,23 @@ func tapClientFor(client *github.Client, tapToken, token string) *github.Client 
 	tapClient := github.New(value)
 	tapClient.UserAgent = client.UserAgent
 	return tapClient
+}
+
+// releaseClientFor returns the client the GitHub release itself is created
+// and published with.
+//
+// Mirrors tapClientFor exactly: the same client when no release token is
+// configured, so a repository that has always published with one credential
+// keeps working unchanged until it opts into a bot identity of its own.
+func releaseClientFor(client *github.Client, releaseToken, token string) *github.Client {
+	value, _ := plan.ReleaseToken(releaseToken, token)
+	current, _ := plan.Token(token)
+	if value == current {
+		return client
+	}
+	releaseClient := github.New(value)
+	releaseClient.UserAgent = client.UserAgent
+	return releaseClient
 }
 
 // publishTap writes a formula to the configured Homebrew tap, one per command
