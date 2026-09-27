@@ -16,21 +16,35 @@ import (
 // a tap.
 const tapTokenUsage = "token the Homebrew tap is written with (default: $LETSGO_TAP_TOKEN, else the release token)"
 
-// tapClientFor returns the client the tap is written with.
-//
-// It returns the release client itself when no tap token is configured, rather
-// than a second client holding the same token: one client means one connection
-// pool and one user agent, and it keeps the single-credential arrangement
-// exactly as it was.
-func tapClientFor(client *github.Client, tapToken, token string) *github.Client {
-	value, _ := plan.TapToken(tapToken, token)
+// releaseTokenUsage documents --release-token once.
+const releaseTokenUsage = "token the GitHub release is published with (default: $LETSGO_RELEASE_TOKEN, else --token)" //nolint:gosec // usage text, not a credential
+
+// splitClientFor returns a client for resolved, or the release client itself
+// when resolved names the same credential as the release: one client means
+// one connection pool and one user agent, and it keeps the single-credential
+// arrangement exactly as it was.
+func splitClientFor(client *github.Client, resolved, token string) *github.Client {
 	current, _ := plan.Token(token)
-	if value == current {
+	if resolved == current {
 		return client
 	}
-	tapClient := github.New(value)
-	tapClient.UserAgent = client.UserAgent
-	return tapClient
+	split := github.New(resolved)
+	split.UserAgent = client.UserAgent
+	return split
+}
+
+// tapClientFor returns the client the tap is written with.
+func tapClientFor(client *github.Client, tapToken, token string) *github.Client {
+	value, _ := plan.TapToken(tapToken, token)
+	return splitClientFor(client, value, token)
+}
+
+// releaseClientFor returns the client the GitHub release itself is created
+// and published with. Mirrors tapClientFor exactly, one split credential at
+// a time.
+func releaseClientFor(client *github.Client, releaseToken, token string) *github.Client {
+	value, _ := plan.ReleaseToken(releaseToken, token)
+	return splitClientFor(client, value, token)
 }
 
 // publishTap writes a formula to the configured Homebrew tap, one per command
