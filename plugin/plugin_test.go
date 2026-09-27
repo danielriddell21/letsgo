@@ -192,7 +192,9 @@ func TestWireTypesRoundTripAsJSON(t *testing.T) {
 // runs for real, from the outside.
 func buildHelper(t *testing.T) string {
 	t.Helper()
-	bin := filepath.Join(t.TempDir(), "helper")
+	// go build always appends .exe to the output name on Windows, whatever
+	// name -o is given, so the binary is named with it here too.
+	bin := filepath.Join(t.TempDir(), "helper.exe")
 	cmd := exec.Command("go", "build", "-o", bin, "./testdata/helper")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build testdata/helper: %v\n%s", err, out)
