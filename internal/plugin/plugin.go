@@ -25,33 +25,22 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	pub "github.com/danielriddell21/letsgo/plugin"
 )
 
-// Hook is a point in the release a plugin can answer for.
-type Hook string
+// Hook is a point in the release a plugin can answer for. The type, its
+// constants and the closed set of hooks live in the public
+// github.com/danielriddell21/letsgo/plugin package; see hooks.go for why.
+type Hook = pub.Hook
 
 const (
-	// HookLDFlags asks for extra -X assignments. The answer is recorded in the
-	// artifact's ldflags, which verification already replays exactly.
-	HookLDFlags Hook = "ldflags"
-
-	// HookArchiveLayout asks which binaries share an archive. The answer is
-	// recorded as the artifact's binaries.
-	HookArchiveLayout Hook = "archive-layout"
+	HookLDFlags       = pub.HookLDFlags
+	HookArchiveLayout = pub.HookArchiveLayout
 )
 
 // Hooks is the closed set, in the order they run.
-var Hooks = []Hook{HookLDFlags, HookArchiveLayout}
-
-// Valid reports whether a hook is one letsgo knows.
-func (h Hook) Valid() bool {
-	for _, known := range Hooks {
-		if h == known {
-			return true
-		}
-	}
-	return false
-}
+var Hooks = pub.Hooks
 
 // Plugin is one configured plugin, pinned to the exact program that ran.
 type Plugin struct {
