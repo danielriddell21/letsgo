@@ -2,11 +2,17 @@ package yank_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/yank"
 )
@@ -191,6 +197,190 @@ func TestFormulasFromSkipsAVariant(t *testing.T) {
 	}
 	if formulas[0].Name != "foo" {
 		t.Errorf("formula = %q, want foo", formulas[0].Name)
+	}
+}
+
+// fakeTap is a Homebrew tap that remembers what was written to it.
+type fakeTap struct {
+	writes   []github.FileInput
+	writeErr error
+}
+
+func (f *fakeTap) ReadFile(context.Context, github.Repo, string) (*github.File, error) {
+	return nil, nil
+}
+
+func (f *fakeTap) WriteFile(_ context.Context, _ github.Repo, in github.FileInput) error {
+	if f.writeErr != nil {
+		return f.writeErr
+	}
+	f.writes = append(f.writes, in)
+	return nil
+}
+
+// tapFilesFixture writes a fake tap-files plugin that answers with body, and
+// pins it. A shell script is enough: the contract is a subprocess reading
+// JSON and writing JSON.
+func tapFilesFixture(t *testing.T, body string) (plugin.Plugin, string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake plugin is a shell script")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "letsgo-cask")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+
+	return plugin.Plugin{
+		Hook: plugin.HookTapFiles, Command: "letsgo-cask",
+		Digest: "sha256:" + hex.EncodeToString(sum[:]),
+	}, t.TempDir()
+}
+
+// A cask left pointing at a retracted release is a bug nobody sees: it still
+// resolves, just to bytes that say not to use them. Yank has to roll it back
+// exactly as it rolls back the formula.
+func TestRunRollsBackTheCaskToo(t *testing.T) {
+	tapFilesPlugin, root := tapFilesFixture(t, `
+cat > /dev/null
+echo '{"files":[{"path":"Casks/foo.rb","content":"cask \"foo\""}]}'`)
+
+	forge := &fakeForge{release: &github.Release{ID: 7, TagName: "v1.3.0", Body: "notes"}}
+	tap := &fakeTap{}
+
+	m := &manifest.Manifest{
+		Version: "1.2.0", Tag: "v1.2.0",
+		Artifacts: []manifest.Artifact{
+			{Name: "foo_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64", Binary: "foo", SHA256: "aaa"},
+		},
+	}
+
+	result, err := yank.Run(context.Background(), yank.Options{
+		Client: forge, Repo: github.Repo{Owner: "you", Name: "foo"},
+		Tag: "v1.3.0", Reason: "bad build",
+		Tap: github.Repo{Owner: "you", Name: "homebrew-tap"}, TapAPI: tap,
+		Previous:       "v1.2.0",
+		TapFilesPlugin: tapFilesPlugin, PluginRoot: root,
+		Manifests: func(context.Context, string) (*manifest.Manifest, error) { return m, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The formula rolls back too, from the same manifest; the cask is what
+	// this test is about.
+	var cask *github.FileInput
+	for i, w := range tap.writes {
+		if w.Path == "Casks/foo.rb" {
+			cask = &tap.writes[i]
+		}
+	}
+	if cask == nil {
+		t.Fatalf("no write to Casks/foo.rb, tap writes = %+v", tap.writes)
+	}
+	if !strings.Contains(string(cask.Content), `cask "foo"`) {
+		t.Errorf("cask content = %s", cask.Content)
+	}
+	if len(result.TapFiles) != 1 || result.TapFiles[0] != "Casks/foo.rb" {
+		t.Errorf("result.TapFiles = %v", result.TapFiles)
+	}
+}
+
+// No tap-files plugin pinned means nothing to roll back, and no error either.
+func TestRunSkipsTheCaskWhenNoPluginIsPinned(t *testing.T) {
+	forge := &fakeForge{release: &github.Release{ID: 7, TagName: "v1.3.0", Body: "notes"}}
+	tap := &fakeTap{}
+
+	m := &manifest.Manifest{Version: "1.2.0", Tag: "v1.2.0"}
+
+	result, err := yank.Run(context.Background(), yank.Options{
+		Client: forge, Repo: github.Repo{Owner: "you", Name: "foo"},
+		Tag: "v1.3.0", Reason: "bad build",
+		Tap: github.Repo{Owner: "you", Name: "homebrew-tap"}, TapAPI: tap,
+		Previous:  "v1.2.0",
+		Manifests: func(context.Context, string) (*manifest.Manifest, error) { return m, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.TapFiles) != 0 {
+		t.Errorf("result.TapFiles = %v, want none", result.TapFiles)
+	}
+}
+
+// A yanked release with no earlier one to fall back to leaves the tap alone
+// — the same as a release that was the first.
+func TestRunLeavesTheTapWhenThereIsNoEarlierRelease(t *testing.T) {
+	forge := &fakeForge{release: &github.Release{ID: 7, TagName: "v1.0.0", Body: "notes"}}
+	tap := &fakeTap{}
+
+	result, err := yank.Run(context.Background(), yank.Options{
+		Client: forge, Repo: github.Repo{Owner: "you", Name: "foo"},
+		Tag: "v1.0.0", Reason: "bad build",
+		Tap: github.Repo{Owner: "you", Name: "homebrew-tap"}, TapAPI: tap,
+		Manifests: func(context.Context, string) (*manifest.Manifest, error) {
+			t.Fatal("no earlier release means nothing to rebuild from")
+			return nil, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tap.writes) != 0 || len(result.Formulas) != 0 || len(result.TapFiles) != 0 {
+		t.Errorf("result = %+v, tap writes = %v, want no tap activity", result, tap.writes)
+	}
+}
+
+// The plugin failing stops the rollback exactly as it stops a release: a cask
+// nobody can account for is not one to publish.
+func TestRunFailsWhenTheTapFilesPluginFails(t *testing.T) {
+	tapFilesPlugin, root := tapFilesFixture(t, `echo "no macOS build to cask" >&2; exit 1`)
+
+	forge := &fakeForge{release: &github.Release{ID: 7, TagName: "v1.3.0", Body: "notes"}}
+	m := &manifest.Manifest{Version: "1.2.0", Tag: "v1.2.0"}
+
+	_, err := yank.Run(context.Background(), yank.Options{
+		Client: forge, Repo: github.Repo{Owner: "you", Name: "foo"},
+		Tag: "v1.3.0", Reason: "bad build",
+		Tap: github.Repo{Owner: "you", Name: "homebrew-tap"}, TapAPI: &fakeTap{},
+		Previous:       "v1.2.0",
+		TapFilesPlugin: tapFilesPlugin, PluginRoot: root,
+		Manifests: func(context.Context, string) (*manifest.Manifest, error) { return m, nil },
+	})
+	if err == nil || !strings.Contains(err.Error(), "no macOS build to cask") {
+		t.Errorf("err = %v, want the plugin's own message", err)
+	}
+}
+
+// A tap that refuses the write fails the retraction rather than reporting a
+// cask rolled back that was not.
+func TestRunFailsWhenTheTapRefusesTheCaskWrite(t *testing.T) {
+	tapFilesPlugin, root := tapFilesFixture(t, `
+cat > /dev/null
+echo '{"files":[{"path":"Casks/foo.rb","content":"cask \"foo\""}]}'`)
+
+	forge := &fakeForge{release: &github.Release{ID: 7, TagName: "v1.3.0", Body: "notes"}}
+	m := &manifest.Manifest{Version: "1.2.0", Tag: "v1.2.0"}
+
+	_, err := yank.Run(context.Background(), yank.Options{
+		Client: forge, Repo: github.Repo{Owner: "you", Name: "foo"},
+		Tag: "v1.3.0", Reason: "bad build",
+		Tap: github.Repo{Owner: "you", Name: "homebrew-tap"}, TapAPI: &fakeTap{writeErr: errors.New("boom")},
+		Previous:       "v1.2.0",
+		TapFilesPlugin: tapFilesPlugin, PluginRoot: root,
+		Manifests: func(context.Context, string) (*manifest.Manifest, error) { return m, nil },
+	})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v, want the tap's own refusal", err)
 	}
 }
 

@@ -25,7 +25,11 @@ import (
 // already fixed once the artifacts above are built. That is also why a
 // failing or misbehaving plugin stops the release here, before anything —
 // the manifest included — is even written to disk.
-func applyTapFilesPlugin(ctx context.Context, p *plan.Plan, artifacts []build.Artifact) ([]plugin.TapFile, error) {
+//
+// info is the repository's description, licence and homepage, already read
+// from the forge by the caller — nil when there is none to read, which
+// leaves those fields empty rather than failing the release over them.
+func applyTapFilesPlugin(ctx context.Context, p *plan.Plan, artifacts []build.Artifact, info *github.RepoInfo) ([]plugin.TapFile, error) {
 	configured, ok := p.Plugins[plugin.HookTapFiles]
 	if !ok {
 		return nil, nil
@@ -38,13 +42,20 @@ func applyTapFilesPlugin(ctx context.Context, p *plan.Plan, artifacts []build.Ar
 		return nil, fmt.Errorf("release: %s needs a GitHub repository and a tag to build tap URLs", configured.Command)
 	}
 
-	in := tapFilesInput(p, artifacts)
+	in := tapFilesInput(p, artifacts, info)
+	return RunTapFiles(ctx, configured, p.RootDir, in)
+}
 
+// RunTapFiles runs a pinned tap-files plugin and validates its answer.
+//
+// Shared by a release building fresh artifacts and by yank, which rebuilds
+// the same input from a previous release's manifest: both need the same
+// execution and the same path checks.
+func RunTapFiles(ctx context.Context, configured plugin.Plugin, rootDir string, in plugin.TapFilesInput) ([]plugin.TapFile, error) {
 	var out plugin.TapFilesOutput
-	if err := plugin.Run(ctx, configured, p.RootDir, in, &out); err != nil {
+	if err := plugin.Run(ctx, configured, rootDir, in, &out); err != nil {
 		return nil, err
 	}
-
 	if err := validateTapFiles(out.Files); err != nil {
 		return nil, fmt.Errorf("plugin %s: %w", configured.Command, err)
 	}
@@ -53,7 +64,7 @@ func applyTapFilesPlugin(ctx context.Context, p *plan.Plan, artifacts []build.Ar
 
 // tapFilesInput assembles the tap-files hook's input from what the release
 // already knows: the same facts a Homebrew formula is written from.
-func tapFilesInput(p *plan.Plan, artifacts []build.Artifact) plugin.TapFilesInput {
+func tapFilesInput(p *plan.Plan, artifacts []build.Artifact, info *github.RepoInfo) plugin.TapFilesInput {
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 
 	in := plugin.TapFilesInput{
@@ -65,6 +76,12 @@ func tapFilesInput(p *plan.Plan, artifacts []build.Artifact) plugin.TapFilesInpu
 		Homepage:  "https://" + repo.String(),
 		Caveats:   p.Config.BrewCaveats,
 		Artifacts: make([]plugin.TapArtifact, 0, len(artifacts)),
+	}
+	if info != nil {
+		in.Description, in.License = info.Description, info.License
+		if info.Homepage != "" {
+			in.Homepage = info.Homepage
+		}
 	}
 
 	for _, a := range artifacts {
@@ -80,6 +97,46 @@ func tapFilesInput(p *plan.Plan, artifacts []build.Artifact) plugin.TapFilesInpu
 			SHA256:   a.ArchiveSHA256,
 			URL:      github.DownloadURL(repo, p.Tag, a.Archive),
 			Binaries: binaries,
+		})
+	}
+	return in
+}
+
+// TapFilesInputFromManifest rebuilds the tap-files hook's input from a
+// previously published release's manifest, for yank: the plugin is asked the
+// same question about a release that already happened, so its cask can be
+// rolled back exactly as the formula is.
+//
+// Unlike a fresh release, there is no repository description or licence to
+// carry: FormulasFrom does not re-fetch them for the same reason, and yank
+// should not need the forge to answer a question about bytes already
+// published.
+func TapFilesInputFromManifest(m *manifest.Manifest, repo, tap github.Repo, caveats string) plugin.TapFilesInput {
+	tag := m.Tag
+	if tag == "" {
+		tag = "v" + m.Version
+	}
+
+	in := plugin.TapFilesInput{
+		Project:   m.Project,
+		Version:   m.Version,
+		Tag:       tag,
+		Repo:      repo.String(),
+		Tap:       tap.String(),
+		Homepage:  "https://" + repo.String(),
+		Caveats:   caveats,
+		Artifacts: make([]plugin.TapArtifact, 0, len(m.Artifacts)),
+	}
+
+	for _, a := range m.Artifacts {
+		in.Artifacts = append(in.Artifacts, plugin.TapArtifact{
+			Archive:  a.Name,
+			Variant:  a.Variant,
+			OS:       a.OS,
+			Arch:     a.Arch,
+			SHA256:   a.SHA256,
+			URL:      github.DownloadURL(repo, tag, a.Name),
+			Binaries: a.BinaryNames(),
 		})
 	}
 	return in

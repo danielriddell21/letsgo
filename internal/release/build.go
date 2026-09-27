@@ -22,6 +22,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
+	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
 // Result is everything a release consists of on disk.
@@ -46,7 +47,13 @@ type Result struct {
 
 // Build produces every artifact described by the plan, plus the source
 // archive, the manifest and the checksum file.
-func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, warnf func(string, ...any)) (*Result, error) {
+//
+// info is the repository's description, licence and homepage, for a
+// tap-files plugin to write into a cask; nil when the caller has no forge to
+// read it from, as `letsgo build` never does.
+func Build(
+	ctx context.Context, p *plan.Plan, dir string, toolVersion string, info *github.RepoInfo, warnf func(string, ...any),
+) (*Result, error) {
 	if !p.OK() {
 		return nil, fmt.Errorf("release: refusing to build a plan that did not pass its gates")
 	}
@@ -92,7 +99,7 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 		return nil, err
 	}
 
-	tapFiles, err := applyTapFilesPlugin(ctx, p, artifacts)
+	tapFiles, err := applyTapFilesPlugin(ctx, p, artifacts, info)
 	if err != nil {
 		return nil, err
 	}

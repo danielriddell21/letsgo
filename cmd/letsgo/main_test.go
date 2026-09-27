@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,12 +13,142 @@ import (
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/feature"
+	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 )
+
+// demoMainGo is a program small enough to build in a test, but one that
+// answers --version: planAndBuild's smoke test insists on that from anything
+// it builds.
+const demoMainGo = `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Printf("demo %s (%s) built %s\n", version, commit, date)
+	}
+}
+`
+
+// moduleFixture writes a minimal buildable module and commits it, so
+// plan.Resolve has a real repository to work from.
+//
+// Driven as one shell-independent command list, with the identity given as
+// -c flags rather than a GIT_AUTHOR_* environment: a test fixture belongs to
+// this file, not copied from the shape another package's already has.
+func moduleFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	for name, content := range map[string]string{
+		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
+		"main.go":    demoMainGo,
+		"letsgo.mod": "build " + gobuild.Host().String() + "\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	identity := []string{"-c", "user.name=Test", "-c", "user.email=t@example.com"}
+	for _, args := range [][]string{
+		{"-C", dir, "init", "-q", "-b", "main"},
+		{"-C", dir, "remote", "add", "origin", "https://github.com/you/demo.git"},
+		{"-C", dir, "add", "."},
+		append(append([]string{"-C", dir}, identity...), "commit", "-q", "-m", "feat: first release"),
+		{"-C", dir, "tag", "v1.2.3"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return dir
+}
+
+// A release reads the repository's description through the same Describe
+// callback runRelease wires up, and the result is what the caller gets back
+// to hand to publishTap — the whole point of threading it through Build.
+func TestPlanAndBuildRunsDescribeAndReturnsItsResult(t *testing.T) {
+	dir := moduleFixture(t)
+	want := &github.RepoInfo{Description: "a demo"}
+	var described *plan.Plan
+
+	p, outDir, result, info, err := planAndBuild(context.Background(), planBuildOptions{
+		Out:         filepath.Join(t.TempDir(), "dist"),
+		Plan:        plan.Options{Dir: dir},
+		FailureNote: "nothing was built",
+		Started:     time.Now(),
+		Describe: func(p *plan.Plan) *github.RepoInfo {
+			described = p
+			return want
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info != want {
+		t.Errorf("info = %v, want %v", info, want)
+	}
+	if described != p {
+		t.Error("Describe was not called with the resolved plan")
+	}
+	if outDir == "" || result == nil {
+		t.Errorf("outDir = %q, result = %v", outDir, result)
+	}
+}
+
+// `letsgo build` sets no Describe, and a release should not read the
+// repository over that alone.
+func TestPlanAndBuildSkipsDescribeWhenUnset(t *testing.T) {
+	dir := moduleFixture(t)
+
+	_, _, _, info, err := planAndBuild(context.Background(), planBuildOptions{
+		Out:         filepath.Join(t.TempDir(), "dist"),
+		Plan:        plan.Options{Dir: dir},
+		FailureNote: "nothing was built",
+		Started:     time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info != nil {
+		t.Errorf("info = %v, want nil", info)
+	}
+}
+
+// A plan that fails its own gates never reaches Build, or Describe.
+func TestPlanAndBuildFailsWhenThePlanDoes(t *testing.T) {
+	dir := t.TempDir() // no module here at all: plan.Resolve cannot succeed.
+
+	described := false
+	_, _, _, _, err := planAndBuild(context.Background(), planBuildOptions{
+		Out:         filepath.Join(t.TempDir(), "dist"),
+		Plan:        plan.Options{Dir: dir},
+		FailureNote: "nothing was built",
+		Started:     time.Now(),
+		Describe:    func(*plan.Plan) *github.RepoInfo { described = true; return nil },
+	})
+	if err == nil {
+		t.Fatal("want an error: there is no module to resolve a plan from")
+	}
+	if described {
+		t.Error("Describe ran despite the plan never resolving")
+	}
+}
 
 // flagSet mirrors the shapes the real subcommands declare: a boolean, a
 // string, and a second string, so permutation is tested against flags that
@@ -27,6 +159,44 @@ func flagSet() *flag.FlagSet {
 	fs.String("reason", "", "")
 	fs.String("token", "", "")
 	return fs
+}
+
+// A release only reads the repository's description when there is a
+// Homebrew tap to write into — a formula's, or a tap-files plugin's cask.
+func TestWantsRepoInfo(t *testing.T) {
+	tap := github.Repo{Owner: "you", Name: "homebrew-tap"}
+
+	for _, tc := range []struct {
+		name string
+		p    *plan.Plan
+		want bool
+	}{
+		{"no tap", &plan.Plan{HasRepo: true}, false},
+		{"tap but no repository", &plan.Plan{Tap: tap}, false},
+		{"tap and repository", &plan.Plan{Tap: tap, HasRepo: true}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := wantsRepoInfo(tc.p); got != tc.want {
+				t.Errorf("wantsRepoInfo(%+v) = %v, want %v", tc.p, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRepoInfoForRunsDescribeWhenSet(t *testing.T) {
+	want := &github.RepoInfo{Description: "a thing"}
+	o := planBuildOptions{Describe: func(*plan.Plan) *github.RepoInfo { return want }}
+
+	if got := repoInfoFor(o, &plan.Plan{}); got != want {
+		t.Errorf("repoInfoFor = %v, want %v", got, want)
+	}
+}
+
+// `letsgo build` never touches the network, so it sets no Describe at all.
+func TestRepoInfoForNilWhenUnset(t *testing.T) {
+	if got := repoInfoFor(planBuildOptions{}, &plan.Plan{}); got != nil {
+		t.Errorf("repoInfoFor = %v, want nil", got)
+	}
 }
 
 func TestPermuteMovesFlagsAhead(t *testing.T) {

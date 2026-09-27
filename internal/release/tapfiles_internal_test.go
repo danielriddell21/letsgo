@@ -13,6 +13,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -74,7 +75,7 @@ func TestApplyTapFilesPluginNoOpWhenUnpinned(t *testing.T) {
 	p := basePlan(t)
 	p.Plugins = map[plugin.Hook]plugin.Plugin{}
 
-	files, err := applyTapFilesPlugin(context.Background(), p, nil)
+	files, err := applyTapFilesPlugin(context.Background(), p, nil, nil)
 	if err != nil || files != nil {
 		t.Errorf("applyTapFilesPlugin = %v, %v, want nil, nil", files, err)
 	}
@@ -124,7 +125,7 @@ func TestApplyTapFilesPluginFails(t *testing.T) {
 				p.Tap = github.Repo{}
 			}
 
-			if _, err := applyTapFilesPlugin(context.Background(), p, nil); err == nil ||
+			if _, err := applyTapFilesPlugin(context.Background(), p, nil, nil); err == nil ||
 				!strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v", err)
 			}
@@ -146,7 +147,9 @@ echo '{"files":[{"path":"Casks/gambit-gui.rb","content":"cask \"gambit-gui\""}]}
 		},
 	}
 
-	files, err := applyTapFilesPlugin(context.Background(), p, artifacts)
+	files, err := applyTapFilesPlugin(context.Background(), p, artifacts, &github.RepoInfo{
+		Description: "a gambit", License: "MIT", Homepage: "https://gambit.example",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,6 +164,9 @@ echo '{"files":[{"path":"Casks/gambit-gui.rb","content":"cask \"gambit-gui\""}]}
 	for _, want := range []string{
 		`"project":"gambit"`, `"version":"1.2.0"`, `"tag":"v1.2.0"`,
 		`"repo":"you/gambit"`, `"tap":"you/homebrew-tap"`, `"caveats":"a caveat"`,
+		// Description, licence and homepage come from the repository, not a
+		// flag: IP-11's whole point.
+		`"description":"a gambit"`, `"license":"MIT"`, `"homepage":"https://gambit.example"`,
 		`"archive":"gambit-gui_1.2.0_darwin_arm64.tar.gz"`,
 		`"sha256":"` + strings.Repeat("a", 64) + `"`,
 		`"url":"https://github.com/you/gambit/releases/download/v1.2.0/gambit-gui_1.2.0_darwin_arm64.tar.gz"`,
@@ -169,6 +175,50 @@ echo '{"files":[{"path":"Casks/gambit-gui.rb","content":"cask \"gambit-gui\""}]}
 		if !strings.Contains(string(input), want) {
 			t.Errorf("input %s does not contain %q", input, want)
 		}
+	}
+}
+
+// Yank rebuilds the same input a release built, but from the previous
+// release's manifest rather than fresh artifacts.
+func TestTapFilesInputFromManifestRebuildsFromThePreviousRelease(t *testing.T) {
+	m := &manifest.Manifest{
+		Project: "gambit", Version: "1.2.0", Tag: "v1.2.0",
+		Artifacts: []manifest.Artifact{
+			{
+				Name: "gambit-gui_1.2.0_darwin_arm64.tar.gz", Variant: "gui",
+				OS: "darwin", Arch: "arm64", SHA256: strings.Repeat("a", 64), Binary: "gambit-gui",
+			},
+		},
+	}
+	repo := github.Repo{Owner: "you", Name: "gambit"}
+	tap := github.Repo{Owner: "you", Name: "homebrew-tap"}
+
+	in := TapFilesInputFromManifest(m, repo, tap, "a caveat")
+
+	if in.Project != "gambit" || in.Version != "1.2.0" || in.Tag != "v1.2.0" ||
+		in.Repo != "you/gambit" || in.Tap != "you/homebrew-tap" || in.Caveats != "a caveat" {
+		t.Errorf("in = %+v", in)
+	}
+	if len(in.Artifacts) != 1 {
+		t.Fatalf("artifacts = %+v", in.Artifacts)
+	}
+
+	a := in.Artifacts[0]
+	if a.Archive != m.Artifacts[0].Name || a.Variant != "gui" || a.SHA256 != strings.Repeat("a", 64) ||
+		a.URL != "https://github.com/you/gambit/releases/download/v1.2.0/"+m.Artifacts[0].Name ||
+		len(a.Binaries) != 1 || a.Binaries[0] != "gambit-gui" {
+		t.Errorf("artifact = %+v", a)
+	}
+}
+
+// A release published before the manifest recorded a tag has none to read,
+// so the same v-prefixed default a fresh release would use applies here too.
+func TestTapFilesInputFromManifestDefaultsTheTagFromTheVersion(t *testing.T) {
+	m := &manifest.Manifest{Project: "gambit", Version: "1.2.0"}
+
+	in := TapFilesInputFromManifest(m, github.Repo{Owner: "you", Name: "gambit"}, github.Repo{}, "")
+	if in.Tag != "v1.2.0" {
+		t.Errorf("Tag = %q, want v1.2.0", in.Tag)
 	}
 }
 

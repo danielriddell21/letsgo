@@ -9,7 +9,9 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
@@ -41,6 +43,14 @@ type Options struct {
 	// formula alone, which is right when the yanked release was the first.
 	Previous string
 
+	// TapFilesPlugin is the tap-files plugin this repository pins, zero if
+	// none is. A cask left pointing at a retracted release is a bug nobody
+	// sees — it still resolves, just to bytes that say not to use them — so
+	// yank re-runs the plugin against the same previous manifest the formula
+	// is rolled back from, and PluginRoot is where it runs from.
+	TapFilesPlugin plugin.Plugin
+	PluginRoot     string
+
 	// Manifests loads a release's manifest, for regenerating the formula.
 	Manifests func(ctx context.Context, tag string) (*manifest.Manifest, error)
 
@@ -62,6 +72,10 @@ type Result struct {
 	Retracted bool
 	Formulas  []string
 
+	// TapFiles are the paths a tap-files plugin rewrote, rolled back to the
+	// previous release alongside the formula.
+	TapFiles []string
+
 	// Next is the version the retraction has to be published in before it
 	// takes effect. This is the step people miss.
 	Next string
@@ -78,8 +92,9 @@ const notice = "> [!CAUTION]\n" +
 //
 // Four things happen, and only the first two are about Go: the release is
 // marked so a human reading the release page sees it, go.mod gains the
-// directive so the toolchain sees it, the formula stops pointing at it, and
-// the caller is told the version the retraction must itself be published in.
+// directive so the toolchain sees it, the tap stops pointing at it — the
+// formula, and a tap-files plugin's cask if one is pinned — and the caller is
+// told the version the retraction must itself be published in.
 func Run(ctx context.Context, o Options) (*Result, error) {
 	logf := o.Logf
 	if logf == nil {
@@ -105,7 +120,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	if err := o.editGoMod(result, logf); err != nil {
 		return nil, err
 	}
-	if err := o.revertFormula(ctx, result, logf); err != nil {
+	if err := o.revertTap(ctx, result, logf); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -169,17 +184,18 @@ func (o Options) editGoMod(result *Result, logf func(string, ...any)) error {
 	return nil
 }
 
-// revertFormula points the tap back at the previous release.
+// revertTap points the tap back at the previous release: the formula, and a
+// tap-files plugin's cask if one is pinned.
 //
-// Regenerated from that release's own manifest rather than from anything kept
-// locally: the digests have to be the ones that release published, and they
-// are recorded exactly once, in its letsgo.json.
-func (o Options) revertFormula(ctx context.Context, result *Result, logf func(string, ...any)) error {
+// Both are regenerated from that release's own manifest rather than from
+// anything kept locally: the digests have to be the ones that release
+// published, and they are recorded exactly once, in its letsgo.json.
+func (o Options) revertTap(ctx context.Context, result *Result, logf func(string, ...any)) error {
 	if o.Tap == (github.Repo{}) || o.TapAPI == nil || o.Manifests == nil {
 		return nil
 	}
 	if o.Previous == "" {
-		logf("no earlier release to roll the formula back to; the tap still points at %s", o.Tag)
+		logf("no earlier release to roll the tap back to; it still points at %s", o.Tag)
 		return nil
 	}
 
@@ -195,6 +211,24 @@ func (o Options) revertFormula(ctx context.Context, result *Result, logf func(st
 		}
 		logf("%s %s in %s (back to %s)", published.Status, published.Path, o.Tap, o.Previous)
 		result.Formulas = append(result.Formulas, published.Path)
+	}
+
+	if o.TapFilesPlugin.Command == "" {
+		return nil
+	}
+	in := release.TapFilesInputFromManifest(m, o.Repo, o.Tap, o.Caveats)
+	files, err := release.RunTapFiles(ctx, o.TapFilesPlugin, o.PluginRoot, in)
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		published, err := brew.PublishFile(ctx, o.TapAPI, o.Tap, f.Path, []byte(f.Content),
+			fmt.Sprintf("%s %s", o.Project, m.Version))
+		if err != nil {
+			return err
+		}
+		logf("%s %s in %s (back to %s)", published.Status, published.Path, o.Tap, o.Previous)
+		result.TapFiles = append(result.TapFiles, published.Path)
 	}
 	return nil
 }
