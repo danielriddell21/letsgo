@@ -40,7 +40,11 @@ func tapClientFor(client *github.Client, tapToken, token string) *github.Client 
 // a formula installs one archive per platform, so `alpha` and `beta` cannot
 // share one, and `Formula/alpha.rb` beside `Formula/beta.rb` is what a tap is
 // shaped to hold anyway.
-func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api brew.FileAPI, client *github.Client, repo github.Repo) error {
+//
+// info is what planAndBuild already read from the forge for the tap-files
+// hook; passed in rather than read again so the description is asked for
+// once, not once per publisher.
+func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api brew.FileAPI, repo github.Repo, info *github.RepoInfo) error {
 	if p.Tap == (github.Repo{}) {
 		return nil
 	}
@@ -58,8 +62,6 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 		fmt.Printf("  ! no formula for variant %s: a variant's package is the repository's to choose\n",
 			strings.Join(names, ", "))
 	}
-
-	info := describeRepo(ctx, client, repo)
 
 	for _, formula := range formulas(p, result, repo, info) {
 		published, err := brew.Publish(ctx, api, p.Tap, formula)

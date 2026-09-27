@@ -99,7 +99,7 @@ func TestBuildProducesACompleteRelease(t *testing.T) {
 	p := fixture(t)
 	dir := t.TempDir()
 
-	result, err := release.Build(context.Background(), p, dir, "0.1.0", nil)
+	result, err := release.Build(context.Background(), p, dir, "0.1.0", nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestDisableSBOMOmitsItEverywhere(t *testing.T) {
 	p := fixture(t, "disable sbom")
 	dir := t.TempDir()
 
-	result, err := release.Build(context.Background(), p, dir, "0.1.0", nil)
+	result, err := release.Build(context.Background(), p, dir, "0.1.0", nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestManifestDigestsMatchTheFilesOnDisk(t *testing.T) {
 	p := fixture(t)
 	dir := t.TempDir()
 
-	result, err := release.Build(context.Background(), p, dir, "0.1.0", nil)
+	result, err := release.Build(context.Background(), p, dir, "0.1.0", nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -212,7 +212,7 @@ func TestChecksumFileCoversEverythingElse(t *testing.T) {
 	p := fixture(t)
 	dir := t.TempDir()
 
-	result, err := release.Build(context.Background(), p, dir, "0.1.0", nil)
+	result, err := release.Build(context.Background(), p, dir, "0.1.0", nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -255,11 +255,11 @@ func TestChecksumFileCoversEverythingElse(t *testing.T) {
 func TestBuildIsReproducible(t *testing.T) {
 	p := fixture(t)
 
-	first, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil)
+	first, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil)
+	second, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestBuildRefusesAFailedPlan(t *testing.T) {
 	p := fixture(t)
 	p.Checks = append(p.Checks, plan.Check{Name: "invented", Status: plan.Fail, Detail: "for the test"})
 
-	if _, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil); err == nil {
+	if _, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil, nil); err == nil {
 		t.Error("Build proceeded despite a failed gate")
 	}
 }
@@ -315,7 +315,7 @@ func TestBuildRecordsTapFiles(t *testing.T) {
 	pin := caskFixturePlugin(t, "Casks/demo.rb", "cask demo")
 	p := fixture(t, "brew you/tap", pin)
 
-	result, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil)
+	result, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestBuildFailsOnAnInvalidTapFilePath(t *testing.T) {
 	pin := caskFixturePlugin(t, "../Formula/x.rb", "x")
 	p := fixture(t, "brew you/tap", pin)
 
-	if _, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil); err == nil ||
+	if _, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil, nil); err == nil ||
 		!strings.Contains(err.Error(), "not a valid tap path") {
 		t.Errorf("err = %v", err)
 	}

@@ -15,10 +15,11 @@ func TestLookupMissesAnUnknownPlugin(t *testing.T) {
 	}
 }
 
-// letsgo-cask reads a finished release; it has no hook to answer.
-func TestKnownStandalonePluginHasNoHook(t *testing.T) {
+// letsgo-cask answers tap-files: what else belongs in the tap beside the
+// formula core writes on its own.
+func TestLookupFindsCasksHook(t *testing.T) {
 	got, ok := Lookup("letsgo-cask")
-	if !ok || got.Hook != "" {
-		t.Errorf("Lookup(letsgo-cask) = %+v, %v, want an empty hook", got, ok)
+	if !ok || got.Hook != HookTapFiles {
+		t.Errorf("Lookup(letsgo-cask) = %+v, %v, want %s", got, ok, HookTapFiles)
 	}
 }

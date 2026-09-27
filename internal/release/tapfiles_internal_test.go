@@ -74,7 +74,7 @@ func TestApplyTapFilesPluginNoOpWhenUnpinned(t *testing.T) {
 	p := basePlan(t)
 	p.Plugins = map[plugin.Hook]plugin.Plugin{}
 
-	files, err := applyTapFilesPlugin(context.Background(), p, nil)
+	files, err := applyTapFilesPlugin(context.Background(), p, nil, nil)
 	if err != nil || files != nil {
 		t.Errorf("applyTapFilesPlugin = %v, %v, want nil, nil", files, err)
 	}
@@ -124,7 +124,7 @@ func TestApplyTapFilesPluginFails(t *testing.T) {
 				p.Tap = github.Repo{}
 			}
 
-			if _, err := applyTapFilesPlugin(context.Background(), p, nil); err == nil ||
+			if _, err := applyTapFilesPlugin(context.Background(), p, nil, nil); err == nil ||
 				!strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v", err)
 			}
@@ -146,7 +146,9 @@ echo '{"files":[{"path":"Casks/gambit-gui.rb","content":"cask \"gambit-gui\""}]}
 		},
 	}
 
-	files, err := applyTapFilesPlugin(context.Background(), p, artifacts)
+	files, err := applyTapFilesPlugin(context.Background(), p, artifacts, &github.RepoInfo{
+		Description: "a gambit", License: "MIT", Homepage: "https://gambit.example",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,6 +163,9 @@ echo '{"files":[{"path":"Casks/gambit-gui.rb","content":"cask \"gambit-gui\""}]}
 	for _, want := range []string{
 		`"project":"gambit"`, `"version":"1.2.0"`, `"tag":"v1.2.0"`,
 		`"repo":"you/gambit"`, `"tap":"you/homebrew-tap"`, `"caveats":"a caveat"`,
+		// Description, licence and homepage come from the repository, not a
+		// flag: IP-11's whole point.
+		`"description":"a gambit"`, `"license":"MIT"`, `"homepage":"https://gambit.example"`,
 		`"archive":"gambit-gui_1.2.0_darwin_arm64.tar.gz"`,
 		`"sha256":"` + strings.Repeat("a", 64) + `"`,
 		`"url":"https://github.com/you/gambit/releases/download/v1.2.0/gambit-gui_1.2.0_darwin_arm64.tar.gz"`,

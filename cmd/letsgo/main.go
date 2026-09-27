@@ -222,7 +222,7 @@ func runBuild(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	_, dir, result, err := planAndBuild(ctx, planBuildOptions{
+	_, dir, result, _, err := planAndBuild(ctx, planBuildOptions{
 		Out:         *out,
 		Plan:        plan.Options{Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty},
 		FailureNote: "nothing was built",
@@ -269,9 +269,15 @@ func runRelease(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
+	tokenValue, _ := plan.Token(*token)
+	client := github.New(tokenValue)
+	client.UserAgent = "letsgo/" + version
+
 	// A rehearsal needs no forge and no token, so the gates that check for
-	// them are not run.
-	p, dir, result, err := planAndBuild(ctx, planBuildOptions{
+	// them are not run. The repository's description and licence are read
+	// regardless — a tap-files plugin's cask needs them exactly as a formula
+	// does, and a rehearsal has to reach every decision a real run reaches.
+	p, dir, result, info, err := planAndBuild(ctx, planBuildOptions{
 		Out: *out,
 		Plan: plan.Options{
 			Dir: ".", Publish: !*snapshot, Token: *token, TapToken: *tapToken, Snapshot: *snapshot,
@@ -280,15 +286,17 @@ func runRelease(args []string) error {
 		},
 		FailureNote: "nothing was built or published",
 		Started:     started,
+		Describe: func(p *plan.Plan) *github.RepoInfo {
+			if p.Tap == (github.Repo{}) || !p.HasRepo {
+				return nil
+			}
+			return describeRepo(ctx, client, github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name})
+		},
 	})
 	if err != nil {
 		return err
 	}
 	fmt.Printf("\n  built %d files\n", len(result.Files))
-
-	tokenValue, _ := plan.Token(*token)
-	client := github.New(tokenValue)
-	client.UserAgent = "letsgo/" + version
 
 	// The tap gets its own client, so that the credential which can write to
 	// another repository need not be one that can also write to this one. They
@@ -341,7 +349,7 @@ func runRelease(args []string) error {
 
 	// After publication, because a formula names download URLs that only
 	// exist once the assets are attached.
-	if err := publishTap(ctx, p, result, tapAPI, client, repo); err != nil {
+	if err := publishTap(ctx, p, result, tapAPI, repo, info); err != nil {
 		return err
 	}
 
@@ -373,6 +381,11 @@ type planBuildOptions struct {
 	FailureNote string
 
 	Started time.Time
+
+	// Describe reads the repository's description, licence and homepage once
+	// the plan is known to have one, for a tap-files plugin's cask. Nil skips
+	// it \u2014 `letsgo build` never touches the network.
+	Describe func(p *plan.Plan) *github.RepoInfo
 }
 
 // planAndBuild resolves a plan, prints its report, and builds it.
@@ -380,30 +393,35 @@ type planBuildOptions struct {
 // Shared so that what `letsgo build` produces locally is what `letsgo release`
 // uploads, decided by the same code rather than by two sequences that agree
 // today.
-func planAndBuild(ctx context.Context, o planBuildOptions) (*plan.Plan, string, *release.Result, error) {
+func planAndBuild(ctx context.Context, o planBuildOptions) (*plan.Plan, string, *release.Result, *github.RepoInfo, error) {
 	p, err := plan.Resolve(ctx, o.Plan)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("letsgo: %w", err)
+		return nil, "", nil, nil, fmt.Errorf("letsgo: %w", err)
 	}
 	p.Report(os.Stdout, false)
 
 	if !p.OK() {
 		fmt.Printf("\n  plan failed in %s \u00b7 %s\n", took(o.Started), o.FailureNote)
-		return nil, "", nil, errPlanFailed
+		return nil, "", nil, nil, errPlanFailed
 	}
 
 	dir, err := filepath.Abs(o.Out)
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("letsgo: %w", err)
+		return nil, "", nil, nil, fmt.Errorf("letsgo: %w", err)
 	}
 
-	result, err := release.Build(ctx, p, dir, version, func(format string, args ...any) {
+	var info *github.RepoInfo
+	if o.Describe != nil {
+		info = o.Describe(p)
+	}
+
+	result, err := release.Build(ctx, p, dir, version, info, func(format string, args ...any) {
 		fmt.Printf("    ! "+format+"\n", args...)
 	})
 	if err != nil {
-		return nil, "", nil, fmt.Errorf("letsgo: %w", err)
+		return nil, "", nil, nil, fmt.Errorf("letsgo: %w", err)
 	}
-	return p, dir, result, nil
+	return p, dir, result, info, nil
 }
 
 // reportPublished summarises what reached the forge.

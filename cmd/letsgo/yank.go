@@ -14,6 +14,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/yank"
 )
@@ -73,7 +74,8 @@ func runYank(args []string) error {
 	}
 
 	if !*keepTap {
-		options.Tap, options.TapAPI = tapFor(module.Dir, tapClientFor(client, *tapToken, *token))
+		options.Tap, options.TapAPI, options.TapFilesPlugin, options.PluginRoot =
+			tapFor(module.Dir, tapClientFor(client, *tapToken, *token))
 	}
 
 	reportYank(tag, repo, previous, options)
@@ -101,18 +103,19 @@ func previousRelease(ctx context.Context, client *github.Client, repo github.Rep
 	return yank.PreviousOf(tags, tag), nil
 }
 
-// tapFor reads the configured Homebrew tap, if there is one. A malformed
-// config is not worth failing a retraction over: the formula is the least
-// important of the four things yank does.
+// tapFor reads the configured Homebrew tap, if there is one, and the
+// tap-files plugin pinned alongside it. A malformed config is not worth
+// failing a retraction over: the tap is the least important of the four
+// things yank does.
 //
 // The client is the tap's rather than the release's, for the same reason the
 // release path separates them: rolling a formula back writes to the tap only.
-func tapFor(moduleDir string, client *github.Client) (github.Repo, brew.FileAPI) {
+func tapFor(moduleDir string, client *github.Client) (github.Repo, brew.FileAPI, plugin.Plugin, string) {
 	p, err := plan.Resolve(context.Background(), plan.Options{Dir: moduleDir, Snapshot: true, AllowDirty: true})
 	if err != nil || p.Tap == (github.Repo{}) {
-		return github.Repo{}, nil
+		return github.Repo{}, nil, plugin.Plugin{}, ""
 	}
-	return p.Tap, client
+	return p.Tap, client, p.Plugins[plugin.HookTapFiles], p.RootDir
 }
 
 func reportYank(tag string, repo github.Repo, previous string, o yank.Options) {

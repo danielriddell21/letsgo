@@ -102,7 +102,7 @@ func buildRelease(t *testing.T) *published {
 	}
 
 	dist := t.TempDir()
-	result, err := release.Build(context.Background(), p, dist, "test", nil)
+	result, err := release.Build(context.Background(), p, dist, "test", nil, nil)
 	if err != nil {
 		t.Fatalf("release.Build: %v", err)
 	}

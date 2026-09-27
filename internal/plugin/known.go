@@ -31,7 +31,8 @@ var Known = []KnownPlugin{
 	},
 	{
 		Command: "letsgo-cask",
-		Summary: "writes a Homebrew cask from a published release",
+		Hook:    HookTapFiles,
+		Summary: "writes a Homebrew cask alongside the formula",
 	},
 }
 

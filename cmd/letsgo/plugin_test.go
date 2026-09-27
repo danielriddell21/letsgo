@@ -16,6 +16,16 @@ import (
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
 
+// withStandalonePlugin temporarily adds a known plugin that answers no hook,
+// so the reporting that treats one specially can be exercised even though
+// nothing in the real catalogue is like this today.
+func withStandalonePlugin(t *testing.T, command string) {
+	t.Helper()
+	orig := plugin.Known
+	plugin.Known = append(append([]plugin.KnownPlugin{}, orig...), plugin.KnownPlugin{Command: command})
+	t.Cleanup(func() { plugin.Known = orig })
+}
+
 func TestSplitPluginRef(t *testing.T) {
 	for _, tc := range []struct{ ref, name, version string }{
 		{"letsgo-multi", "letsgo-multi", ""},
@@ -93,11 +103,14 @@ func TestDescribePinUsesTheCatalogue(t *testing.T) {
 			"plugin ldflags letsgo-env v0.2.0", "",
 		},
 		{
-			"reports a standalone plugin", "letsgo-cask", "",
+			"reports a standalone plugin", "letsgo-standalone", "",
 			"does not answer a hook", "pin it in letsgo.mod",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.plugin == "letsgo-standalone" {
+				withStandalonePlugin(t, tc.plugin)
+			}
 			t.Chdir(t.TempDir())
 			if tc.config != "" {
 				write(t, "letsgo.mod", tc.config)
@@ -276,6 +289,8 @@ func TestListPluginsWithNoPins(t *testing.T) {
 // without needing a letsgo.mod at all: it lists what letsgo publishes, not
 // what this repository pins.
 func TestListAvailablePluginsListsTheCatalogue(t *testing.T) {
+	withStandalonePlugin(t, "letsgo-standalone")
+
 	var out bytes.Buffer
 	if err := listAvailablePlugins(&out); err != nil {
 		t.Fatal(err)
@@ -285,8 +300,11 @@ func TestListAvailablePluginsListsTheCatalogue(t *testing.T) {
 	if !strings.Contains(got, "archive-layout") || !strings.Contains(got, "letsgo-multi") {
 		t.Errorf("out = %q, want letsgo-multi under archive-layout", got)
 	}
-	if !strings.Contains(got, "(standalone)") || !strings.Contains(got, "letsgo-cask") {
-		t.Errorf("out = %q, want letsgo-cask marked standalone", got)
+	if !strings.Contains(got, "tap-files") || !strings.Contains(got, "letsgo-cask") {
+		t.Errorf("out = %q, want letsgo-cask under tap-files", got)
+	}
+	if !strings.Contains(got, "(standalone)") || !strings.Contains(got, "letsgo-standalone") {
+		t.Errorf("out = %q, want letsgo-standalone marked standalone", got)
 	}
 }
 
