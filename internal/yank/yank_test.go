@@ -193,6 +193,14 @@ func TestPreviousOfIgnoresAnotherScopesTags(t *testing.T) {
 	}
 }
 
+// A tag can carry the scope's prefix and still not parse as a version
+// (MatchesTag only checks for a leading digit, not a full semver).
+func TestPreviousOfRejectsATargetThatDoesNotParse(t *testing.T) {
+	if got := yank.PreviousOf([]string{"v1.0.0"}, "v1", ""); got != "" {
+		t.Errorf("PreviousOf = %q, want empty for an unparseable target", got)
+	}
+}
+
 func TestNextAfterKeepsTheScopePrefix(t *testing.T) {
 	if got := yank.NextAfter("v1.2.3", ""); got != "v1.2.4" {
 		t.Errorf("NextAfter = %q, want v1.2.4", got)
@@ -203,6 +211,10 @@ func TestNextAfterKeepsTheScopePrefix(t *testing.T) {
 	// A tag outside the given scope has no next version in it.
 	if got := yank.NextAfter("v1.2.3", "services/api/"); got != "" {
 		t.Errorf("NextAfter = %q, want empty", got)
+	}
+	// MatchesTag only checks for a leading digit, not a full semver.
+	if got := yank.NextAfter("v1", ""); got != "" {
+		t.Errorf("NextAfter = %q, want empty for an unparseable tag", got)
 	}
 }
 
