@@ -66,45 +66,38 @@ func TestModulePathIgnoresSimilarDirectives(t *testing.T) {
 }
 
 func TestLocalReplace(t *testing.T) {
-	cases := map[string]struct {
-		goMod      string
-		wantModule string
-		wantDir    string
-	}{
-		"no replace": {
-			"module example.com/foo\n", "", "",
-		},
-		"module replacement is not local": {
-			"module example.com/foo\nreplace example.com/bar => example.com/baz v1.2.3\n", "", "",
-		},
-		"relative path is local": {
-			"module example.com/foo\nreplace example.com/bar => ../bar\n", "example.com/bar", "../bar",
-		},
-		"absolute path is local": {
-			"module example.com/foo\nreplace example.com/bar => /home/me/bar\n", "example.com/bar", "/home/me/bar",
-		},
-		"old side carries a version": {
-			"module example.com/foo\nreplace example.com/bar v1.0.0 => ../bar\n", "example.com/bar", "../bar",
-		},
-		"block form": {
-			"module example.com/foo\nreplace (\n\texample.com/bar => ../bar\n)\n", "example.com/bar", "../bar",
-		},
+	assertReplace := func(t *testing.T, goMod, wantModule, wantDir string) {
+		t.Helper()
+		dir := t.TempDir()
+		write(t, dir, "go.mod", goMod)
+
+		module, replacement, err := LocalReplace(filepath.Join(dir, "go.mod"))
+		if err != nil {
+			t.Fatalf("LocalReplace: %v", err)
+		}
+		if module != wantModule || replacement != wantDir {
+			t.Errorf("LocalReplace = %q, %q, want %q, %q", module, replacement, wantModule, wantDir)
+		}
 	}
 
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			write(t, dir, "go.mod", tc.goMod)
-
-			module, replacement, err := LocalReplace(filepath.Join(dir, "go.mod"))
-			if err != nil {
-				t.Fatalf("LocalReplace: %v", err)
-			}
-			if module != tc.wantModule || replacement != tc.wantDir {
-				t.Errorf("LocalReplace = %q, %q, want %q, %q", module, replacement, tc.wantModule, tc.wantDir)
-			}
-		})
-	}
+	t.Run("no replace", func(t *testing.T) {
+		assertReplace(t, "module example.com/foo\n", "", "")
+	})
+	t.Run("module replacement is not local", func(t *testing.T) {
+		assertReplace(t, "module example.com/foo\nreplace example.com/bar => example.com/baz v1.2.3\n", "", "")
+	})
+	t.Run("relative path is local", func(t *testing.T) {
+		assertReplace(t, "module example.com/foo\nreplace example.com/bar => ../bar\n", "example.com/bar", "../bar")
+	})
+	t.Run("absolute path is local", func(t *testing.T) {
+		assertReplace(t, "module example.com/foo\nreplace example.com/bar => /home/me/bar\n", "example.com/bar", "/home/me/bar")
+	})
+	t.Run("old side carries a version", func(t *testing.T) {
+		assertReplace(t, "module example.com/foo\nreplace example.com/bar v1.0.0 => ../bar\n", "example.com/bar", "../bar")
+	})
+	t.Run("block form", func(t *testing.T) {
+		assertReplace(t, "module example.com/foo\nreplace (\n\texample.com/bar => ../bar\n)\n", "example.com/bar", "../bar")
+	})
 }
 
 func TestFindModuleWalksUpward(t *testing.T) {

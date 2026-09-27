@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -59,15 +60,9 @@ func TestEnvUsesAFixedPath(t *testing.T) {
 func TestEnvDisablesWorkspaceMode(t *testing.T) {
 	t.Setenv("GOWORK", "/some/repo/go.work")
 
-	for _, entry := range Env(Host(), "") {
-		if key, value, ok := strings.Cut(entry, "="); ok && strings.EqualFold(key, "GOWORK") {
-			if value != "off" {
-				t.Errorf("GOWORK = %q, want off", value)
-			}
-			return
-		}
+	if !slices.Contains(Env(Host(), ""), "GOWORK=off") {
+		t.Errorf("GOWORK=off is not in the build environment: %v", Env(Host(), ""))
 	}
-	t.Error("GOWORK is not set in the build environment")
 }
 
 // The Go toolchain is chosen by PATH: setup-go, gvm, asdf and mise all work
