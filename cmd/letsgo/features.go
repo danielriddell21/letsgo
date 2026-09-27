@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/feature"
+	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
 func runFeatures(args []string) error {
@@ -18,17 +21,47 @@ func runFeatures(args []string) error {
 	return listFeatures(os.Stdout)
 }
 
-// listFeatures prints the catalogue: what each feature is called, its
-// default state, and how a repository would change it.
-//
-// This is the catalogue only. Nothing here yet reads letsgo.mod, so every
-// feature is shown at its default — resolving a repository's own
-// disable/require directives is a later slice.
+// listFeatures prints the catalogue: what each feature is called, its state
+// in this repository, where that state came from, and how to change it.
 func listFeatures(w io.Writer) error {
+	disabled, err := configuredDisabled()
+	if err != nil {
+		return err
+	}
+	set := feature.Resolve(disabled)
+
 	for _, f := range feature.All {
-		fmt.Fprintf(w, "%-14s %-9s %-3s %s\n", f.Name, f.Kind, onOff(f.Default), changeHint(f))
+		on := set.On(f.Name)
+		from := "default"
+		if on != f.Default {
+			from = plan.ConfigFile
+		}
+		fmt.Fprintf(w, "%-14s %-9s %-3s %-11s %s\n", f.Name, f.Kind, onOff(on), from, changeHint(f))
 	}
 	return nil
+}
+
+// configuredDisabled reads the repository's own disable directive, or none
+// when there is no config file: zero-config is the primary path, not a
+// problem.
+func configuredDisabled() ([]string, error) {
+	data, err := os.ReadFile(plan.ConfigFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("letsgo: reading %s: %w", plan.ConfigFile, err)
+	}
+
+	file, err := config.Parse(filepath.Base(plan.ConfigFile), data)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := config.Decode(file)
+	if err != nil {
+		return nil, err
+	}
+	return cfg.Disabled, nil
 }
 
 func onOff(on bool) string {

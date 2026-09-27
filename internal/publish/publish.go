@@ -205,7 +205,7 @@ func ensureRelease(ctx context.Context, o Options, result *Result, logf func(str
 	}
 
 	input := o.Release
-	if o.Notes == NotesAppend && strings.TrimSpace(existing.Body) != "" {
+	if o.Notes == NotesAppend && strings.TrimSpace(existing.Body) != "" && strings.TrimSpace(o.Release.Body) != "" {
 		input.Body = strings.TrimRight(existing.Body, "\n") + "\n\n" + o.Release.Body
 		result.AppendedNotes = true
 	}

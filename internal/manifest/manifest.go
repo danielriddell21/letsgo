@@ -74,6 +74,19 @@ type Manifest struct {
 	// at what was built, which is the one question a mutable tag cannot answer
 	// on its own.
 	Images []Image `json:"images,omitempty"`
+
+	// Features records departures from the defaults: which optional
+	// behaviours this release turned off or made strict. Nil when everything
+	// ran at its default, so a consumer can tell an opt-out apart from an
+	// older letsgo that predates this field.
+	Features *Features `json:"features,omitempty"`
+}
+
+// Features is a release's departures from the feature defaults
+// (internal/feature).
+type Features struct {
+	Disabled []string `json:"disabled,omitempty"`
+	Required []string `json:"required,omitempty"`
 }
 
 // Image is one published container image.

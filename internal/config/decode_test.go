@@ -276,6 +276,47 @@ func TestBrewDirective(t *testing.T) {
 	}
 }
 
+func TestDisableDirective(t *testing.T) {
+	cfg := decode(t, "disable sbom changelog\ndisable proxy-warm\n")
+	if strings.Join(cfg.Disabled, ",") != "sbom,changelog,proxy-warm" {
+		t.Errorf("Disabled = %q", cfg.Disabled)
+	}
+
+	// Repeating a name is a formatting slip, not a second feature.
+	cfg = decode(t, "disable sbom\ndisable sbom\n")
+	if len(cfg.Disabled) != 1 {
+		t.Errorf("Disabled = %q, want one entry", cfg.Disabled)
+	}
+}
+
+func TestDisableDirectiveRejects(t *testing.T) {
+	for _, in := range []string{
+		"disable\n",
+		"disable nope\n",
+		// Integrity: the error says so rather than merely refusing.
+		"disable reproducible\n",
+		"disable source\n",
+		"disable tag-check\n",
+		// Enabled by their own directive, not by a second switch.
+		"disable brew\n",
+		"disable image\n",
+		"disable budget\n",
+	} {
+		if _, err := Decode(parse(t, in)); err == nil {
+			t.Errorf("%q should not have parsed", in)
+		}
+	}
+}
+
+// A typo should point at the feature it probably meant, the same courtesy an
+// unknown directive gets.
+func TestDisableDirectiveSuggestsAName(t *testing.T) {
+	_, err := Decode(parse(t, "disable sbmo\n"))
+	if err == nil || !strings.Contains(err.Error(), `did you mean "sbom"`) {
+		t.Errorf("err = %v, want a suggestion for sbom", err)
+	}
+}
+
 func TestBrewDirectiveRejects(t *testing.T) {
 	for _, in := range []string{
 		"brew\n",

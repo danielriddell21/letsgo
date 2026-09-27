@@ -27,6 +27,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/oci"
@@ -78,6 +79,12 @@ type Options struct {
 	// AllowBreaking publishes an incompatible API change without a major
 	// version bump.
 	AllowBreaking bool
+
+	// DisableProxyWarm skips priming the module proxy for this run only. It
+	// means the same thing as `disable proxy-warm` in letsgo.mod, and is
+	// recorded in the plan and the manifest the same way, so `--no-proxy-warm`
+	// is indistinguishable from a repository that always disables it.
+	DisableProxyWarm bool
 }
 
 // Status is the outcome of one check.
@@ -485,6 +492,11 @@ type Plan struct {
 	Config     *config.Config
 	ConfigPath string
 
+	// Features are the departures from the defaults this release resolved,
+	// from letsgo.mod's `disable` directive and any one-run flag that means
+	// the same thing.
+	Features feature.Set
+
 	Project  string
 	Version  string
 	Tag      string
@@ -583,6 +595,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	// move it: `module web` says the go.mod to build is not the one beside
 	// letsgo.mod.
 	p.loadConfig(root.Dir)
+	p.resolveFeatures(opts)
 	p.resolvePlugins()
 	p.resolveModule()
 	p.resolveProject()
@@ -662,6 +675,11 @@ func TapToken(override, tokenOverride string) (token, source string) {
 // "nothing in this binary can execute code with a known advisory against it".
 // That is checkable, actionable, and rare enough to be worth stopping for.
 func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
+	if !p.Features.On("vulncheck") {
+		p.add("vulnerabilities", Skip, "disabled by config")
+		return
+	}
+
 	found, err := gate.Vulncheck(ctx, p.Module.Dir)
 
 	switch {
@@ -693,6 +711,10 @@ func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 	p.add("vulnerabilities", Fail, "%s", strings.Join(lines, "\n"))
 }
 
+// apiCompatibility is the check name every step of checkAPICompatibility
+// reports under.
+const apiCompatibility = "api compatibility"
+
 // checkAPICompatibility refuses a release whose version promises more
 // compatibility than its API delivers.
 //
@@ -701,20 +723,24 @@ func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 // import path, and nothing enforces it, so the mistake is made quietly and
 // found by other people.
 func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
+	if !p.Features.On("api-gate") {
+		p.add(apiCompatibility, Skip, "disabled by config")
+		return
+	}
 	if p.Tag == "" {
-		p.add("api compatibility", Skip, "not a tagged release")
+		p.add(apiCompatibility, Skip, "not a tagged release")
 		return
 	}
 
 	previous, err := discover.PreviousTag(ctx, p.RootDir)
 	if err != nil || previous == "" {
-		p.add("api compatibility", Skip, "no earlier release to compare against")
+		p.add(apiCompatibility, Skip, "no earlier release to compare against")
 		return
 	}
 
 	old, cleanup, err := checkoutTag(ctx, p.RootDir, previous)
 	if err != nil {
-		p.add("api compatibility", Warn, "could not check out %s: %v", previous, err)
+		p.add(apiCompatibility, Warn, "could not check out %s: %v", previous, err)
 		return
 	}
 	defer cleanup()
@@ -722,34 +748,34 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 	changes, err := gate.APIDiff(ctx, old, p.Module.Dir)
 	switch {
 	case errors.Is(err, gate.ErrToolMissing), errors.Is(err, gate.ErrNothingExported):
-		p.add("api compatibility", Skip, "%v", err)
+		p.add(apiCompatibility, Skip, "%v", err)
 		return
 	case err != nil:
-		p.add("api compatibility", Warn, "could not be checked: %v", err)
+		p.add(apiCompatibility, Warn, "could not be checked: %v", err)
 		return
 	}
 	p.APIChanges = changes
 
 	breaking := gate.Incompatibles(changes)
 	if len(breaking) == 0 {
-		p.add("api compatibility", Pass, "the exported API is backward compatible with %s", previous)
+		p.add(apiCompatibility, Pass, "the exported API is backward compatible with %s", previous)
 		return
 	}
 
 	// A major bump is exactly what an incompatible change calls for, so
 	// making one is the correct outcome rather than a problem.
 	if bumpBetween(previous, p.Tag) == "major" {
-		p.add("api compatibility", Pass, "%d incompatible change(s), and %s is a major release",
+		p.add(apiCompatibility, Pass, "%d incompatible change(s), and %s is a major release",
 			len(breaking), p.Tag)
 		return
 	}
 
 	if opts.AllowBreaking {
-		p.add("api compatibility", Warn, "%s\naccepted with --allow-breaking", describe(breaking))
+		p.add(apiCompatibility, Warn, "%s\naccepted with --allow-breaking", describe(breaking))
 		return
 	}
 
-	p.add("api compatibility", Fail,
+	p.add(apiCompatibility, Fail,
 		"%s is not a major release, but the API is not backward compatible with %s\n%s\n%s",
 		p.Tag, previous, describe(breaking),
 		"a breaking change needs a major version and a matching /vN module path\noverride with --allow-breaking")
@@ -1113,6 +1139,32 @@ func (p *Plan) loadConfig(moduleDir string) {
 
 	p.Config, p.ConfigPath = cfg, path
 	p.note("config", ConfigFile, "repository root")
+}
+
+// resolveFeatures folds letsgo.mod's `disable` directive together with any
+// one-run flag that means the same thing, so the rest of the plan has one
+// place to ask whether a feature is on.
+func (p *Plan) resolveFeatures(opts Options) {
+	disabled := append([]string(nil), p.Config.Disabled...)
+
+	from := ConfigFile
+	if opts.DisableProxyWarm {
+		if len(disabled) == 0 {
+			from = "--no-proxy-warm"
+		} else {
+			from += ", --no-proxy-warm"
+		}
+		disabled = append(disabled, "proxy-warm")
+	}
+
+	p.Features = feature.Resolve(disabled)
+	if len(p.Features) == 0 {
+		return
+	}
+
+	names := strings.Join(p.Features.Disabled(), ", ")
+	p.note("features", names, from)
+	p.add("features", Pass, "disabled: %s", names)
 }
 
 // resolveModule settles which module is built.

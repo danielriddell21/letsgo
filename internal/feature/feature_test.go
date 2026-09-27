@@ -83,6 +83,47 @@ func TestLookup(t *testing.T) {
 	}
 }
 
+func TestResolveAndOn(t *testing.T) {
+	s := Resolve([]string{"sbom", "proxy-warm", "sbom"})
+
+	if s.On("sbom") || s.On("proxy-warm") {
+		t.Errorf("Set = %v, want sbom and proxy-warm off", s)
+	}
+	if !s.On("changelog") {
+		t.Error("changelog should still be on")
+	}
+}
+
+func TestResolveOfNothing(t *testing.T) {
+	s := Resolve(nil)
+	if len(s) != 0 {
+		t.Errorf("Resolve(nil) = %v, want empty", s)
+	}
+	if !s.On("sbom") {
+		t.Error("an empty Set should report every feature on")
+	}
+	if len(s.Disabled()) != 0 {
+		t.Errorf("Disabled() = %v, want none", s.Disabled())
+	}
+}
+
+// Disabled is sorted, so two runs that disabled the same features in a
+// different order still record and print identically.
+func TestSetDisabledIsSorted(t *testing.T) {
+	s := Resolve([]string{"vulncheck", "api-gate", "sbom"})
+	got := s.Disabled()
+	want := []string{"api-gate", "sbom", "vulncheck"}
+
+	if len(got) != len(want) {
+		t.Fatalf("Disabled() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Disabled() = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestKindString(t *testing.T) {
 	cases := map[Kind]string{Integrity: "integrity", Gate: "gate", Output: "output", Publish: "publish"}
 	for k, want := range cases {

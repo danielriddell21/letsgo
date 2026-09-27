@@ -8,6 +8,8 @@
 // those is a bug, not a variant.
 package feature
 
+import "sort"
+
 // Kind groups a feature by what it protects, which is what a repository is
 // agreeing to give up when it turns one off.
 type Kind int
@@ -140,4 +142,37 @@ func Lookup(name string) (Feature, bool) {
 		}
 	}
 	return Feature{}, false
+}
+
+// Set is which catalogue features are disabled for a release, however that
+// was decided — a `disable` directive, or a one-run flag such as
+// `--no-proxy-warm` that means the same thing.
+type Set map[string]bool
+
+// Resolve builds a Set from the names a release disabled. Repeats are
+// harmless: this is a set, not a log of how each name was said.
+func Resolve(disabled []string) Set {
+	s := make(Set, len(disabled))
+	for _, name := range disabled {
+		s[name] = true
+	}
+	return s
+}
+
+// On reports whether a feature is on. Only meaningful for a feature whose
+// Default is true: one that defaults off is on only because its own
+// directive is present, which a Set knows nothing about.
+func (s Set) On(name string) bool {
+	return !s[name]
+}
+
+// Disabled lists every disabled name, sorted, for recording in the manifest
+// and printing in a report.
+func (s Set) Disabled() []string {
+	names := make([]string, 0, len(s))
+	for name := range s {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

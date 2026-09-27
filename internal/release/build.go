@@ -138,7 +138,9 @@ func writeMetadata(
 		build.Sum{Name: source.Name, SHA256: source.SHA256},
 		build.Sum{Name: manifest.FileName, SHA256: manifestSum},
 	)
-	sums = append(sums, build.Sum{Name: document, SHA256: documentSum})
+	if document != "" {
+		sums = append(sums, build.Sum{Name: document, SHA256: documentSum})
+	}
 	if installer != "" {
 		sums = append(sums, build.Sum{Name: installer, SHA256: installerSum})
 	}
@@ -150,7 +152,10 @@ func writeMetadata(
 	for _, a := range artifacts {
 		files = append(files, a.Archive)
 	}
-	files = append(files, source.Name, manifest.FileName, document)
+	files = append(files, source.Name, manifest.FileName)
+	if document != "" {
+		files = append(files, document)
+	}
 	if installer != "" {
 		files = append(files, installer)
 	}
@@ -179,6 +184,7 @@ func describe(
 		Source:          &manifest.Source{Archive: source.Name, SHA256: source.SHA256},
 		Modules:         mods,
 		Gates:           gates(p),
+		Features:        featuresRecord(p),
 		APIChanges:      apiChanges(p),
 		Images:          imageRecords(images),
 		Artifacts:       make([]manifest.Artifact, 0, len(artifacts)),
@@ -336,6 +342,17 @@ func apiChanges(p *plan.Plan) []manifest.APIChange {
 		})
 	}
 	return out
+}
+
+// featuresRecord carries which features this release disabled into the
+// manifest, or nil when every feature ran at its default — so an ordinary
+// release, which is most of them, adds nothing to the file.
+func featuresRecord(p *plan.Plan) *manifest.Features {
+	disabled := p.Features.Disabled()
+	if len(disabled) == 0 {
+		return nil
+	}
+	return &manifest.Features{Disabled: disabled}
 }
 
 // gates records what the release was checked against, so a consumer can see
