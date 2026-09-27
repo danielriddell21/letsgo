@@ -38,23 +38,17 @@ func layout(in testIn) (testOut, error) {
 	return testOut{Archive: in.Project}, nil
 }
 
-// call runs run with the given arguments and stdin, and returns what it wrote
-// to stdout. Both streams are swapped for pipes: the contract is what crosses
-// them, so that is what the test drives.
-func call(t *testing.T, args []string, stdin string) (string, error) {
+// withStdio runs fn with os.Args, os.Stdin and os.Stdout swapped for the
+// duration, restoring them afterwards. stdout is the caller's, so a test that
+// wants to read what was written supplies one end of a pipe.
+func withStdio(t *testing.T, args []string, stdin string, stdout *os.File, fn func()) {
 	t.Helper()
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	defer func() { _ = r.Close() }()
 
 	input, err := os.CreateTemp(t.TempDir(), "stdin")
 	if err != nil {
 		t.Fatalf("temp: %v", err)
 	}
-	// Closed explicitly, not deferred: run reads from os.Stdin before this
+	// Closed explicitly, not deferred: fn reads from os.Stdin before this
 	// function returns, and an open handle left past that point is what
 	// stops Windows from letting t.TempDir() remove the file afterwards.
 	defer func() { _ = input.Close() }()
@@ -66,10 +60,27 @@ func call(t *testing.T, args []string, stdin string) (string, error) {
 	}
 
 	oldArgs, oldIn, oldOut := os.Args, os.Stdin, os.Stdout
-	os.Args, os.Stdin, os.Stdout = args, input, w
-	runErr := run(HookArchiveLayout, layout)
+	os.Args, os.Stdin, os.Stdout = args, input, stdout
+	fn()
 	os.Args, os.Stdin, os.Stdout = oldArgs, oldIn, oldOut
+}
 
+// call runs run with the given arguments and stdin, and returns what it wrote
+// to stdout. Both streams are swapped for pipes: the contract is what crosses
+// them, so that is what the test drives.
+func call[In, Out any](t *testing.T, args []string, stdin string, hook Hook, answer func(In) (Out, error)) (string, error) {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+
+	var runErr error
+	withStdio(t, args, stdin, w, func() {
+		runErr = run(hook, answer)
+	})
 	if err := w.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
@@ -87,7 +98,7 @@ func call(t *testing.T, args []string, stdin string) (string, error) {
 }
 
 func TestRunAnswersItsHook(t *testing.T) {
-	stdout, err := call(t, []string{"letsgo-multi", "archive-layout"}, `{"project":"demo"}`)
+	stdout, err := call(t, []string{"letsgo-multi", "archive-layout"}, `{"project":"demo"}`, HookArchiveLayout, layout)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -104,7 +115,7 @@ func TestRunAnswersItsHook(t *testing.T) {
 // A plugin asked for a hook it does not implement says so, rather than
 // answering the wrong question with a plausible-looking result.
 func TestRunRefusesAnotherHook(t *testing.T) {
-	_, err := call(t, []string{"letsgo-multi", "ldflags"}, `{"project":"demo"}`)
+	_, err := call(t, []string{"letsgo-multi", "ldflags"}, `{"project":"demo"}`, HookArchiveLayout, layout)
 	if err == nil {
 		t.Fatal("expected a refusal")
 	}
@@ -118,15 +129,40 @@ func TestRunNeedsExactlyOneArgument(t *testing.T) {
 		{"letsgo-multi"},
 		{"letsgo-multi", "archive-layout", "extra"},
 	} {
-		if _, err := call(t, args, `{}`); err == nil {
+		if _, err := call(t, args, `{}`, HookArchiveLayout, layout); err == nil {
 			t.Errorf("%v should not be accepted", args)
 		}
 	}
 }
 
 func TestRunRejectsInputThatIsNotJSON(t *testing.T) {
-	if _, err := call(t, []string{"letsgo-multi", "archive-layout"}, "not json"); err == nil {
+	if _, err := call(t, []string{"letsgo-multi", "archive-layout"}, "not json", HookArchiveLayout, layout); err == nil {
 		t.Error("expected a decode failure")
+	}
+}
+
+// The answer function's own error reaches the caller unchanged: run adds
+// nothing to it, because there is nothing wrong with the hook or the wire
+// format, only with what the plugin decided.
+func TestRunPropagatesTheAnswerFunctionsError(t *testing.T) {
+	answer := func(testIn) (testOut, error) { return testOut{}, errors.New("boom") }
+	_, err := call(t, []string{"letsgo-multi", "archive-layout"}, `{}`, HookArchiveLayout, answer)
+	if err == nil || err.Error() != "boom" {
+		t.Errorf("err = %v, want boom", err)
+	}
+}
+
+type unencodable struct {
+	Ch chan int `json:"ch"`
+}
+
+// An answer that cannot be encoded is reported like any other failure, not
+// left to panic or write a truncated stdout.
+func TestRunReportsAnEncodingFailure(t *testing.T) {
+	answer := func(testIn) (unencodable, error) { return unencodable{Ch: make(chan int)}, nil }
+	_, err := call(t, []string{"letsgo-multi", "archive-layout"}, `{}`, HookArchiveLayout, answer)
+	if err == nil || !strings.Contains(err.Error(), "writing the hook's answer") {
+		t.Errorf("err = %v, want an encoding failure", err)
 	}
 }
 
@@ -202,68 +238,5 @@ func TestMainExitsNonZeroForTheWrongHook(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), string(HookLDFlags)) {
 		t.Errorf("stderr = %q, want it to name the hook asked for", stderr.String())
-	}
-}
-
-// withStdio runs fn with os.Args, os.Stdin and os.Stdout swapped for the
-// given values, restoring them afterwards.
-func withStdio(t *testing.T, args []string, stdin string, fn func(stdout *os.File)) {
-	t.Helper()
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	defer func() { _ = r.Close() }()
-
-	input, err := os.CreateTemp(t.TempDir(), "stdin")
-	if err != nil {
-		t.Fatalf("temp: %v", err)
-	}
-	defer func() { _ = input.Close() }()
-	if _, err := input.WriteString(stdin); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if _, err := input.Seek(0, 0); err != nil {
-		t.Fatalf("seek: %v", err)
-	}
-
-	oldArgs, oldIn, oldOut := os.Args, os.Stdin, os.Stdout
-	os.Args, os.Stdin, os.Stdout = args, input, w
-	fn(w)
-	os.Args, os.Stdin, os.Stdout = oldArgs, oldIn, oldOut
-	_ = w.Close()
-}
-
-// The answer function's own error reaches the caller unchanged: run adds
-// nothing to it, because there is nothing wrong with the hook or the wire
-// format, only with what the plugin decided.
-func TestRunPropagatesTheAnswerFunctionsError(t *testing.T) {
-	var runErr error
-	withStdio(t, []string{"letsgo-multi", "archive-layout"}, `{}`, func(*os.File) {
-		runErr = run(HookArchiveLayout, func(testIn) (testOut, error) {
-			return testOut{}, errors.New("boom")
-		})
-	})
-	if runErr == nil || runErr.Error() != "boom" {
-		t.Errorf("err = %v, want boom", runErr)
-	}
-}
-
-type unencodable struct {
-	Ch chan int `json:"ch"`
-}
-
-// An answer that cannot be encoded is reported like any other failure, not
-// left to panic or write a truncated stdout.
-func TestRunReportsAnEncodingFailure(t *testing.T) {
-	var runErr error
-	withStdio(t, []string{"letsgo-multi", "archive-layout"}, `{}`, func(*os.File) {
-		runErr = run(HookArchiveLayout, func(testIn) (unencodable, error) {
-			return unencodable{Ch: make(chan int)}, nil
-		})
-	})
-	if runErr == nil || !strings.Contains(runErr.Error(), "writing the hook's answer") {
-		t.Errorf("err = %v, want an encoding failure", runErr)
 	}
 }

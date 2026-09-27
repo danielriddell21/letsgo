@@ -151,19 +151,13 @@ func TestWriteAndRead(t *testing.T) {
 	}
 }
 
-// go.sum lists each module twice, once for the archive and once for its
-// go.mod. Counting lines would report double the real dependency count.
-func TestSummariseModulesCountsDistinctModules(t *testing.T) {
+// The counting and deduplication logic is the public package's own — see
+// manifest.TestSummariseModulesCountsDistinctModules — so this only holds
+// that the wrapper actually delegates to it.
+func TestSummariseModulesDelegatesToThePublicPackage(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "go.sum")
-	content := strings.Join([]string{
-		"github.com/a/b v1.0.0 h1:aaa=",
-		"github.com/a/b v1.0.0/go.mod h1:bbb=",
-		"golang.org/x/net v0.23.0 h1:ccc=",
-		"golang.org/x/net v0.23.0/go.mod h1:ddd=",
-		"golang.org/x/sys v0.1.0/go.mod h1:eee=",
-		"",
-	}, "\n")
+	content := "github.com/a/b v1.0.0 h1:aaa=\ngithub.com/a/b v1.0.0/go.mod h1:bbb=\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -172,11 +166,8 @@ func TestSummariseModulesCountsDistinctModules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mods.Count != 3 {
-		t.Errorf("Count = %d, want 3", mods.Count)
-	}
-	if len(mods.GoSumSHA256) != 64 {
-		t.Errorf("GoSumSHA256 = %q, want a sha256", mods.GoSumSHA256)
+	if mods.Count != 1 || mods.List[0].Path != "github.com/a/b" {
+		t.Errorf("mods = %+v", mods)
 	}
 }
 
