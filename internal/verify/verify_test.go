@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -299,6 +300,55 @@ func TestVerifyNeedsAManifest(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), manifest.FileName) {
 		t.Errorf("error does not explain what is missing: %v", err)
+	}
+}
+
+// With no tag given, a scoped module resolves the newest release within its
+// own prefix, not the repository's overall latest — the same distinction
+// runYank draws before picking a previous release.
+func TestVerifyWithNoTagIsScopedToThePrefix(t *testing.T) {
+	const prefix = "services/api/"
+	manifestData := []byte(fmt.Sprintf(`{"schema":%d}`, manifest.Schema))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/tags"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]github.Tag{
+				{Name: "v9.9.9"},       // a higher, unscoped decoy
+				{Name: "other/v8.0.0"}, // a different module's scope
+				{Name: "services/api/v1.0.0"},
+				{Name: "services/api/v1.2.3"}, // the scoped winner
+			})
+
+		case strings.Contains(r.URL.Path, "/releases/tags/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(github.Release{
+				ID: 1, TagName: "services/api/v1.2.3",
+				Assets: []github.Asset{{ID: 1, Name: manifest.FileName, Size: int64(len(manifestData))}},
+			})
+
+		case strings.Contains(r.URL.Path, "/releases/assets/"):
+			_, _ = w.Write(manifestData)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+
+	result, err := verify.Run(context.Background(), verify.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Prefix: prefix, WorkDir: t.TempDir(), SkipRebuild: true,
+	})
+	if err != nil {
+		t.Fatalf("verify.Run: %v", err)
+	}
+	if result.Tag != "services/api/v1.2.3" {
+		t.Errorf("Tag = %q, want the scoped module's own latest release, not the repository's overall latest", result.Tag)
 	}
 }
 

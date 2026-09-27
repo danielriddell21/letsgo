@@ -487,6 +487,10 @@ func runVerify(args []string) error {
 	if err != nil {
 		return err
 	}
+	prefix, err := scopePrefix(ctx, *repoFlag, dir)
+	if err != nil {
+		return err
+	}
 
 	workDir := *work
 	if workDir == "" {
@@ -502,7 +506,7 @@ func runVerify(args []string) error {
 	client.UserAgent = "letsgo/" + version
 
 	result, err := verify.Run(ctx, verify.Options{
-		Client: client, Repo: repo, Tag: fs.Arg(0),
+		Client: client, Repo: repo, Tag: fs.Arg(0), Prefix: prefix,
 		Dir: dir, WorkDir: workDir, SkipRebuild: *noRebuild,
 		UserAgent: "letsgo/" + version,
 	})
@@ -544,6 +548,28 @@ func targetRepo(ctx context.Context, explicit string) (github.Repo, string, erro
 		return github.Repo{}, "", err
 	}
 	return github.Repo{Owner: found.Owner, Name: found.Name}, module.Dir, nil
+}
+
+// scopePrefix resolves the module's scope prefix (see discover.Scope), so
+// "no tag given" can find the latest release within this module's own
+// scope rather than the repository's overall latest — the same distinction
+// runYank draws before picking a previous release.
+//
+// A repository named explicitly by --repo has no local module to scope by:
+// inspecting a release elsewhere always means the whole repository.
+func scopePrefix(ctx context.Context, explicit, dir string) (string, error) {
+	if explicit != "" || dir == "" {
+		return "", nil
+	}
+	git, err := discover.FindGit(ctx, dir)
+	if err != nil {
+		return "", fmt.Errorf("letsgo: %w", err)
+	}
+	scope, err := discover.NewScope(git.TopLevel, dir)
+	if err != nil {
+		return "", fmt.Errorf("letsgo: %w", err)
+	}
+	return scope.Prefix, nil
 }
 
 // runDiff compares two releases.
