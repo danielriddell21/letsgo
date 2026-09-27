@@ -65,6 +65,48 @@ func TestModulePathIgnoresSimilarDirectives(t *testing.T) {
 	}
 }
 
+func TestLocalReplace(t *testing.T) {
+	cases := map[string]struct {
+		goMod      string
+		wantModule string
+		wantDir    string
+	}{
+		"no replace": {
+			"module example.com/foo\n", "", "",
+		},
+		"module replacement is not local": {
+			"module example.com/foo\nreplace example.com/bar => example.com/baz v1.2.3\n", "", "",
+		},
+		"relative path is local": {
+			"module example.com/foo\nreplace example.com/bar => ../bar\n", "example.com/bar", "../bar",
+		},
+		"absolute path is local": {
+			"module example.com/foo\nreplace example.com/bar => /home/me/bar\n", "example.com/bar", "/home/me/bar",
+		},
+		"old side carries a version": {
+			"module example.com/foo\nreplace example.com/bar v1.0.0 => ../bar\n", "example.com/bar", "../bar",
+		},
+		"block form": {
+			"module example.com/foo\nreplace (\n\texample.com/bar => ../bar\n)\n", "example.com/bar", "../bar",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			write(t, dir, "go.mod", tc.goMod)
+
+			module, replacement, err := LocalReplace(filepath.Join(dir, "go.mod"))
+			if err != nil {
+				t.Fatalf("LocalReplace: %v", err)
+			}
+			if module != tc.wantModule || replacement != tc.wantDir {
+				t.Errorf("LocalReplace = %q, %q, want %q, %q", module, replacement, tc.wantModule, tc.wantDir)
+			}
+		})
+	}
+}
+
 func TestFindModuleWalksUpward(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "go.mod", "module example.com/foo\n")
@@ -410,5 +452,46 @@ func TestFindGit(t *testing.T) {
 
 	if prev, err := PreviousTag(ctx, dir); err != nil || prev != "v1.0.0" {
 		t.Errorf("PreviousTag = %q, %v; want v1.0.0", prev, err)
+	}
+}
+
+// A nested module's tags (e.g. "web/v1.0.0") must never answer for the root
+// module: `git describe --tags` matches any tag reachable from HEAD, so
+// without a restriction to plain version tags a root release could pick a
+// nested module's tag as its previous release and build its changelog, API
+// gate and version bump against the wrong history entirely.
+func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+
+	run("init", "-q", "-b", "main")
+	write(t, dir, "README.md", "hi\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "first")
+	run("tag", "v1.0.0")
+
+	write(t, dir, "web/go.mod", "module example.com/foo/web\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "second")
+	run("tag", "web/v1.0.0")
+
+	write(t, dir, "README.md", "changed\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "third")
+
+	ctx := context.Background()
+	if prev, err := PreviousTag(ctx, dir); err != nil || prev != "v1.0.0" {
+		t.Errorf("PreviousTag = %q, %v; want v1.0.0, not the nested module's tag", prev, err)
 	}
 }

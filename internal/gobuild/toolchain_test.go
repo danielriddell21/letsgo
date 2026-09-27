@@ -50,6 +50,26 @@ func TestEnvUsesAFixedPath(t *testing.T) {
 	}
 }
 
+// A root go.work in a monorepo is auto-detected by walking up from the build
+// directory, with no environment variable needed to trigger it — so a build
+// forced to inherit whatever the caller's GOWORK happened to be would still
+// silently substitute a sibling module from disk instead of the version
+// go.mod names. GOWORK=off has to be set unconditionally, not merely left
+// unset, to turn that detection off regardless of the caller's environment.
+func TestEnvDisablesWorkspaceMode(t *testing.T) {
+	t.Setenv("GOWORK", "/some/repo/go.work")
+
+	for _, entry := range Env(Host(), "") {
+		if key, value, ok := strings.Cut(entry, "="); ok && strings.EqualFold(key, "GOWORK") {
+			if value != "off" {
+				t.Errorf("GOWORK = %q, want off", value)
+			}
+			return
+		}
+	}
+	t.Error("GOWORK is not set in the build environment")
+}
+
 // The Go toolchain is chosen by PATH: setup-go, gvm, asdf and mise all work
 // that way, and many systems also carry an older Go in /usr/bin. Preferring a
 // system copy would silently build with a different compiler than the one the

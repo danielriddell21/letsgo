@@ -664,6 +664,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveFeatures(opts)
 	p.resolvePlugins()
 	p.resolveModule()
+	p.checkReplace()
 	p.resolveProject()
 	p.resolveVersion(ctx)
 	p.checkWorktree(opts)
@@ -1369,6 +1370,34 @@ func (p *Plan) resolveModule() {
 	p.Module = module
 	p.note("module", module.Path, ConfigFile)
 	p.add("module", Pass, "%s in %s", module.Path, p.Config.ModuleDir)
+
+	// The tag names the repository's release, not a version of this nested
+	// module — v1.2.0 is not a tag `go install module/web@v1.2.0` or the
+	// module proxy will ever recognise. Scoped tags (a prefixed tag naming
+	// this module directly) are what fixes this; until then, a warm that can
+	// only fail is skipped rather than reported as a broken release.
+	p.add("module proxy", Warn,
+		"the tag has no %s prefix, so `go install %s@version` and the proxy warm cannot resolve it",
+		p.Config.ModuleDir, module.Path)
+}
+
+// checkReplace fails a release whose go.mod replaces a dependency with a
+// local filesystem path, rather than letting the failure surface later as an
+// unrelated-looking build or reproducibility error.
+func (p *Plan) checkReplace() {
+	module, dir, err := discover.LocalReplace(filepath.Join(p.Module.Dir, "go.mod"))
+	if err != nil {
+		p.add("replace", Fail, "%v", err)
+		return
+	}
+	if module != "" {
+		p.add("replace", Fail,
+			"go.mod replaces %s with the local path %q\n"+
+				"  `go install` cannot resolve a local replacement, and the release's source archive does not contain it either",
+			module, dir)
+		return
+	}
+	p.add("replace", Pass, "no local-path replace directives")
 }
 
 func (p *Plan) resolveProject() {

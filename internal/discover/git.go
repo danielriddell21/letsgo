@@ -89,8 +89,14 @@ func FindGit(ctx context.Context, dir string) (Git, error) {
 // PreviousTag returns the most recent tag reachable from HEAD, excluding any
 // tag that points at HEAD itself. It is empty when there is no earlier tag,
 // which is the normal state for a first release.
+//
+// Matched against "v[0-9]*" rather than every tag: `git describe` otherwise
+// matches any tag reachable from HEAD, so in a repository that also carries
+// a nested module's tags (e.g. "web/v1.0.0") a root release could pick one
+// of those as its previous tag and build its changelog, API gate and bump
+// against the wrong release entirely.
 func PreviousTag(ctx context.Context, dir string) (string, error) {
-	args := []string{"describe", "--tags", "--abbrev=0"}
+	args := []string{"describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"}
 
 	if current, err := git(ctx, dir, "tag", "--points-at", "HEAD"); err == nil {
 		for _, tag := range strings.Split(current, "\n") {
