@@ -287,7 +287,7 @@ func runRelease(args []string) error {
 		FailureNote: "nothing was built or published",
 		Started:     started,
 		Describe: func(p *plan.Plan) *github.RepoInfo {
-			if p.Tap == (github.Repo{}) || !p.HasRepo {
+			if !wantsRepoInfo(p) {
 				return nil
 			}
 			return describeRepo(ctx, client, github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name})
@@ -410,10 +410,7 @@ func planAndBuild(ctx context.Context, o planBuildOptions) (*plan.Plan, string, 
 		return nil, "", nil, nil, fmt.Errorf("letsgo: %w", err)
 	}
 
-	var info *github.RepoInfo
-	if o.Describe != nil {
-		info = o.Describe(p)
-	}
+	info := repoInfoFor(o, p)
 
 	result, err := release.Build(ctx, p, dir, version, info, func(format string, args ...any) {
 		fmt.Printf("    ! "+format+"\n", args...)
@@ -422,6 +419,23 @@ func planAndBuild(ctx context.Context, o planBuildOptions) (*plan.Plan, string, 
 		return nil, "", nil, nil, fmt.Errorf("letsgo: %w", err)
 	}
 	return p, dir, result, info, nil
+}
+
+// repoInfoFor runs o.Describe when the caller set one, nil otherwise —
+// `letsgo build` never does.
+func repoInfoFor(o planBuildOptions, p *plan.Plan) *github.RepoInfo {
+	if o.Describe == nil {
+		return nil
+	}
+	return o.Describe(p)
+}
+
+// wantsRepoInfo reports whether a release should read the repository's
+// description before building: only when there is a Homebrew tap to write a
+// formula (or a tap-files plugin's cask) into, so a release with none never
+// touches the endpoint.
+func wantsRepoInfo(p *plan.Plan) bool {
+	return p.Tap != (github.Repo{}) && p.HasRepo
 }
 
 // reportPublished summarises what reached the forge.

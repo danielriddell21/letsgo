@@ -29,6 +29,44 @@ func flagSet() *flag.FlagSet {
 	return fs
 }
 
+// A release only reads the repository's description when there is a
+// Homebrew tap to write into — a formula's, or a tap-files plugin's cask.
+func TestWantsRepoInfo(t *testing.T) {
+	tap := github.Repo{Owner: "you", Name: "homebrew-tap"}
+
+	for _, tc := range []struct {
+		name string
+		p    *plan.Plan
+		want bool
+	}{
+		{"no tap", &plan.Plan{HasRepo: true}, false},
+		{"tap but no repository", &plan.Plan{Tap: tap}, false},
+		{"tap and repository", &plan.Plan{Tap: tap, HasRepo: true}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := wantsRepoInfo(tc.p); got != tc.want {
+				t.Errorf("wantsRepoInfo(%+v) = %v, want %v", tc.p, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRepoInfoForRunsDescribeWhenSet(t *testing.T) {
+	want := &github.RepoInfo{Description: "a thing"}
+	o := planBuildOptions{Describe: func(*plan.Plan) *github.RepoInfo { return want }}
+
+	if got := repoInfoFor(o, &plan.Plan{}); got != want {
+		t.Errorf("repoInfoFor = %v, want %v", got, want)
+	}
+}
+
+// `letsgo build` never touches the network, so it sets no Describe at all.
+func TestRepoInfoForNilWhenUnset(t *testing.T) {
+	if got := repoInfoFor(planBuildOptions{}, &plan.Plan{}); got != nil {
+		t.Errorf("repoInfoFor = %v, want nil", got)
+	}
+}
+
 func TestPermuteMovesFlagsAhead(t *testing.T) {
 	tests := map[string]struct {
 		in   []string

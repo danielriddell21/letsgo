@@ -74,8 +74,7 @@ func runYank(args []string) error {
 	}
 
 	if !*keepTap {
-		options.Tap, options.TapAPI, options.TapFilesPlugin, options.PluginRoot =
-			tapFor(module.Dir, tapClientFor(client, *tapToken, *token))
+		options.Tap, options.TapAPI, options.TapFilesPlugin, options.PluginRoot = tapFor(module.Dir, tapClientFor(client, *tapToken, *token))
 	}
 
 	reportYank(tag, repo, previous, options)
