@@ -188,6 +188,30 @@ func scopedModuleFixture(t *testing.T) (repoDir, moduleDir string) {
 	return repoDir, moduleDir
 }
 
+// `letsgo tag`, run from a nested module's own directory, proposes and
+// creates a tag scoped to it — its own directory as a prefix, not a bare
+// version tag that would collide with the repository's own scope.
+func TestRunTagCreatesAScopedTag(t *testing.T) {
+	repoDir, moduleDir := scopedModuleFixture(t)
+	t.Chdir(moduleDir)
+
+	if err := runTag([]string{"--yes"}); err != nil {
+		t.Fatalf("runTag: %v", err)
+	}
+
+	// The fixture's HEAD is already tagged services/api/v1.2.3, so that tag
+	// itself is excluded as "the release being made"; with nothing else
+	// reachable, this is a first release for the previous tag to find, and
+	// bump.Propose's own answer for that is v0.1.0.
+	out, err := exec.Command("git", "-C", repoDir, "tag", "--points-at", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git tag --points-at HEAD: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "services/api/v0.1.0") {
+		t.Errorf("tags at HEAD = %q, want services/api/v0.1.0 among them", out)
+	}
+}
+
 // A worktree always checks out the whole repository, so a nested module has
 // to be compared at <worktree>/relDir, never at the worktree's own root: the
 // same bug `plan.checkoutTag` had, in the command that proposes a tag rather

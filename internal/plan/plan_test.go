@@ -643,6 +643,31 @@ func TestRootReleaseIgnoresANestedModulesTag(t *testing.T) {
 	}
 }
 
+// A nested module with no tag of its own must fail naming its own prefix,
+// not the bare "no version tag" a root module would get: HEAD may well carry
+// a root tag, which is a different scope's tag, not this module's missing one.
+func TestScopedModuleWithNoTagNamesItsOwnPrefix(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("services/api/go.mod", "module github.com/you/foo/services/api\n\ngo 1.24\n")
+	r.write("services/api/main.go", "package main\n\nfunc main() {}\n")
+	r.write("services/api/letsgo.mod", "build linux/amd64\n")
+	r.git("add", ".")
+	r.git("commit", "-q", "-m", "commit")
+	r.git("tag", "v1.0.0")
+
+	p, err := plan.Resolve(context.Background(), plan.Options{Dir: filepath.Join(r.dir, "services/api")})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	c := check(t, p, "tag")
+	if c.Status != plan.Fail || !strings.Contains(c.Detail, "services/api/v") {
+		t.Errorf("check = %+v, want it to name the module's own prefix", c)
+	}
+}
+
 func TestReplaceDirective(t *testing.T) {
 	replaceCheck := func(t *testing.T, replace string) plan.Check {
 		t.Helper()
