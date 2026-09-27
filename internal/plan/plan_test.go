@@ -577,30 +577,31 @@ func TestModuleDirectiveWarnsThatTheProxyCannotResolveIt(t *testing.T) {
 	}
 }
 
-func TestLocalPathReplaceFailsThePlan(t *testing.T) {
-	r := newRepo(t)
-	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n\nreplace github.com/you/bar => ../bar\n")
-	r.write("main.go", "package main\n\nfunc main() {}\n")
-	r.commit("v1.0.0")
-
-	c := check(t, r.resolve(plan.Options{}), "replace")
-	if c.Status != plan.Fail || !strings.Contains(c.Detail, "../bar") {
-		t.Errorf("check = %+v", c)
+func TestReplaceDirective(t *testing.T) {
+	replaceCheck := func(t *testing.T, replace string) plan.Check {
+		t.Helper()
+		r := newRepo(t)
+		r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n\n"+replace+"\n")
+		r.write("main.go", "package main\n\nfunc main() {}\n")
+		r.commit("v1.0.0")
+		return check(t, r.resolve(plan.Options{}), "replace")
 	}
-}
 
-// A replacement naming a module version, rather than a filesystem path, is
-// exactly what `go install` already handles.
-func TestVersionedReplaceIsFine(t *testing.T) {
-	r := newRepo(t)
-	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n\nreplace github.com/you/bar => github.com/you/baz v1.0.0\n")
-	r.write("main.go", "package main\n\nfunc main() {}\n")
-	r.commit("v1.0.0")
+	t.Run("a local path fails the plan", func(t *testing.T) {
+		c := replaceCheck(t, "replace github.com/you/bar => ../bar")
+		if c.Status != plan.Fail || !strings.Contains(c.Detail, "../bar") {
+			t.Errorf("check = %+v", c)
+		}
+	})
 
-	c := check(t, r.resolve(plan.Options{}), "replace")
-	if c.Status != plan.Pass {
-		t.Errorf("check = %+v, want Pass", c)
-	}
+	// A replacement naming a module version, rather than a filesystem path, is
+	// exactly what `go install` already handles.
+	t.Run("a module version is fine", func(t *testing.T) {
+		c := replaceCheck(t, "replace github.com/you/bar => github.com/you/baz v1.0.0")
+		if c.Status != plan.Pass {
+			t.Errorf("check = %+v, want Pass", c)
+		}
+	})
 }
 
 func TestVersionDirectiveInjectsIntoANamedSymbol(t *testing.T) {
