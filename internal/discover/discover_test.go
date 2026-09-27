@@ -200,12 +200,12 @@ func TestNewScope(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			t.Skip("creating a symlink needs elevated privileges on Windows")
 		}
-		real := filepath.Join(t.TempDir(), "real")
-		if err := os.Mkdir(real, 0o755); err != nil {
+		actual := filepath.Join(t.TempDir(), "real")
+		if err := os.Mkdir(actual, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		link := filepath.Join(t.TempDir(), "link")
-		if err := os.Symlink(real, link); err != nil {
+		if err := os.Symlink(actual, link); err != nil {
 			t.Fatal(err)
 		}
 		nested := filepath.Join(link, "services", "api")
@@ -492,11 +492,6 @@ func TestFindGit(t *testing.T) {
 	if g.Shallow {
 		t.Error("a fresh repository should not be shallow")
 	}
-	// Scope depends on this: a root module derived against its own TopLevel
-	// must come out empty, or every plain repository would carry a prefix.
-	if s, err := NewScope(g.TopLevel, dir); err != nil || s != (Scope{}) {
-		t.Errorf("NewScope(TopLevel, dir) = %+v, %v, want an empty scope", s, err)
-	}
 
 	repo, err := FindRepo(ctx, dir)
 	if err != nil {
@@ -526,6 +521,24 @@ func TestFindGit(t *testing.T) {
 
 	if prev, err := PreviousTag(ctx, dir, ""); err != nil || prev != "v1.0.0" {
 		t.Errorf("PreviousTag = %q, %v; want v1.0.0", prev, err)
+	}
+}
+
+// Scope depends on this: a root module derived against its own TopLevel must
+// come out empty, or every plain repository would carry a prefix.
+func TestFindGitPopulatesATopLevelThatAgreesWithItself(t *testing.T) {
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-q", "-b", "main")
+	write(t, dir, "README.md", "hi\n")
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-q", "-m", "first")
+
+	g, err := FindGit(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("FindGit: %v", err)
+	}
+	if s, err := NewScope(g.TopLevel, dir); err != nil || s != (Scope{}) {
+		t.Errorf("NewScope(TopLevel, dir) = %+v, %v, want an empty scope", s, err)
 	}
 }
 

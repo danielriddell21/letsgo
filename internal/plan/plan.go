@@ -1445,24 +1445,11 @@ func (p *Plan) resolveVersion(ctx context.Context) {
 	}
 
 	prefix := p.Scope.Prefix
-	var versions []string
-	for _, tag := range p.Git.Tags {
-		rest, ok := strings.CutPrefix(tag, prefix)
-		if !ok {
-			continue
-		}
-		if len(rest) > 1 && rest[0] == 'v' && rest[1] >= '0' && rest[1] <= '9' {
-			versions = append(versions, tag)
-		}
-	}
+	versions := scopedVersionTags(p.Git.Tags, prefix)
 
 	switch len(versions) {
 	case 0:
-		if prefix == "" {
-			p.add("tag", Fail, "HEAD has no version tag; tag a release or use --snapshot")
-		} else {
-			p.add("tag", Fail, "HEAD has no %sv version tag; tag a release or use --snapshot", prefix)
-		}
+		p.failNoVersionTag(prefix)
 		return
 	case 1:
 		// The ordinary case.
@@ -1484,6 +1471,33 @@ func (p *Plan) resolveVersion(ctx context.Context) {
 	} else {
 		p.add("module path", Pass, "%s agrees with tag %s", p.Module.Path, p.Tag)
 	}
+}
+
+// scopedVersionTags returns the tags that name a version of prefix's own
+// scope, in the same order they were given.
+func scopedVersionTags(tags []string, prefix string) []string {
+	var versions []string
+	for _, tag := range tags {
+		rest, ok := strings.CutPrefix(tag, prefix)
+		if !ok {
+			continue
+		}
+		if len(rest) > 1 && rest[0] == 'v' && rest[1] >= '0' && rest[1] <= '9' {
+			versions = append(versions, tag)
+		}
+	}
+	return versions
+}
+
+// failNoVersionTag records that this scope has no version tag on HEAD,
+// naming its own prefix when it has one: a root module's tag is a different
+// scope entirely, not this one's missing tag.
+func (p *Plan) failNoVersionTag(prefix string) {
+	if prefix == "" {
+		p.add("tag", Fail, "HEAD has no version tag; tag a release or use --snapshot")
+		return
+	}
+	p.add("tag", Fail, "HEAD has no %sv version tag; tag a release or use --snapshot", prefix)
 }
 
 func (p *Plan) checkWorktree(opts Options) {

@@ -174,11 +174,16 @@ func scopedModuleFixture(t *testing.T) (repoDir, moduleDir string) {
 		}
 	}
 
-	identity := []string{"-c", "user.name=Test", "-c", "user.email=t@example.com"}
+	// Set locally rather than passed as -c on each command: runTag makes its
+	// own git calls against this repository (discover.CreateTag among them),
+	// and those need an identity too, not just the ones this fixture runs
+	// itself.
 	for _, args := range [][]string{
 		{"-C", repoDir, "init", "-q", "-b", "main"},
+		{"-C", repoDir, "config", "user.name", "Test"},
+		{"-C", repoDir, "config", "user.email", "t@example.com"},
 		{"-C", repoDir, "add", "."},
-		append(append([]string{"-C", repoDir}, identity...), "commit", "-q", "-m", "first"),
+		{"-C", repoDir, "commit", "-q", "-m", "first"},
 		{"-C", repoDir, "tag", "services/api/v1.2.3"},
 	} {
 		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
