@@ -46,10 +46,11 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 	}
 
 	// Only a published release serves assets from the download URLs a formula
-	// names. Pointing a tap at a draft would produce a formula that resolves
-	// to a 404 for everyone but its author.
+	// (or a tap-files plugin's output) names. Pointing a tap at a draft would
+	// produce a cask or formula that resolves to a 404 for everyone but its
+	// author.
 	if p.Config.Draft {
-		fmt.Println("  ! skipped the Homebrew formula: a draft release serves no public assets")
+		fmt.Println("  ! skipped the Homebrew tap: a draft release serves no public assets")
 		return nil
 	}
 
@@ -62,6 +63,18 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 
 	for _, formula := range formulas(p, result, repo, info) {
 		published, err := brew.Publish(ctx, api, p.Tap, formula)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("  %s %s in %s\n", published.Status, published.Path, p.Tap)
+	}
+
+	// Written in the same tap update as the formula: whatever a tap-files
+	// plugin rendered was already validated back when the release was built,
+	// so nothing here can still fail on the plugin's account.
+	for _, f := range result.TapFiles {
+		published, err := brew.PublishFile(ctx, api, p.Tap, f.Path, []byte(f.Content),
+			fmt.Sprintf("%s %s", p.Project, p.Version))
 		if err != nil {
 			return err
 		}

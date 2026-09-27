@@ -83,6 +83,18 @@ type Manifest struct {
 	// ran at its default, so a consumer can tell an opt-out apart from an
 	// older letsgo that predates this field.
 	Features *Features `json:"features,omitempty"`
+
+	// TapFiles are the files a tap-files plugin wrote into the Homebrew tap
+	// alongside the formula, a cask most often. They change nothing this
+	// release published, so verification has nothing to replay; this is here
+	// for a reader, and for yank to know which files it owns.
+	TapFiles []TapFile `json:"tap_files,omitempty"`
+}
+
+// TapFile is one file the tap-files hook wrote into the Homebrew tap.
+type TapFile struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
 }
 
 // Features is a release's departures from the feature defaults.

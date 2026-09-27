@@ -15,4 +15,8 @@ type (
 	InputCommand        = pub.InputCommand
 	ArchiveLayoutOutput = pub.ArchiveLayoutOutput
 	OutputArchive       = pub.OutputArchive
+	TapFilesInput       = pub.TapFilesInput
+	TapArtifact         = pub.TapArtifact
+	TapFilesOutput      = pub.TapFilesOutput
+	TapFile             = pub.TapFile
 )

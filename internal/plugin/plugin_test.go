@@ -101,10 +101,53 @@ func TestRunRejectsAnUnknownHook(t *testing.T) {
 }
 
 func TestHooksAreAClosedSet(t *testing.T) {
-	if !plugin.HookLDFlags.Valid() || !plugin.HookArchiveLayout.Valid() {
+	if !plugin.HookLDFlags.Valid() || !plugin.HookArchiveLayout.Valid() || !plugin.HookTapFiles.Valid() {
 		t.Error("a documented hook is not valid")
 	}
 	if plugin.Hook("exec").Valid() {
 		t.Error("an undocumented hook is valid")
+	}
+}
+
+// A credential that can publish to another repository has no reason to be
+// visible to a plugin that only renders files for core to write.
+func TestRunStripsTokensFromTheTapFilesHookEnv(t *testing.T) {
+	dir, digest := fake(t, `
+if [ -n "$GITHUB_TOKEN$GH_TOKEN$LETSGO_TAP_TOKEN" ]; then
+  echo "a token reached the plugin" >&2
+  exit 1
+fi
+echo '{"files":[]}'`)
+	t.Setenv("PATH", dir)
+	t.Setenv("GITHUB_TOKEN", "secret")
+	t.Setenv("GH_TOKEN", "secret")
+	t.Setenv("LETSGO_TAP_TOKEN", "secret")
+
+	var out plugin.TapFilesOutput
+	err := plugin.Run(context.Background(),
+		plugin.Plugin{Hook: plugin.HookTapFiles, Command: "letsgo-fake", Digest: digest},
+		t.TempDir(), plugin.TapFilesInput{}, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Every other hook keeps the whole environment: only tap-files talks about a
+// tap, so only it needs the token kept out.
+func TestRunLeavesOtherHooksEnvWhole(t *testing.T) {
+	dir, digest := fake(t, `
+if [ -z "$GITHUB_TOKEN" ]; then
+  echo "the token was stripped" >&2
+  exit 1
+fi
+echo '{}'`)
+	t.Setenv("PATH", dir)
+	t.Setenv("GITHUB_TOKEN", "secret")
+
+	err := plugin.Run(context.Background(),
+		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digest},
+		t.TempDir(), plugin.ArchiveLayoutInput{}, &plugin.ArchiveLayoutOutput{})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

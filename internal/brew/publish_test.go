@@ -126,6 +126,36 @@ func TestPublishCommitsAsLetsgo(t *testing.T) {
 	}
 }
 
+// A tap-files plugin's output is written the same way a formula is: the same
+// conditional write, and the same author.
+func TestPublishFileCreatesThenSkips(t *testing.T) {
+	tap := &fakeTap{}
+	repo := github.Repo{Owner: "you", Name: "homebrew-tap"}
+	ctx := context.Background()
+
+	first, err := brew.PublishFile(ctx, tap, repo, "Casks/my-tool.rb", []byte("cask\n"), "my-tool 1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Status != brew.Created || first.Path != "Casks/my-tool.rb" {
+		t.Fatalf("first publish = %+v", first)
+	}
+	if got := tap.writes[0].Author; got == nil || *got != brew.Author {
+		t.Errorf("committer = %+v, want %+v", got, brew.Author)
+	}
+
+	second, err := brew.PublishFile(ctx, tap, repo, "Casks/my-tool.rb", []byte("cask\n"), "my-tool 1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Status != brew.Unchanged {
+		t.Errorf("second publish = %+v, want unchanged", second)
+	}
+	if len(tap.writes) != 1 {
+		t.Errorf("an unchanged file was written again: %d writes", len(tap.writes))
+	}
+}
+
 // Overriding it must reach the write, since that is the whole point of it
 // being a variable rather than a constant.
 func TestPublishHonoursAnOverriddenAuthor(t *testing.T) {

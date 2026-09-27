@@ -23,6 +23,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ type Hook = pub.Hook
 const (
 	HookLDFlags       = pub.HookLDFlags
 	HookArchiveLayout = pub.HookArchiveLayout
+	HookTapFiles      = pub.HookTapFiles
 )
 
 // Hooks is the closed set, in the order they run.
@@ -94,7 +96,15 @@ func Run(ctx context.Context, p Plugin, dir string, input, output any) error {
 	// can read files, the clock and the network, so what makes its answer safe
 	// is that the answer is recorded and replayed, not that its inputs were
 	// rationed. One hook exists precisely to read the environment.
+	//
+	// tap-files is the one exception: it renders files for core to write, and
+	// core is the one that talks to the forge and the tap. A credential that
+	// can publish to someone else's repository has no reason to be in this
+	// process's environment at all.
 	cmd.Env = os.Environ()
+	if p.Hook == HookTapFiles {
+		cmd.Env = withoutEnv(cmd.Env, "GITHUB_TOKEN", "GH_TOKEN", "LETSGO_TAP_TOKEN")
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -110,6 +120,19 @@ func Run(ctx context.Context, p Plugin, dir string, input, output any) error {
 		return fmt.Errorf("plugin %s: reading its answer: %w", p.Command, err)
 	}
 	return nil
+}
+
+// withoutEnv returns env with any variable named in drop removed.
+func withoutEnv(env []string, drop ...string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if slices.Contains(drop, name) {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // resolve finds the executable and proves it is the one that was pinned.

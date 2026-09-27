@@ -35,6 +35,11 @@ type Result struct {
 	// which is why the manifest can name them.
 	Images []ImageBuild
 
+	// TapFiles are what a tap-files plugin rendered for the Homebrew tap,
+	// already validated. Publishing writes them; nothing here has written
+	// anything yet.
+	TapFiles []plugin.TapFile
+
 	// Files are the names of every file to publish, in upload order.
 	Files []string
 }
@@ -87,7 +92,14 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 		return nil, err
 	}
 
-	m := describe(p, toolVersion, goVersion, source, mods, artifacts, images)
+	tapFiles, err := applyTapFilesPlugin(ctx, p, artifacts)
+	if err != nil {
+		return nil, err
+	}
+
+	m := describe(p, toolVersion, goVersion, buildOutputs{
+		source: source, mods: mods, artifacts: artifacts, images: images, tapFiles: tapFiles,
+	})
 
 	files, err := writeMetadata(p, m, toolVersion, dir, artifacts, source)
 	if err != nil {
@@ -96,7 +108,7 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 
 	return &Result{
 		Dir: dir, Manifest: m, Artifacts: artifacts, Source: source,
-		Images: images, Files: files,
+		Images: images, TapFiles: tapFiles, Files: files,
 	}, nil
 }
 
@@ -162,16 +174,20 @@ func writeMetadata(
 	return append(files, build.ChecksumFile), nil
 }
 
+// buildOutputs is everything Build assembles before it can describe the
+// release, passed as one value so describe does not grow a parameter for
+// every kind of output a release can have.
+type buildOutputs struct {
+	source    build.Source
+	mods      manifest.Modules
+	artifacts []build.Artifact
+	images    []ImageBuild
+	tapFiles  []plugin.TapFile
+}
+
 // describe assembles the release manifest: everything a consumer needs to
 // rebuild this release and compare, in one file.
-func describe(
-	p *plan.Plan,
-	toolVersion, goVersion string,
-	source build.Source,
-	mods manifest.Modules,
-	artifacts []build.Artifact,
-	images []ImageBuild,
-) *manifest.Manifest {
+func describe(p *plan.Plan, toolVersion, goVersion string, out buildOutputs) *manifest.Manifest {
 	m := &manifest.Manifest{
 		Schema:          manifest.Schema,
 		Project:         p.Project,
@@ -181,16 +197,17 @@ func describe(
 		SourceDateEpoch: p.Git.CommitTime.Unix(),
 		ModuleDir:       p.Config.ModuleDir,
 		Builder:         builder(p, toolVersion, goVersion),
-		Source:          &manifest.Source{Archive: source.Name, SHA256: source.SHA256},
-		Modules:         mods,
+		Source:          &manifest.Source{Archive: out.source.Name, SHA256: out.source.SHA256},
+		Modules:         out.mods,
 		Gates:           gates(p),
 		Features:        featuresRecord(p),
 		APIChanges:      apiChanges(p),
-		Images:          imageRecords(images),
-		Artifacts:       make([]manifest.Artifact, 0, len(artifacts)),
+		Images:          imageRecords(out.images),
+		TapFiles:        tapFileRecords(out.tapFiles),
+		Artifacts:       make([]manifest.Artifact, 0, len(out.artifacts)),
 	}
 
-	for _, a := range artifacts {
+	for _, a := range out.artifacts {
 		group := groupFor(p, a)
 		record := manifest.Artifact{
 			Name: a.Archive, OS: a.OS, Arch: a.Arch,

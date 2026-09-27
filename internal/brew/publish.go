@@ -60,8 +60,20 @@ func Publish(ctx context.Context, api FileAPI, tap github.Repo, f Formula) (Resu
 	if err != nil {
 		return Result{}, err
 	}
-	path := f.FileName()
+	return publish(ctx, api, tap, f.FileName(), content, fmt.Sprintf("%s %s", f.Name, f.Version))
+}
 
+// PublishFile writes an arbitrary file into the tap, unless it is already
+// exactly right.
+//
+// Used for anything a plugin renders alongside the formula: the same
+// conditional write, the same author, the same commit — a tap should not be
+// able to tell a cask from a formula by how it arrived.
+func PublishFile(ctx context.Context, api FileAPI, tap github.Repo, path string, content []byte, message string) (Result, error) {
+	return publish(ctx, api, tap, path, content, message)
+}
+
+func publish(ctx context.Context, api FileAPI, tap github.Repo, path string, content []byte, message string) (Result, error) {
 	existing, err := api.ReadFile(ctx, tap, path)
 	if err != nil {
 		return Result{}, err
@@ -78,7 +90,7 @@ func Publish(ctx context.Context, api FileAPI, tap github.Repo, f Formula) (Resu
 	author := Author
 	if err := api.WriteFile(ctx, tap, github.FileInput{
 		Path:    path,
-		Message: fmt.Sprintf("%s %s", f.Name, f.Version),
+		Message: message,
 		Content: content,
 		SHA:     sha,
 		Author:  &author,

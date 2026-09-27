@@ -12,7 +12,7 @@ import (
 )
 
 func TestHooksAreAClosedSet(t *testing.T) {
-	if !HookLDFlags.Valid() || !HookArchiveLayout.Valid() {
+	if !HookLDFlags.Valid() || !HookArchiveLayout.Valid() || !HookTapFiles.Valid() {
 		t.Error("a documented hook is not valid")
 	}
 	if Hook("exec").Valid() {
@@ -21,7 +21,7 @@ func TestHooksAreAClosedSet(t *testing.T) {
 }
 
 func TestHooksListsBothHooks(t *testing.T) {
-	if len(Hooks) != 2 || Hooks[0] != HookLDFlags || Hooks[1] != HookArchiveLayout {
+	if len(Hooks) != 3 || Hooks[0] != HookLDFlags || Hooks[1] != HookArchiveLayout || Hooks[2] != HookTapFiles {
 		t.Errorf("Hooks = %v", Hooks)
 	}
 }
