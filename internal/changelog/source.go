@@ -73,14 +73,22 @@ func Collect(ctx context.Context, s Source) (previous string, commits []discover
 		if err != nil {
 			return "", nil, err
 		}
-		commits, err = discover.Commits(ctx, s.Dir, previous, s.Tag)
+		nested, err := discover.NestedModuleDirs(s.Dir)
+		if err != nil {
+			return "", nil, err
+		}
+		commits, err = discover.Commits(ctx, s.Dir, previous, s.Tag, nested...)
 		return previous, commits, err
 	}
 
 	if s.Client == nil {
 		// Say what was lost. Silently producing a one-commit changelog would
 		// look like a release that changed almost nothing.
-		commits, err = discover.Commits(ctx, s.Dir, "", s.Tag)
+		nested, err := discover.NestedModuleDirs(s.Dir)
+		if err != nil {
+			return "", nil, err
+		}
+		commits, err = discover.Commits(ctx, s.Dir, "", s.Tag, nested...)
 		return "", commits, err
 	}
 

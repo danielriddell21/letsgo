@@ -190,7 +190,12 @@ type Commit struct {
 // each pull request once, as its merge commit, rather than reporting the merge
 // and every commit it brought in. In a squash-based workflow there are no
 // merges and it changes nothing.
-func Commits(ctx context.Context, dir, from, to string) ([]Commit, error) {
+// exclude names directories nested inside dir whose own commits should not
+// count as dir's own: each is a separate module with its own release cycle,
+// so a commit that only touched one of them is not evidence for dir's bump
+// or changelog. Given relative to dir, slash-separated — discover.
+// NestedModuleDirs returns them in exactly that shape.
+func Commits(ctx context.Context, dir, from, to string, exclude ...string) ([]Commit, error) {
 	if to == "" {
 		to = "HEAD"
 	}
@@ -203,7 +208,15 @@ func Commits(ctx context.Context, dir, from, to string) ([]Commit, error) {
 	// a person can type, newlines and tabs included.
 	const format = "--format=%H%x1f%s%x1f%b%x1f%an%x1e"
 
-	out, err := git(ctx, dir, "log", "--first-parent", format, revisions)
+	args := []string{"log", "--first-parent", format, revisions}
+	if len(exclude) > 0 {
+		args = append(args, "--", ".")
+		for _, e := range exclude {
+			args = append(args, ":(exclude)"+e)
+		}
+	}
+
+	out, err := git(ctx, dir, args...)
 	if err != nil {
 		return nil, err
 	}
