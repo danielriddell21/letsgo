@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,12 +13,139 @@ import (
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/feature"
+	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 )
+
+// moduleFixture writes a minimal buildable module and commits it, so
+// plan.Resolve has a real repository to work from.
+func moduleFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	write := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/demo\n\ngo 1.24\n")
+	write("main.go", `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Printf("demo %s (%s) built %s\n", version, commit, date)
+		return
+	}
+}
+`)
+	write("letsgo.mod", "build "+gobuild.Host().String()+"\n")
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
+			"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	run("remote", "add", "origin", "https://github.com/you/demo.git")
+	run("add", ".")
+	run("commit", "-q", "-m", "feat: first release")
+	run("tag", "v1.2.3")
+	return dir
+}
+
+// A release reads the repository's description through the same Describe
+// callback runRelease wires up, and the result is what the caller gets back
+// to hand to publishTap — the whole point of threading it through Build.
+func TestPlanAndBuildRunsDescribeAndReturnsItsResult(t *testing.T) {
+	dir := moduleFixture(t)
+	want := &github.RepoInfo{Description: "a demo"}
+	var described *plan.Plan
+
+	p, outDir, result, info, err := planAndBuild(context.Background(), planBuildOptions{
+		Out:         filepath.Join(t.TempDir(), "dist"),
+		Plan:        plan.Options{Dir: dir},
+		FailureNote: "nothing was built",
+		Started:     time.Now(),
+		Describe: func(p *plan.Plan) *github.RepoInfo {
+			described = p
+			return want
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info != want {
+		t.Errorf("info = %v, want %v", info, want)
+	}
+	if described != p {
+		t.Error("Describe was not called with the resolved plan")
+	}
+	if outDir == "" || result == nil {
+		t.Errorf("outDir = %q, result = %v", outDir, result)
+	}
+}
+
+// `letsgo build` sets no Describe, and a release should not read the
+// repository over that alone.
+func TestPlanAndBuildSkipsDescribeWhenUnset(t *testing.T) {
+	dir := moduleFixture(t)
+
+	_, _, _, info, err := planAndBuild(context.Background(), planBuildOptions{
+		Out:         filepath.Join(t.TempDir(), "dist"),
+		Plan:        plan.Options{Dir: dir},
+		FailureNote: "nothing was built",
+		Started:     time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info != nil {
+		t.Errorf("info = %v, want nil", info)
+	}
+}
+
+// A plan that fails its own gates never reaches Build, or Describe.
+func TestPlanAndBuildFailsWhenThePlanDoes(t *testing.T) {
+	dir := t.TempDir() // no module here at all: plan.Resolve cannot succeed.
+
+	described := false
+	_, _, _, _, err := planAndBuild(context.Background(), planBuildOptions{
+		Out:         filepath.Join(t.TempDir(), "dist"),
+		Plan:        plan.Options{Dir: dir},
+		FailureNote: "nothing was built",
+		Started:     time.Now(),
+		Describe:    func(*plan.Plan) *github.RepoInfo { described = true; return nil },
+	})
+	if err == nil {
+		t.Fatal("want an error: there is no module to resolve a plan from")
+	}
+	if described {
+		t.Error("Describe ran despite the plan never resolving")
+	}
+}
 
 // flagSet mirrors the shapes the real subcommands declare: a boolean, a
 // string, and a second string, so permutation is tested against flags that
