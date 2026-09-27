@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -288,6 +289,9 @@ func TestBuildRefusesAFailedPlan(t *testing.T) {
 // it under the name cask-fixture.
 func caskFixturePlugin(t *testing.T, path, content string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake plugin is a shell script")
+	}
 	scriptDir := t.TempDir()
 	script := filepath.Join(scriptDir, "cask-fixture")
 	body := fmt.Sprintf("#!/bin/sh\ncat > /dev/null\necho '{\"files\":[{\"path\":%q,\"content\":%q}]}'\n", path, content)
