@@ -276,6 +276,7 @@ func runRelease(args []string) error {
 		Plan: plan.Options{
 			Dir: ".", Publish: !*snapshot, Token: *token, TapToken: *tapToken, Snapshot: *snapshot,
 			Analyse: true, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
+			DisableProxyWarm: *skipWarm,
 		},
 		FailureNote: "nothing was built or published",
 		Started:     started,
@@ -348,7 +349,7 @@ func runRelease(args []string) error {
 		return err
 	}
 
-	if !*skipWarm && !*snapshot && !published.Release.Draft {
+	if p.Features.On("proxy-warm") && !*snapshot && !published.Release.Draft {
 		warmProxy(ctx, p)
 	}
 
@@ -776,6 +777,9 @@ func notesMode(appendNotes bool) publish.NotesMode {
 // A shallow checkout is the normal shape of a CI clone, so the history is
 // fetched from the forge rather than demanded of the caller.
 func releaseNotes(ctx context.Context, p *plan.Plan, client *github.Client, repo github.Repo) (string, error) {
+	if !p.Features.On("changelog") {
+		return "", nil
+	}
 	if p.Git.Shallow {
 		fmt.Println("  shallow clone; reading history from the forge")
 	}

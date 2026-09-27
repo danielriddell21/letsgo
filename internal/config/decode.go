@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/internal/feature"
 )
 
 // Config is the semantic content of a letsgo.mod file.
@@ -79,6 +81,10 @@ type Config struct {
 
 	// Draft creates the release without publishing it.
 	Draft bool
+
+	// Disabled are the features this repository turned off, by name from the
+	// feature catalogue (internal/feature).
+	Disabled []string
 }
 
 // Plugin is one external program invoked at a named hook.
@@ -158,6 +164,7 @@ var known = map[string]string{
 	"image":   "image, image <reference>, image base <ref>, image cmd <arg>..., or image expose <port>...",
 	"brew":    "brew <owner/tap-repo>, or brew caveats <text>",
 	"release": "release <key=value>...",
+	"disable": "disable <feature>...",
 }
 
 // blockOnly names the directives that exist only as a block. Written down so
@@ -179,6 +186,7 @@ var handlers = map[string]func(cfg *Config, file string, line *Line) error{
 	"image":   applyImage,
 	"brew":    applyBrew,
 	"release": applyRelease,
+	"disable": applyDisable,
 }
 
 // Decode interprets a parsed file.
@@ -269,13 +277,56 @@ func checkKnown(file, keyword string, pos Position) error {
 	return errAt(file, pos, "%s", msg)
 }
 
+// nearestKeyword finds the name closest to keyword, for a did-you-mean
+// suggestion. A prefix or a case difference is caught outright; anything else
+// falls back to edit distance, so a transposed pair of letters (sbmo for
+// sbom) still gets a suggestion rather than the full list.
 func nearestKeyword(keyword string, names []string) string {
 	for _, name := range names {
 		if strings.EqualFold(name, keyword) || strings.HasPrefix(name, keyword) {
 			return name
 		}
 	}
+
+	best, bestDist := "", -1
+	for _, name := range names {
+		d := levenshtein(strings.ToLower(keyword), strings.ToLower(name))
+		if bestDist == -1 || d < bestDist {
+			best, bestDist = name, d
+		}
+	}
+
+	// Worth suggesting only when the typo is close: past this, a guess is as
+	// likely to be wrong as right, and the full list serves the reader better.
+	if best != "" && bestDist <= (len(keyword)+1)/2 {
+		return best
+	}
 	return ""
+}
+
+// levenshtein is the edit distance between two strings: the fewest
+// insertions, deletions and substitutions that turn one into the other.
+func levenshtein(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
+
+	prev := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+
+	for i := 1; i <= len(ra); i++ {
+		cur := make([]int, len(rb)+1)
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			cur[j] = min(cur[j-1]+1, prev[j]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(rb)]
 }
 
 func checkOnce(file string, seen map[string]Position, keyword string, pos Position) error {
@@ -668,6 +719,60 @@ func applyRelease(cfg *Config, file string, line *Line) error {
 		}
 	}
 	return nil
+}
+
+// applyDisable turns off features that are on by default.
+//
+// Each name is checked against the catalogue rather than merely collected:
+// an integrity feature refusing outright and an off-by-default one pointing
+// at its own directive are both mistakes worth catching here, at the line
+// that made them, rather than as a release that silently kept the feature
+// on.
+func applyDisable(cfg *Config, file string, line *Line) error {
+	if len(line.Args) == 0 {
+		return arity(file, line)
+	}
+
+	for _, name := range line.Args {
+		f, ok := feature.Lookup(name)
+		if !ok {
+			return errAt(file, line.P, "%s", unknownFeature(name))
+		}
+		if f.Kind == feature.Integrity {
+			return errAt(file, line.P, "%s cannot be disabled: it is what letsgo is", name)
+		}
+		if !f.Disable {
+			return errAt(file, line.P, "%s cannot be disabled; remove the `%s` directive instead", name, f.Enable)
+		}
+		if !containsString(cfg.Disabled, name) {
+			cfg.Disabled = append(cfg.Disabled, name)
+		}
+	}
+	return nil
+}
+
+// unknownFeature reports a name that is not in the catalogue, with the same
+// did-you-mean treatment an unknown directive gets.
+func unknownFeature(name string) string {
+	names := make([]string, len(feature.All))
+	for i, f := range feature.All {
+		names[i] = f.Name
+	}
+	sort.Strings(names)
+
+	if near := nearestKeyword(name, names); near != "" {
+		return fmt.Sprintf("unknown feature %q; did you mean %q?", name, near)
+	}
+	return fmt.Sprintf("unknown feature %q; valid features are %s", name, strings.Join(names, ", "))
+}
+
+func containsString(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 func arity(file string, line *Line) error {

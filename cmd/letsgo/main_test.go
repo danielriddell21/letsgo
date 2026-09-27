@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 	"strings"
@@ -9,9 +10,11 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
+	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 )
 
@@ -121,6 +124,18 @@ func TestIsPrerelease(t *testing.T) {
 				t.Errorf("isPrerelease(%q, %q) = %v, want %v", c.version, c.config, got, c.want)
 			}
 		})
+	}
+}
+
+// disable changelog must stop the changelog from being built at all, not
+// merely from being shown: a nil client proves this returns before it would
+// have made a network call.
+func TestReleaseNotesSkippedWhenChangelogDisabled(t *testing.T) {
+	p := &plan.Plan{Features: feature.Resolve([]string{"changelog"})}
+
+	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{})
+	if err != nil || notes != "" {
+		t.Errorf("releaseNotes = (%q, %v), want empty and no error", notes, err)
 	}
 }
 

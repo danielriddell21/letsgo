@@ -40,7 +40,9 @@ func main() {
 }
 `
 
-func fixture(t *testing.T) *plan.Plan {
+// fixture builds a plan for a minimal releasable module. Extra letsgo.mod
+// lines — a `disable`, say — can be given beyond the target it always needs.
+func fixture(t *testing.T, extraConfig ...string) *plan.Plan {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -56,7 +58,11 @@ func fixture(t *testing.T) *plan.Plan {
 	write("go.mod", "module example.com/demo\n\ngo 1.24\n")
 	write("main.go", mainGo)
 	write("README.md", "# demo\n")
-	write("letsgo.mod", "build "+gobuild.Host().String()+"\n")
+	config := "build " + gobuild.Host().String() + "\n"
+	for _, line := range extraConfig {
+		config += line + "\n"
+	}
+	write("letsgo.mod", config)
 
 	run := func(args ...string) {
 		t.Helper()
@@ -125,6 +131,35 @@ func TestBuildProducesACompleteRelease(t *testing.T) {
 	}
 	if m.Gates["version injection"] != "pass" {
 		t.Errorf("gates were not recorded: %+v", m.Gates)
+	}
+}
+
+// disable sbom must reach every layer: no asset on disk, nothing in
+// SHA256SUMS, and the manifest saying why an older release's SBOM would
+// still be there and this one's is not.
+func TestDisableSBOMOmitsItEverywhere(t *testing.T) {
+	p := fixture(t, "disable sbom")
+	dir := t.TempDir()
+
+	result, err := release.Build(context.Background(), p, dir, "0.1.0", nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if result.Manifest.SBOM != "" {
+		t.Errorf("manifest SBOM = %q, want empty", result.Manifest.SBOM)
+	}
+	if contains(result.Files, "sbom.cdx.json") || result.Manifest.Features == nil ||
+		!contains(result.Manifest.Features.Disabled, "sbom") {
+		t.Errorf("Files = %v, Features = %+v", result.Files, result.Manifest.Features)
+	}
+
+	sums, err := os.ReadFile(filepath.Join(dir, build.ChecksumFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(sums), "sbom") {
+		t.Errorf("SHA256SUMS mentions the SBOM it did not write:\n%s", sums)
 	}
 }
 

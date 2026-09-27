@@ -27,6 +27,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/oci"
@@ -78,6 +79,12 @@ type Options struct {
 	// AllowBreaking publishes an incompatible API change without a major
 	// version bump.
 	AllowBreaking bool
+
+	// DisableProxyWarm skips priming the module proxy for this run only. It
+	// means the same thing as `disable proxy-warm` in letsgo.mod, and is
+	// recorded in the plan and the manifest the same way, so `--no-proxy-warm`
+	// is indistinguishable from a repository that always disables it.
+	DisableProxyWarm bool
 }
 
 // Status is the outcome of one check.
@@ -485,6 +492,11 @@ type Plan struct {
 	Config     *config.Config
 	ConfigPath string
 
+	// Features are the departures from the defaults this release resolved,
+	// from letsgo.mod's `disable` directive and any one-run flag that means
+	// the same thing.
+	Features feature.Set
+
 	Project  string
 	Version  string
 	Tag      string
@@ -583,6 +595,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	// move it: `module web` says the go.mod to build is not the one beside
 	// letsgo.mod.
 	p.loadConfig(root.Dir)
+	p.resolveFeatures(opts)
 	p.resolvePlugins()
 	p.resolveModule()
 	p.resolveProject()
@@ -662,6 +675,11 @@ func TapToken(override, tokenOverride string) (token, source string) {
 // "nothing in this binary can execute code with a known advisory against it".
 // That is checkable, actionable, and rare enough to be worth stopping for.
 func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
+	if !p.Features.On("vulncheck") {
+		p.add("vulnerabilities", Skip, "disabled by config")
+		return
+	}
+
 	found, err := gate.Vulncheck(ctx, p.Module.Dir)
 
 	switch {
@@ -701,6 +719,10 @@ func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 // import path, and nothing enforces it, so the mistake is made quietly and
 // found by other people.
 func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
+	if !p.Features.On("api-gate") {
+		p.add("api compatibility", Skip, "disabled by config")
+		return
+	}
 	if p.Tag == "" {
 		p.add("api compatibility", Skip, "not a tagged release")
 		return
@@ -1113,6 +1135,32 @@ func (p *Plan) loadConfig(moduleDir string) {
 
 	p.Config, p.ConfigPath = cfg, path
 	p.note("config", ConfigFile, "repository root")
+}
+
+// resolveFeatures folds letsgo.mod's `disable` directive together with any
+// one-run flag that means the same thing, so the rest of the plan has one
+// place to ask whether a feature is on.
+func (p *Plan) resolveFeatures(opts Options) {
+	disabled := append([]string(nil), p.Config.Disabled...)
+
+	from := ConfigFile
+	if opts.DisableProxyWarm {
+		if len(disabled) == 0 {
+			from = "--no-proxy-warm"
+		} else {
+			from += ", --no-proxy-warm"
+		}
+		disabled = append(disabled, "proxy-warm")
+	}
+
+	p.Features = feature.Resolve(disabled)
+	if len(p.Features) == 0 {
+		return
+	}
+
+	names := strings.Join(p.Features.Disabled(), ", ")
+	p.note("features", names, from)
+	p.add("features", Pass, "disabled: %s", names)
 }
 
 // resolveModule settles which module is built.

@@ -19,6 +19,9 @@ import (
 // no forge has no release page; in both cases the honest thing is to publish
 // no installer rather than one whose URLs resolve to nothing.
 func writeInstaller(p *plan.Plan, artifacts []build.Artifact, dir string) (string, string, error) {
+	if !p.Features.On("install-script") {
+		return "", "", nil
+	}
 	if p.Tag == "" || !p.HasRepo || p.Repo.Host != "github.com" {
 		return "", "", nil
 	}

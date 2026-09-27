@@ -68,6 +68,36 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
+// Most releases disable nothing, and the field should say so by not
+// appearing, not by appearing empty — the same way Source and Gates already
+// distinguish "not recorded" from "recorded as nothing".
+func TestFeaturesOmittedWhenNil(t *testing.T) {
+	data, err := sample().Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"features"`) {
+		t.Errorf("features present with nothing disabled:\n%s", data)
+	}
+}
+
+func TestFeaturesRoundTrip(t *testing.T) {
+	m := sample()
+	m.Features = &Features{Disabled: []string{"proxy-warm", "sbom"}}
+
+	data, err := m.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Features == nil || strings.Join(got.Features.Disabled, ",") != "proxy-warm,sbom" {
+		t.Errorf("Features = %+v", got.Features)
+	}
+}
+
 // A consumer that guesses at an unknown schema is worse than one that refuses.
 func TestDecodeRejectsUnknownSchema(t *testing.T) {
 	if _, err := Decode([]byte(`{"schema": 99}`)); err == nil {
