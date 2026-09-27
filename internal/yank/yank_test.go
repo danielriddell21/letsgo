@@ -80,6 +80,38 @@ func TestRunMarksTheReleaseAndEditsGoMod(t *testing.T) {
 	}
 }
 
+// A scoped module's go.mod retract directive names a bare version: the file
+// already lives in the scope its tag prefix names, so the directive must not
+// repeat it, and Retract would reject a prefixed tag as not a version anyway.
+func TestRunStripsTheScopePrefixBeforeEditingGoMod(t *testing.T) {
+	dir := t.TempDir()
+	goMod := dir + "/go.mod"
+	if err := writeFile(goMod, "module example.com/foo/services/api\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	forge := &fakeForge{release: &github.Release{ID: 7, TagName: "services/api/v1.2.3", Body: "notes"}}
+
+	result, err := yank.Run(context.Background(), yank.Options{
+		Client: forge, Repo: github.Repo{Owner: "you", Name: "foo"},
+		Tag: "services/api/v1.2.3", Prefix: "services/api/", Reason: "bad", GoMod: goMod,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !result.Retracted {
+		t.Fatal("go.mod was not edited")
+	}
+	got := readFile(t, goMod)
+	if !strings.Contains(got, "retract (\n\tv1.2.3 // bad\n)") {
+		t.Errorf("go.mod:\n%s", got)
+	}
+	if result.Next != "services/api/v1.2.4" {
+		t.Errorf("Next = %q, want services/api/v1.2.4", result.Next)
+	}
+}
+
 // Running yank twice must not stack notices or directives.
 func TestRunIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
@@ -129,16 +161,48 @@ func TestRunRefusesAnUnknownRelease(t *testing.T) {
 func TestPreviousOf(t *testing.T) {
 	tags := []string{"v1.0.0", "v1.1.0", "v1.2.0-rc.1", "v1.2.0", "v1.3.0", "not-a-version"}
 
-	if got := yank.PreviousOf(tags, "v1.3.0"); got != "v1.2.0" {
+	if got := yank.PreviousOf(tags, "v1.3.0", ""); got != "v1.2.0" {
 		t.Errorf("PreviousOf = %q, want v1.2.0", got)
 	}
 	// A prerelease is not what a retracted release should send people to.
-	if got := yank.PreviousOf(tags, "v1.2.0"); got != "v1.1.0" {
+	if got := yank.PreviousOf(tags, "v1.2.0", ""); got != "v1.1.0" {
 		t.Errorf("PreviousOf = %q, want v1.1.0", got)
 	}
 	// The first release has nothing to fall back to.
-	if got := yank.PreviousOf(tags, "v1.0.0"); got != "" {
+	if got := yank.PreviousOf(tags, "v1.0.0", ""); got != "" {
 		t.Errorf("PreviousOf = %q, want empty", got)
+	}
+}
+
+// A nested module's tags parse as valid versions too, so an unscoped search
+// would sometimes hand a scoped retraction someone else's previous release.
+func TestPreviousOfIgnoresAnotherScopesTags(t *testing.T) {
+	tags := []string{
+		"v9.0.0", // the root's own, newer tag — a different scope
+		"services/api/v1.0.0", "services/api/v1.1.0",
+	}
+
+	got := yank.PreviousOf(tags, "services/api/v1.1.0", "services/api/")
+	if got != "services/api/v1.0.0" {
+		t.Errorf("PreviousOf = %q, want services/api/v1.0.0", got)
+	}
+
+	// A tag outside this scope is not a version in it at all.
+	if got := yank.PreviousOf(tags, "v9.0.0", "services/api/"); got != "" {
+		t.Errorf("PreviousOf = %q, want empty for a tag outside the scope", got)
+	}
+}
+
+func TestNextAfterKeepsTheScopePrefix(t *testing.T) {
+	if got := yank.NextAfter("v1.2.3", ""); got != "v1.2.4" {
+		t.Errorf("NextAfter = %q, want v1.2.4", got)
+	}
+	if got := yank.NextAfter("services/api/v1.2.3", "services/api/"); got != "services/api/v1.2.4" {
+		t.Errorf("NextAfter = %q, want services/api/v1.2.4", got)
+	}
+	// A tag outside the given scope has no next version in it.
+	if got := yank.NextAfter("v1.2.3", "services/api/"); got != "" {
+		t.Errorf("NextAfter = %q, want empty", got)
 	}
 }
 
