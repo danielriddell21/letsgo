@@ -112,7 +112,7 @@ func TestCommitsUpToPaginates(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(batch)
 	})
 
-	commits, err := c.CommitsUpTo(context.Background(), Repo{Owner: "you", Name: "foo"}, "v1.0.0")
+	commits, err := c.CommitsUpTo(context.Background(), Repo{Owner: "you", Name: "foo"}, "v1.0.0", "")
 	if err != nil {
 		t.Fatalf("CommitsUpTo: %v", err)
 	}
@@ -121,6 +121,24 @@ func TestCommitsUpToPaginates(t *testing.T) {
 	}
 	if len(pages) != 2 {
 		t.Errorf("requested pages %v, want two", pages)
+	}
+}
+
+// A nested module's first release must not list some other module's
+// commits, and the commits endpoint can filter that server-side.
+func TestCommitsUpToScopesToPath(t *testing.T) {
+	var gotPath string
+	c := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Query().Get("path")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]CommitInfo{})
+	})
+
+	if _, err := c.CommitsUpTo(context.Background(), Repo{Owner: "you", Name: "foo"}, "v1.0.0", "services/api"); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "services/api" {
+		t.Errorf("path = %q, want services/api", gotPath)
 	}
 }
 
@@ -135,7 +153,7 @@ func TestCommitsUpToIsBounded(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(batch)
 	})
 
-	if _, err := c.CommitsUpTo(context.Background(), Repo{Owner: "you", Name: "foo"}, "v1.0.0"); err != nil {
+	if _, err := c.CommitsUpTo(context.Background(), Repo{Owner: "you", Name: "foo"}, "v1.0.0", ""); err != nil {
 		t.Fatal(err)
 	}
 	if requests != maxCommitPages {

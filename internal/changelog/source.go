@@ -67,6 +67,26 @@ func convert(infos []github.CommitInfo) []discover.Commit {
 	return commits
 }
 
+// scopedLatestTag returns the tag naming the highest version in prefix's
+// scope, other than exclude, or "" if there is none.
+func scopedLatestTag(tags []string, prefix, exclude string) string {
+	scope := discover.Scope{Prefix: prefix}
+
+	fullTag := make(map[string]string, len(tags))
+	versions := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		rest, ok := scope.MatchesTag(tag)
+		if !ok {
+			continue
+		}
+		versions = append(versions, rest)
+		fullTag[rest] = tag
+	}
+
+	excludeRest, _ := scope.MatchesTag(exclude)
+	return fullTag[semver.Latest(versions, excludeRest)]
+}
+
 func Collect(ctx context.Context, s Source) (previous string, commits []discover.Commit, err error) {
 	if !s.Shallow {
 		previous, err = discover.PreviousTag(ctx, s.Dir, s.Prefix)
@@ -97,14 +117,18 @@ func Collect(ctx context.Context, s Source) (previous string, commits []discover
 		return "", nil, fmt.Errorf("changelog: listing tags: %w", err)
 	}
 
-	previous = semver.Latest(tags, s.Tag)
+	// A nested module's tags parse as valid versions too, so picking the
+	// highest of all of them would sometimes hand a scoped release someone
+	// else's previous tag. Restricting to this scope before comparing is what
+	// the local path gets for free from PreviousTag's own --match pattern.
+	previous = scopedLatestTag(tags, s.Prefix, s.Tag)
 
 	// A first release has nothing to compare against, and the compare endpoint
 	// requires a base. Reporting no changes would be wrong in the way that is
 	// hardest to notice: the local path answers the same question with the
 	// whole history, so the two would silently disagree.
 	if previous == "" {
-		infos, err := s.Client.CommitsUpTo(ctx, s.Repo, s.Tag)
+		infos, err := s.Client.CommitsUpTo(ctx, s.Repo, s.Tag, strings.TrimSuffix(s.Prefix, "/"))
 		if err != nil {
 			return "", nil, fmt.Errorf("changelog: listing commits up to %s: %w", s.Tag, err)
 		}
@@ -112,6 +136,10 @@ func Collect(ctx context.Context, s Source) (previous string, commits []discover
 		return "", convert(infos), nil
 	}
 
+	// The compare endpoint has no path parameter, unlike the commits endpoint
+	// above: a shallow, non-first release of a nested module can still list a
+	// commit that only touched some other module's files. The local path does
+	// not have this gap.
 	infos, err := s.Client.Compare(ctx, s.Repo, previous, s.Tag)
 	if err != nil {
 		return "", nil, fmt.Errorf("changelog: comparing %s...%s: %w", previous, s.Tag, err)
