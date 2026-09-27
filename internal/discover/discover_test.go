@@ -177,6 +177,9 @@ func TestNewScope(t *testing.T) {
 
 	t.Run("a nested module carries its own directory as prefix", func(t *testing.T) {
 		nested := filepath.Join(top, "services", "api")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatal(err)
+		}
 		s, err := NewScope(top, nested)
 		if err != nil {
 			t.Fatal(err)
