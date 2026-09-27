@@ -161,6 +161,37 @@ func TestSplitMajorSuffix(t *testing.T) {
 	}
 }
 
+func TestNewScope(t *testing.T) {
+	top := t.TempDir()
+
+	t.Run("a root module has no scope", func(t *testing.T) {
+		s, err := NewScope(top, top)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s != (Scope{}) {
+			t.Errorf("Scope = %+v, want empty", s)
+		}
+	})
+
+	t.Run("a nested module carries its own directory as prefix", func(t *testing.T) {
+		nested := filepath.Join(top, "services", "api")
+		s, err := NewScope(top, nested)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Dir != "services/api" || s.Prefix != "services/api/" {
+			t.Errorf("Scope = %+v", s)
+		}
+	})
+
+	t.Run("a directory outside the repository is refused", func(t *testing.T) {
+		if _, err := NewScope(top, t.TempDir()); err == nil {
+			t.Error("expected an error for a module outside the repository")
+		}
+	})
+}
+
 // The major-version gate. Getting this wrong publishes a release that `go get`
 // silently refuses to resolve, with no warning from any Go tool.
 func TestModuleCheckTag(t *testing.T) {
@@ -430,6 +461,11 @@ func TestFindGit(t *testing.T) {
 	if g.Shallow {
 		t.Error("a fresh repository should not be shallow")
 	}
+	// Scope depends on this: a root module derived against its own TopLevel
+	// must come out empty, or every plain repository would carry a prefix.
+	if s, err := NewScope(g.TopLevel, dir); err != nil || s != (Scope{}) {
+		t.Errorf("NewScope(TopLevel, dir) = %+v, %v, want an empty scope", s, err)
+	}
 
 	repo, err := FindRepo(ctx, dir)
 	if err != nil {
@@ -440,7 +476,7 @@ func TestFindGit(t *testing.T) {
 	}
 
 	// A tag on HEAD is the release being made, not the one before it.
-	if prev, err := PreviousTag(ctx, dir); err != nil || prev != "" {
+	if prev, err := PreviousTag(ctx, dir, ""); err != nil || prev != "" {
 		t.Errorf("PreviousTag = %q, %v; want empty for a first release", prev, err)
 	}
 
@@ -457,7 +493,7 @@ func TestFindGit(t *testing.T) {
 	run("commit", "-q", "-m", "second")
 	run("tag", "v1.1.0")
 
-	if prev, err := PreviousTag(ctx, dir); err != nil || prev != "v1.0.0" {
+	if prev, err := PreviousTag(ctx, dir, ""); err != nil || prev != "v1.0.0" {
 		t.Errorf("PreviousTag = %q, %v; want v1.0.0", prev, err)
 	}
 }
@@ -487,7 +523,7 @@ func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
 	run("commit", "-q", "-m", "third")
 
 	ctx := context.Background()
-	if prev, err := PreviousTag(ctx, dir); err != nil || prev != "v1.0.0" {
+	if prev, err := PreviousTag(ctx, dir, ""); err != nil || prev != "v1.0.0" {
 		t.Errorf("PreviousTag = %q, %v; want v1.0.0, not the nested module's tag", prev, err)
 	}
 }

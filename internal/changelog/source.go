@@ -21,6 +21,11 @@ type Source struct {
 	// a release is only ever made from a tagged HEAD.
 	Tag string
 
+	// Prefix is the module's scope prefix (see discover.Scope), empty for a
+	// root module. It keeps the local path from picking another scope's tag
+	// as this release's previous one.
+	Prefix string
+
 	// Shallow says the local history is incomplete, so the forge must be
 	// asked instead.
 	Shallow bool
@@ -64,7 +69,7 @@ func convert(infos []github.CommitInfo) []discover.Commit {
 
 func Collect(ctx context.Context, s Source) (previous string, commits []discover.Commit, err error) {
 	if !s.Shallow {
-		previous, err = discover.PreviousTag(ctx, s.Dir)
+		previous, err = discover.PreviousTag(ctx, s.Dir, s.Prefix)
 		if err != nil {
 			return "", nil, err
 		}

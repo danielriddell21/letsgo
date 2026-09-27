@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/build"
+	"github.com/danielriddell21/letsgo/internal/bump"
 	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
@@ -147,6 +149,82 @@ func TestPlanAndBuildFailsWhenThePlanDoes(t *testing.T) {
 	}
 	if described {
 		t.Error("Describe ran despite the plan never resolving")
+	}
+}
+
+// scopedModuleFixture writes a repository with a nested module, versioned
+// under its own directory the way a monorepo tags it — the scenario
+// docs/design/monorepo.md exists for.
+func scopedModuleFixture(t *testing.T) (repoDir, moduleDir string) {
+	t.Helper()
+	repoDir = t.TempDir()
+	moduleDir = filepath.Join(repoDir, "services", "api")
+
+	for name, content := range map[string]string{
+		"go.mod":                  "module github.com/you/foo\n\ngo 1.24\n",
+		"services/api/go.mod":     "module github.com/you/foo/services/api\n\ngo 1.24\n",
+		"services/api/letsgo.mod": "build " + gobuild.Host().String() + "\n",
+	} {
+		path := filepath.Join(repoDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	identity := []string{"-c", "user.name=Test", "-c", "user.email=t@example.com"}
+	for _, args := range [][]string{
+		{"-C", repoDir, "init", "-q", "-b", "main"},
+		{"-C", repoDir, "add", "."},
+		append(append([]string{"-C", repoDir}, identity...), "commit", "-q", "-m", "first"),
+		{"-C", repoDir, "tag", "services/api/v1.2.3"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return repoDir, moduleDir
+}
+
+// A worktree always checks out the whole repository, so a nested module has
+// to be compared at <worktree>/relDir, never at the worktree's own root: the
+// same bug `plan.checkoutTag` had, in the command that proposes a tag rather
+// than the one that resolves one.
+func TestCheckoutForDiffReturnsTheModulesOwnDirectory(t *testing.T) {
+	repoDir, _ := scopedModuleFixture(t)
+
+	old, cleanup, err := checkoutForDiff(context.Background(), repoDir, "services/api/v1.2.3", "services/api")
+	if err != nil {
+		t.Fatalf("checkoutForDiff: %v", err)
+	}
+	defer cleanup()
+
+	data, err := os.ReadFile(filepath.Join(old, "go.mod"))
+	if err != nil {
+		t.Fatalf("the returned directory is not the nested module's own: %v", err)
+	}
+	if string(data) != "module github.com/you/foo/services/api\n\ngo 1.24\n" {
+		t.Errorf("go.mod = %q, want the nested module's own", data)
+	}
+}
+
+// bump.Propose parses the previous tag as a plain "vX.Y.Z"; a module scoped
+// under services/api carries that version behind a "services/api/" prefix,
+// which has to come off before proposeVersion hands it to bump.Propose, or
+// every scoped tag proposal fails outright.
+func TestProposeVersionStripsThePrefixBeforeParsingSemver(t *testing.T) {
+	_, moduleDir := scopedModuleFixture(t)
+	module := discover.Module{Path: "github.com/you/foo/services/api", Dir: moduleDir}
+	scope := discover.Scope{Dir: "services/api", Prefix: "services/api/"}
+
+	proposal, err := proposeVersion(context.Background(), module, scope, "services/api/v1.2.3", bump.None)
+	if err != nil {
+		t.Fatalf("proposeVersion: %v", err)
+	}
+	if proposal.Next != "v1.2.4" {
+		t.Errorf("Next = %q, want v1.2.4 (a patch bump of the stripped version)", proposal.Next)
 	}
 }
 
