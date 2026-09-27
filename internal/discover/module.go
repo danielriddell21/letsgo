@@ -111,6 +111,96 @@ func modulePath(goModPath string) (string, error) {
 	return "", fmt.Errorf("discover: %s has no module directive", goModPath)
 }
 
+// LocalReplace returns the module path and replacement directory of the
+// first replace directive in goModPath whose replacement is a filesystem
+// path rather than a module version. Both are empty when there is none.
+//
+// go.mod's own rule for telling the two apart is the one used here: a
+// replacement with no version after it is a directory, not a module. That
+// directive is worth catching before a release, rather than after: `go
+// install <module>@<version>` resolves the module from the proxy or module
+// cache, where the local directory does not exist, so the toolchain refuses
+// to build it — and the release's own source archive can't stand in for it
+// either, since the archive is exactly what git tracks and a path outside
+// the module is not part of that.
+func LocalReplace(goModPath string) (module, dir string, err error) {
+	f, err := os.Open(goModPath)
+	if err != nil {
+		return "", "", fmt.Errorf("discover: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	scanner := bufio.NewScanner(f)
+	inBlock := false
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(stripComment(scanner.Text()))
+		if line == "" {
+			continue
+		}
+
+		var target string
+		target, inBlock = replaceTarget(line, inBlock)
+		if target == "" {
+			continue
+		}
+		if m, d, ok := localReplaceTarget(target); ok {
+			return m, d, nil
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", "", fmt.Errorf("discover: reading %s: %w", goModPath, err)
+	}
+	return "", "", nil
+}
+
+// replaceTarget extracts the "old [oldver] => new [newver]" text from one
+// non-blank, comment-stripped go.mod line, tracking whether the scan is
+// inside a "replace (" block. The returned target is empty when the line
+// names no replacement, whether because it is unrelated or because it opens
+// or closes the block itself.
+func replaceTarget(line string, inBlock bool) (target string, stillInBlock bool) {
+	if inBlock {
+		if line == ")" {
+			return "", false
+		}
+		return line, true
+	}
+
+	rest, ok := strings.CutPrefix(line, "replace")
+	if !ok || (rest != "" && !isSpace(rest[0])) {
+		return "", false
+	}
+
+	rest = strings.TrimSpace(rest)
+	if rest == "(" {
+		return "", true
+	}
+	return rest, false
+}
+
+// localReplaceTarget splits one "old [oldver] => new [newver]" line and
+// reports whether new is a filesystem path: one with no version after it.
+func localReplaceTarget(line string) (module, dir string, ok bool) {
+	old, replacement, found := strings.Cut(line, "=>")
+	if !found {
+		return "", "", false
+	}
+
+	oldFields := strings.Fields(old)
+	if len(oldFields) == 0 {
+		return "", "", false
+	}
+
+	replacementFields := strings.Fields(replacement)
+	if len(replacementFields) != 1 {
+		return "", "", false
+	}
+
+	return unquote(oldFields[0]), unquote(replacementFields[0]), true
+}
+
 func stripComment(line string) string {
 	if i := strings.Index(line, "//"); i >= 0 {
 		return line[:i]

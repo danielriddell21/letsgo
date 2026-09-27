@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,6 +48,20 @@ func TestEnvUsesAFixedPath(t *testing.T) {
 	// the helpers it ships with.
 	if dir := toolchainDir(); dir != "" && !strings.Contains(paths[0], dir) {
 		t.Errorf("PATH %q does not include the toolchain directory %q", paths[0], dir)
+	}
+}
+
+// A root go.work in a monorepo is auto-detected by walking up from the build
+// directory, with no environment variable needed to trigger it — so a build
+// forced to inherit whatever the caller's GOWORK happened to be would still
+// silently substitute a sibling module from disk instead of the version
+// go.mod names. GOWORK=off has to be set unconditionally, not merely left
+// unset, to turn that detection off regardless of the caller's environment.
+func TestEnvDisablesWorkspaceMode(t *testing.T) {
+	t.Setenv("GOWORK", "/some/repo/go.work")
+
+	if !slices.Contains(Env(Host(), ""), "GOWORK=off") {
+		t.Errorf("GOWORK=off is not in the build environment: %v", Env(Host(), ""))
 	}
 }
 

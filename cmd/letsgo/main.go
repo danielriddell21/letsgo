@@ -363,7 +363,7 @@ func runRelease(args []string) error {
 		return err
 	}
 
-	if p.Features.On("proxy-warm") && !*snapshot && !published.Release.Draft {
+	if p.Features.On("proxy-warm") && !*snapshot && !published.Release.Draft && p.Config.ModuleDir == "" {
 		warmProxy(ctx, p)
 	}
 

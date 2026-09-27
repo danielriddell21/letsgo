@@ -564,6 +564,46 @@ func TestModuleDirectiveRequiresAGoMod(t *testing.T) {
 	}
 }
 
+// A nested module's tag is the repository's own, not a version of that
+// module, so `go install` and the proxy warm cannot resolve it until a
+// release carries a scoped tag of its own.
+func TestModuleDirectiveWarnsThatTheProxyCannotResolveIt(t *testing.T) {
+	r := workspace(t, "module web\nbuild linux/amd64\n")
+	p := r.resolve(plan.Options{})
+
+	c := check(t, p, "module proxy")
+	if c.Status != plan.Warn {
+		t.Errorf("check = %+v, want Warn", c)
+	}
+}
+
+func TestReplaceDirective(t *testing.T) {
+	replaceCheck := func(t *testing.T, replace string) plan.Check {
+		t.Helper()
+		r := newRepo(t)
+		r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n\n"+replace+"\n")
+		r.write("main.go", "package main\n\nfunc main() {}\n")
+		r.commit("v1.0.0")
+		return check(t, r.resolve(plan.Options{}), "replace")
+	}
+
+	t.Run("a local path fails the plan", func(t *testing.T) {
+		c := replaceCheck(t, "replace github.com/you/bar => ../bar")
+		if c.Status != plan.Fail || !strings.Contains(c.Detail, "../bar") {
+			t.Errorf("check = %+v", c)
+		}
+	})
+
+	// A replacement naming a module version, rather than a filesystem path, is
+	// exactly what `go install` already handles.
+	t.Run("a module version is fine", func(t *testing.T) {
+		c := replaceCheck(t, "replace github.com/you/bar => github.com/you/baz v1.0.0")
+		if c.Status != plan.Pass {
+			t.Errorf("check = %+v, want Pass", c)
+		}
+	})
+}
+
 func TestVersionDirectiveInjectsIntoANamedSymbol(t *testing.T) {
 	r := workspace(t, "module web\nbuild linux/amd64\nversion internal/buildinfo.Version\n")
 	p := r.resolve(plan.Options{})

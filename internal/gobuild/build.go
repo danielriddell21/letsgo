@@ -196,6 +196,15 @@ func environ(t Target, toolchain string) []string {
 	env["GOFLAGS"] = ""
 	env["GOEXPERIMENT"] = ""
 
+	// Off rather than unset. The toolchain auto-detects a go.work file by
+	// walking up from the build directory, with no environment variable
+	// needed to trigger it — a root go.work in a monorepo would then silently
+	// substitute sibling modules from disk instead of the versions go.mod
+	// names, so a release would build something `go install mod@v` cannot
+	// reproduce. This is the one override that must win regardless of what a
+	// caller's environment set.
+	env["GOWORK"] = "off"
+
 	// Locale can affect tool output formatting. Pin it for good measure.
 	env["LC_ALL"] = "C"
 
