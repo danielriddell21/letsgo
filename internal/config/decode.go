@@ -85,6 +85,10 @@ type Config struct {
 	// Disabled are the features this repository turned off, by name from the
 	// feature catalogue (internal/feature).
 	Disabled []string
+
+	// Required are the features whose Skip becomes a Fail, by name from the
+	// feature catalogue.
+	Required []string
 }
 
 // Plugin is one external program invoked at a named hook.
@@ -165,6 +169,7 @@ var known = map[string]string{
 	"brew":    "brew <owner/tap-repo>, or brew caveats <text>",
 	"release": "release <key=value>...",
 	"disable": "disable <feature>...",
+	"require": "require <feature>...",
 }
 
 // blockOnly names the directives that exist only as a block. Written down so
@@ -187,6 +192,7 @@ var handlers = map[string]func(cfg *Config, file string, line *Line) error{
 	"brew":    applyBrew,
 	"release": applyRelease,
 	"disable": applyDisable,
+	"require": applyRequire,
 }
 
 // Decode interprets a parsed file.
@@ -744,8 +750,37 @@ func applyDisable(cfg *Config, file string, line *Line) error {
 		if !f.Disable {
 			return errAt(file, line.P, "%s cannot be disabled; remove the `%s` directive instead", name, f.Enable)
 		}
+		if containsString(cfg.Required, name) {
+			return errAt(file, line.P, "%s cannot be both disabled and required", name)
+		}
 		if !containsString(cfg.Disabled, name) {
 			cfg.Disabled = append(cfg.Disabled, name)
+		}
+	}
+	return nil
+}
+
+// applyRequire makes a feature's Skip a Fail: a gate that only ran when its
+// tool happened to be on PATH becomes one this release cannot pass without
+// it.
+func applyRequire(cfg *Config, file string, line *Line) error {
+	if len(line.Args) == 0 {
+		return arity(file, line)
+	}
+
+	for _, name := range line.Args {
+		f, ok := feature.Lookup(name)
+		if !ok {
+			return errAt(file, line.P, "%s", unknownFeature(name))
+		}
+		if !f.Require {
+			return errAt(file, line.P, "%s cannot be required", name)
+		}
+		if containsString(cfg.Disabled, name) {
+			return errAt(file, line.P, "%s cannot be both disabled and required", name)
+		}
+		if !containsString(cfg.Required, name) {
+			cfg.Required = append(cfg.Required, name)
 		}
 	}
 	return nil
