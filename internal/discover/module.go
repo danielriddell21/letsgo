@@ -183,7 +183,7 @@ func replaceTarget(line string, inBlock bool) (target string, stillInBlock bool)
 // localReplaceTarget splits one "old [oldver] => new [newver]" line and
 // reports whether new is a filesystem path: one with no version after it.
 func localReplaceTarget(line string) (module, dir string, ok bool) {
-	old, new, found := strings.Cut(line, "=>")
+	old, replacement, found := strings.Cut(line, "=>")
 	if !found {
 		return "", "", false
 	}
@@ -193,12 +193,12 @@ func localReplaceTarget(line string) (module, dir string, ok bool) {
 		return "", "", false
 	}
 
-	newFields := strings.Fields(new)
-	if len(newFields) != 1 {
+	replacementFields := strings.Fields(replacement)
+	if len(replacementFields) != 1 {
 		return "", "", false
 	}
 
-	return unquote(oldFields[0]), unquote(newFields[0]), true
+	return unquote(oldFields[0]), unquote(replacementFields[0]), true
 }
 
 func stripComment(line string) string {
