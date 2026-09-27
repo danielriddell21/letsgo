@@ -47,6 +47,7 @@ usage:
   letsgo update [--check]                update letsgo itself, verified against its manifest
   letsgo plugin install <name>           install a plugin, verified against its manifest
   letsgo plugin list                     the plugins this repository pins, and what is installed
+  letsgo features                        the feature catalogue: what can be disabled or required
   letsgo fmt [file]                      format letsgo.mod
   letsgo version                         print the version (also --version)
 
@@ -60,16 +61,17 @@ run a command with -h for its options.
 // a change to the program's entry point. It is also why the aliases sit beside
 // the names they alias instead of sharing a case.
 var commands = map[string]func([]string) error{
-	"plan":    runPlan,
-	"build":   runBuild,
-	"release": runRelease,
-	"verify":  runVerify,
-	"diff":    runDiff,
-	"yank":    runYank,
-	"update":  runUpdate,
-	"plugin":  runPlugin,
-	"tag":     runTag,
-	"fmt":     runFmt,
+	"plan":     runPlan,
+	"build":    runBuild,
+	"release":  runRelease,
+	"verify":   runVerify,
+	"diff":     runDiff,
+	"yank":     runYank,
+	"update":   runUpdate,
+	"plugin":   runPlugin,
+	"tag":      runTag,
+	"fmt":      runFmt,
+	"features": runFeatures,
 
 	"version":   runVersion,
 	"--version": runVersion,
