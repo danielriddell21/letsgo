@@ -182,6 +182,19 @@ func (p *Plan) resolvePlugins() {
 				configured.Hook, strings.Join(hooks, " and "))
 			return
 		}
+		if known, ok := plugin.Lookup(configured.Command); ok {
+			switch {
+			case known.Hook == "":
+				p.add("plugins", Fail,
+					"%s does not answer a hook and cannot be pinned; run it directly after the release",
+					configured.Command)
+				return
+			case known.Hook != hook:
+				p.add("plugins", Fail, "%s answers the %s hook, not %s",
+					configured.Command, known.Hook, hook)
+				return
+			}
+		}
 		p.Plugins[hook] = plugin.Plugin{
 			Hook:    hook,
 			Command: configured.Command,
@@ -192,6 +205,48 @@ func (p *Plan) resolvePlugins() {
 	}
 
 	p.note("plugins", strings.Join(named, ", "), ConfigFile)
+}
+
+// hintPlugins nudges toward a first-party plugin whose job matches this
+// release's shape, without failing anything: building eleven commands
+// without letsgo-multi, or shipping a darwin variant beside a Homebrew tap
+// without letsgo-cask, are both fine — just more work than they need to be.
+func (p *Plan) hintPlugins() {
+	if len(p.Commands) > 1 && !p.pluginPinned("letsgo-multi") {
+		p.add("plugins", Warn,
+			"this release builds %d commands into separate archives; letsgo-multi groups them into one "+
+				"(see `letsgo plugin list --available`)", len(p.Commands))
+	}
+	if p.Config.BrewTap != "" && hasDarwinVariant(p.Config.Variants) && !p.pluginPinned("letsgo-cask") {
+		p.add("plugins", Warn,
+			"this release has a Homebrew tap and a darwin variant; letsgo-cask writes a cask for it "+
+				"(see `letsgo plugin list --available`)")
+	}
+}
+
+// pluginPinned reports whether the repository already pins the named
+// command, by whichever hook.
+func (p *Plan) pluginPinned(command string) bool {
+	for _, configured := range p.Config.Plugins {
+		if configured.Command == command {
+			return true
+		}
+	}
+	return false
+}
+
+// hasDarwinVariant reports whether any variant targets darwin. Variant
+// targets are raw "goos/goarch" strings at this point: parsing them into
+// gobuild.Target happens later, and a hint has no need to wait for that.
+func hasDarwinVariant(variants []config.Variant) bool {
+	for _, v := range variants {
+		for _, t := range v.Targets {
+			if strings.HasPrefix(t, "darwin/") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // applyLayoutPlugin asks the layout plugin which binaries share an archive.
@@ -615,6 +670,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 
 	p.resolveTap()
 	p.resolveImage(ctx)
+	p.hintPlugins()
 
 	if opts.Publish {
 		p.checkForge(ctx, opts)

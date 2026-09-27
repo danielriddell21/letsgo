@@ -53,12 +53,32 @@ func TestDescribePinFillsTheHookFromTheConfig(t *testing.T) {
 	}
 }
 
-// letsgo does not guess a hook it has not been told. A placeholder the user
-// has to fill is honest; a guessed hook that is wrong is a release nobody can
-// account for.
+// letsgo does not guess a hook it has not been told, for a plugin it does not
+// publish itself. A placeholder the user has to fill is honest; a guessed
+// hook that is wrong is a release nobody can account for.
 func TestDescribePinLeavesAnUnknownHookBlank(t *testing.T) {
 	t.Chdir(t.TempDir())
 	write(t, "letsgo.mod", "build linux/amd64\n")
+
+	var out bytes.Buffer
+	describePin(&out, "letsgo-third-party", &selfupdate.Update{
+		Version:      "0.2.0",
+		BinarySHA256: strings.Repeat("c", 64),
+	})
+
+	if !strings.Contains(out.String(), "plugin <hook> letsgo-third-party v0.2.0") {
+		t.Errorf("describePin printed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "the plugin documents") {
+		t.Error("an unfilled hook should say where to find it")
+	}
+}
+
+// A plugin letsgo publishes itself has a documented hook, and installing it
+// fresh — no letsgo.mod pinning it yet — should not make someone copy that
+// hook out of a README by hand.
+func TestDescribePinFillsTheHookFromTheCatalogueForAKnownPlugin(t *testing.T) {
+	t.Chdir(t.TempDir())
 
 	var out bytes.Buffer
 	describePin(&out, "letsgo-env", &selfupdate.Update{
@@ -66,11 +86,49 @@ func TestDescribePinLeavesAnUnknownHookBlank(t *testing.T) {
 		BinarySHA256: strings.Repeat("c", 64),
 	})
 
-	if !strings.Contains(out.String(), "plugin <hook> letsgo-env v0.2.0") {
+	want := "plugin ldflags letsgo-env v0.2.0"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("describePin printed:\n%s\nwant a line %q", out.String(), want)
+	}
+	if strings.Contains(out.String(), "<hook>") {
+		t.Error("a catalogued plugin's hook should not have been left blank")
+	}
+}
+
+// letsgo-cask answers no hook: it reads a finished release, so there is
+// nothing to pin it to, and describePin must not invent one.
+func TestDescribePinReportsAStandalonePlugin(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var out bytes.Buffer
+	describePin(&out, "letsgo-cask", &selfupdate.Update{
+		Version:      "0.2.0",
+		BinarySHA256: strings.Repeat("c", 64),
+	})
+
+	if !strings.Contains(out.String(), "does not answer a hook") {
 		t.Errorf("describePin printed:\n%s", out.String())
 	}
-	if !strings.Contains(out.String(), "the plugin documents") {
-		t.Error("an unfilled hook should say where to find it")
+	if strings.Contains(out.String(), "pin it in letsgo.mod") {
+		t.Error("a standalone plugin should not be told to pin itself")
+	}
+}
+
+// Upgrading a plugin already pinned to a hook must never silently move it to
+// a different one, even if the catalogue disagrees with the config.
+func TestDescribePinPrefersTheConfigOverTheCatalogue(t *testing.T) {
+	t.Chdir(t.TempDir())
+	write(t, "letsgo.mod", "build linux/amd64\n"+
+		"plugin ldflags letsgo-env v0.1.0 sha256:"+strings.Repeat("a", 64)+"\n")
+
+	var out bytes.Buffer
+	describePin(&out, "letsgo-env", &selfupdate.Update{
+		Version:      "0.2.0",
+		BinarySHA256: strings.Repeat("c", 64),
+	})
+
+	if !strings.Contains(out.String(), "plugin ldflags letsgo-env v0.2.0") {
+		t.Errorf("describePin printed:\n%s", out.String())
 	}
 }
 
@@ -224,6 +282,34 @@ func TestListPluginsWithNoPins(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "pins no plugins") {
 		t.Errorf("out = %q", out.String())
+	}
+}
+
+// plugin list --available answers "is there already a plugin for this"
+// without needing a letsgo.mod at all: it lists what letsgo publishes, not
+// what this repository pins.
+func TestListAvailablePluginsListsTheCatalogue(t *testing.T) {
+	var out bytes.Buffer
+	if err := listAvailablePlugins(&out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+
+	if !strings.Contains(got, "archive-layout") || !strings.Contains(got, "letsgo-multi") {
+		t.Errorf("out = %q, want letsgo-multi under archive-layout", got)
+	}
+	if !strings.Contains(got, "(standalone)") || !strings.Contains(got, "letsgo-cask") {
+		t.Errorf("out = %q, want letsgo-cask marked standalone", got)
+	}
+}
+
+// --available must work with no letsgo.mod in sight: it lists what could be
+// pinned, not what already is.
+func TestRunPluginListAvailableNeedsNoConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	if err := runPluginList([]string{"--available"}); err != nil {
+		t.Errorf("runPluginList(--available) = %v", err)
 	}
 }
 
