@@ -640,16 +640,21 @@ func runTag(args []string) error {
 	if !git.Clean {
 		return fmt.Errorf("uncommitted changes; a tag names a commit, so commit first")
 	}
-
-	previous, err := discover.PreviousTag(ctx, module.Dir)
+	scope, err := discover.NewScope(git.TopLevel, module.Dir)
 	if err != nil {
 		return err
 	}
 
-	proposal, err := proposeVersion(ctx, module, previous, forced(*major, *minor, *patch))
+	previous, err := discover.PreviousTag(ctx, module.Dir, scope.Prefix)
 	if err != nil {
 		return err
 	}
+
+	proposal, err := proposeVersion(ctx, module, scope, previous, forced(*major, *minor, *patch))
+	if err != nil {
+		return err
+	}
+	tag := scope.Prefix + proposal.Next
 
 	reportProposal(proposal, previous)
 
@@ -661,18 +666,18 @@ func runTag(args []string) error {
 		return nil
 	}
 
-	if discover.TagExists(ctx, module.Dir, proposal.Next) {
-		return fmt.Errorf("%s already exists", proposal.Next)
+	if discover.TagExists(ctx, module.Dir, tag) {
+		return fmt.Errorf("%s already exists", tag)
 	}
-	if !*yes && !confirm(proposal.Next) {
+	if !*yes && !confirm(tag) {
 		fmt.Println("\n  nothing was tagged")
 		return nil
 	}
 
-	if err := discover.CreateTag(ctx, module.Dir, proposal.Next, proposal.Next); err != nil {
+	if err := discover.CreateTag(ctx, module.Dir, tag, tag); err != nil {
 		return err
 	}
-	fmt.Printf("\n  tagged %s\n  push it with: git push origin %s\n", proposal.Next, proposal.Next)
+	fmt.Printf("\n  tagged %s\n  push it with: git push origin %s\n", tag, tag)
 	return nil
 }
 
@@ -691,9 +696,18 @@ func forced(major, minor, patch bool) bump.Level {
 }
 
 // proposeVersion gathers both signals and combines them.
-func proposeVersion(ctx context.Context, module discover.Module, previous string, force bump.Level) (bump.Proposal, error) {
+//
+// previous is the real git tag, prefixed exactly as it exists in the
+// repository — Commits and checkoutForDiff need that to resolve it — but the
+// version bump.Propose computes is a plain "vX.Y.Z", so scope.Prefix is
+// stripped before it reaches the semver parser.
+func proposeVersion(
+	ctx context.Context, module discover.Module, scope discover.Scope, previous string, force bump.Level,
+) (bump.Proposal, error) {
+	previousVersion := strings.TrimPrefix(previous, scope.Prefix)
+
 	if force != bump.None {
-		return bump.Propose(previous, module.Path,
+		return bump.Propose(previousVersion, module.Path,
 			bump.Signal{Source: "you", Level: force, Detail: "requested on the command line"})
 	}
 
@@ -712,7 +726,7 @@ func proposeVersion(ctx context.Context, module discover.Module, previous string
 		apiErr  = errors.New("no earlier release to compare against")
 	)
 	if previous != "" {
-		old, cleanup, err := checkoutForDiff(ctx, module.Dir, previous)
+		old, cleanup, err := checkoutForDiff(ctx, module.Dir, previous, scope.Dir)
 		if err != nil {
 			apiErr = err
 		} else {
@@ -721,23 +735,27 @@ func proposeVersion(ctx context.Context, module discover.Module, previous string
 		}
 	}
 
-	return bump.Propose(previous, module.Path,
+	return bump.Propose(previousVersion, module.Path,
 		bump.FromAPI(changes, apiErr),
 		bump.FromCommits(notes.Entries))
 }
 
-func checkoutForDiff(ctx context.Context, repoDir, tag string) (string, func(), error) {
+// checkoutForDiff checks out tag into a scratch worktree and returns the
+// module's own directory within it — a worktree always holds the whole
+// repository, so a module nested in it (relDir, slash-separated) is compared
+// at <worktree>/relDir, never at the worktree's own root.
+func checkoutForDiff(ctx context.Context, repoDir, tag, relDir string) (string, func(), error) {
 	base, err := os.MkdirTemp("", "letsgo-tag-")
 	if err != nil {
 		return "", nil, fmt.Errorf("letsgo: scratch directory: %w", err)
 	}
-	dir := filepath.Join(base, "previous")
-	if err := discover.AddWorktree(ctx, repoDir, dir, tag); err != nil {
+	worktree := filepath.Join(base, "previous")
+	if err := discover.AddWorktree(ctx, repoDir, worktree, tag); err != nil {
 		_ = os.RemoveAll(base)
 		return "", nil, err
 	}
-	return dir, func() {
-		_ = discover.RemoveWorktree(ctx, repoDir, dir)
+	return filepath.Join(worktree, filepath.FromSlash(relDir)), func() {
+		_ = discover.RemoveWorktree(ctx, repoDir, worktree)
 		_ = os.RemoveAll(base)
 	}, nil
 }
@@ -825,6 +843,7 @@ func releaseNotes(ctx context.Context, p *plan.Plan, client *github.Client, repo
 	previous, commits, err := changelog.Collect(ctx, changelog.Source{
 		Dir:     p.Module.Dir,
 		Tag:     p.Tag,
+		Prefix:  p.Scope.Prefix,
 		Shallow: p.Git.Shallow,
 		Client:  client,
 		Repo:    repo,

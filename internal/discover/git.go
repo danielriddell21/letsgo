@@ -36,6 +36,11 @@ type Git struct {
 	// letsgo records the fact and lets the changelog fall back to the forge's
 	// compare API.
 	Shallow bool
+
+	// TopLevel is the repository's root directory, absolute. A module built
+	// from a nested directory is what a monorepo release's tag prefix is
+	// derived from: the module's own directory relative to this one.
+	TopLevel string
 }
 
 // FindGit inspects the repository containing dir.
@@ -64,6 +69,11 @@ func FindGit(ctx context.Context, dir string) (Git, error) {
 		return Git{}, err
 	}
 
+	topLevel, err := git(ctx, dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return Git{}, err
+	}
+
 	var tags []string
 	if out, err := git(ctx, dir, "tag", "--points-at", "HEAD"); err == nil && out != "" {
 		tags = strings.Split(out, "\n")
@@ -83,6 +93,7 @@ func FindGit(ctx context.Context, dir string) (Git, error) {
 		Tags:        tags,
 		Clean:       status == "",
 		Shallow:     shallow,
+		TopLevel:    topLevel,
 	}, nil
 }
 
@@ -90,13 +101,13 @@ func FindGit(ctx context.Context, dir string) (Git, error) {
 // tag that points at HEAD itself. It is empty when there is no earlier tag,
 // which is the normal state for a first release.
 //
-// Matched against "v[0-9]*" rather than every tag: `git describe` otherwise
-// matches any tag reachable from HEAD, so in a repository that also carries
-// a nested module's tags (e.g. "web/v1.0.0") a root release could pick one
-// of those as its previous tag and build its changelog, API gate and bump
-// against the wrong release entirely.
-func PreviousTag(ctx context.Context, dir string) (string, error) {
-	args := []string{"describe", "--tags", "--abbrev=0", "--match", "v[0-9]*"}
+// Matched against "<prefix>v[0-9]*" rather than every tag: `git describe`
+// otherwise matches any tag reachable from HEAD, so a release could pick a
+// different module's tag as its previous one — another scope's entirely for
+// a non-empty prefix, or a nested module's root-less tag when prefix is empty
+// — and build its changelog, API gate and bump against the wrong release.
+func PreviousTag(ctx context.Context, dir, prefix string) (string, error) {
+	args := []string{"describe", "--tags", "--abbrev=0", "--match", prefix + "v[0-9]*"}
 
 	if current, err := git(ctx, dir, "tag", "--points-at", "HEAD"); err == nil {
 		for _, tag := range strings.Split(current, "\n") {

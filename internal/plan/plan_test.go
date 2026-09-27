@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/bytesize"
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
@@ -574,6 +575,96 @@ func TestModuleDirectiveWarnsThatTheProxyCannotResolveIt(t *testing.T) {
 	c := check(t, p, "module proxy")
 	if c.Status != plan.Warn {
 		t.Errorf("check = %+v, want Warn", c)
+	}
+}
+
+// A module Go already versions independently — one with its own go.mod,
+// nested in a monorepo — is scoped: its tag carries its own directory as a
+// prefix, and the version letsgo resolves is that tag with the prefix
+// stripped, exactly as docs/design/monorepo.md proposes.
+func TestScopedRelease(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("services/api/go.mod", "module github.com/you/foo/services/api\n\ngo 1.24\n")
+	r.write("services/api/main.go", "package main\n\nfunc main() {}\n")
+	r.write("services/api/letsgo.mod", "build linux/amd64\n")
+	r.commit("services/api/v1.2.0")
+
+	p, err := plan.Resolve(context.Background(), plan.Options{Dir: filepath.Join(r.dir, "services/api")})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if p.Scope.Dir != "services/api" || p.Scope.Prefix != "services/api/" {
+		t.Errorf("Scope = %+v", p.Scope)
+	}
+	if p.Tag != "services/api/v1.2.0" {
+		t.Errorf("Tag = %q, want the prefixed tag", p.Tag)
+	}
+	if p.Version != "1.2.0" {
+		t.Errorf("Version = %q, want the prefix stripped", p.Version)
+	}
+	if c := check(t, p, "module path"); c.Status != plan.Pass {
+		t.Errorf("module path check = %+v", c)
+	}
+	if c := check(t, p, "tag"); c.Status != plan.Pass {
+		t.Errorf("tag check = %+v", c)
+	}
+}
+
+// A root module beside the nested one must still resolve its own,
+// unprefixed tag: the nested module's tag is a different scope entirely, not
+// a competing version tag on the same HEAD.
+func TestRootReleaseIgnoresANestedModulesTag(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\n")
+	r.write("services/api/go.mod", "module github.com/you/foo/services/api\n\ngo 1.24\n")
+	r.git("add", ".")
+	r.git("commit", "-q", "-m", "commit")
+	r.git("tag", "services/api/v1.2.0")
+	r.git("tag", "v1.0.0")
+
+	p, err := plan.Resolve(context.Background(), plan.Options{Dir: r.dir})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if p.Scope != (discover.Scope{}) {
+		t.Errorf("Scope = %+v, want empty for the root module", p.Scope)
+	}
+	if p.Tag != "v1.0.0" {
+		t.Errorf("Tag = %q, want the root's own tag", p.Tag)
+	}
+	if p.Version != "1.0.0" {
+		t.Errorf("Version = %q", p.Version)
+	}
+}
+
+// A nested module with no tag of its own must fail naming its own prefix,
+// not the bare "no version tag" a root module would get: HEAD may well carry
+// a root tag, which is a different scope's tag, not this module's missing one.
+func TestScopedModuleWithNoTagNamesItsOwnPrefix(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("services/api/go.mod", "module github.com/you/foo/services/api\n\ngo 1.24\n")
+	r.write("services/api/main.go", "package main\n\nfunc main() {}\n")
+	r.write("services/api/letsgo.mod", "build linux/amd64\n")
+	r.git("add", ".")
+	r.git("commit", "-q", "-m", "commit")
+	r.git("tag", "v1.0.0")
+
+	p, err := plan.Resolve(context.Background(), plan.Options{Dir: filepath.Join(r.dir, "services/api")})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	c := check(t, p, "tag")
+	if c.Status != plan.Fail || !strings.Contains(c.Detail, "services/api/v") {
+		t.Errorf("check = %+v, want it to name the module's own prefix", c)
 	}
 }
 

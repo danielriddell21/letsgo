@@ -548,7 +548,9 @@ type Plan struct {
 	// the repository rather than the module being built.
 	root discover.Module
 
-	Git        discover.Git
+	Git   discover.Git
+	Scope discover.Scope
+
 	Repo       discover.Repo
 	HasRepo    bool
 	Config     *config.Config
@@ -648,9 +650,17 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 		return nil, err
 	}
 
-	p := &Plan{Module: root, RootDir: root.Dir, root: root, Git: git, Snapshot: opts.Snapshot}
+	scope, err := discover.NewScope(git.TopLevel, root.Dir)
+	if err != nil {
+		return nil, err
+	}
+
+	p := &Plan{Module: root, RootDir: root.Dir, root: root, Git: git, Scope: scope, Snapshot: opts.Snapshot}
 	p.note("commit", git.Commit, "git HEAD")
 	p.note("commit time", git.CommitTime.Format("2006-01-02T15:04:05Z"), "git committer timestamp")
+	if scope.Prefix != "" {
+		p.note("scope", scope.Dir, "the module's own directory")
+	}
 
 	if repo, err := discover.FindRepo(ctx, root.Dir); err == nil {
 		p.Repo, p.HasRepo = repo, true
@@ -831,13 +841,13 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 		return
 	}
 
-	previous, err := discover.PreviousTag(ctx, p.RootDir)
+	previous, err := discover.PreviousTag(ctx, p.RootDir, p.Scope.Prefix)
 	if err != nil || previous == "" {
 		p.skip(apiCompatibility, apiGate, "no earlier release to compare against")
 		return
 	}
 
-	old, cleanup, err := checkoutTag(ctx, p.RootDir, previous)
+	old, cleanup, err := checkoutTag(ctx, p.RootDir, previous, p.Scope.Dir)
 	if err != nil {
 		p.add(apiCompatibility, Warn, "could not check out %s: %v", previous, err)
 		return
@@ -905,21 +915,25 @@ func bumpBetween(previous, current string) string {
 	}
 }
 
-// checkoutTag puts a tag's tree somewhere it can be compared against.
-func checkoutTag(ctx context.Context, repoDir, tag string) (dir string, cleanup func(), err error) {
+// checkoutTag checks out tag into a scratch worktree and returns the
+// module's own directory within it — relDir, slash-separated and relative to
+// the repository, exactly as Scope.Dir names it. A worktree always holds the
+// whole repository, so a module nested in it is compared at <worktree>/relDir,
+// never at the worktree's own root.
+func checkoutTag(ctx context.Context, repoDir, tag, relDir string) (dir string, cleanup func(), err error) {
 	base, err := os.MkdirTemp("", "letsgo-apidiff-")
 	if err != nil {
 		return "", nil, fmt.Errorf("plan: scratch directory: %w", err)
 	}
 
-	dir = filepath.Join(base, "old")
-	if err := discover.AddWorktree(ctx, repoDir, dir, tag); err != nil {
+	worktree := filepath.Join(base, "old")
+	if err := discover.AddWorktree(ctx, repoDir, worktree, tag); err != nil {
 		_ = os.RemoveAll(base)
 		return "", nil, err
 	}
 
-	return dir, func() {
-		_ = discover.RemoveWorktree(ctx, repoDir, dir)
+	return filepath.Join(worktree, filepath.FromSlash(relDir)), func() {
+		_ = discover.RemoveWorktree(ctx, repoDir, worktree)
 		_ = os.RemoveAll(base)
 	}, nil
 }
@@ -1422,24 +1436,20 @@ func (p *Plan) resolveProject() {
 func (p *Plan) resolveVersion(ctx context.Context) {
 	if p.Snapshot {
 		base := "0.0.0"
-		if prev, err := discover.PreviousTag(ctx, p.RootDir); err == nil && prev != "" {
-			base = strings.TrimPrefix(prev, "v")
+		if prev, err := discover.PreviousTag(ctx, p.RootDir, p.Scope.Prefix); err == nil && prev != "" {
+			base = strings.TrimPrefix(strings.TrimPrefix(prev, p.Scope.Prefix), "v")
 		}
 		p.Version = fmt.Sprintf("%s-next+%s", base, p.Git.ShortCommit)
 		p.note("version", p.Version, "snapshot of the previous tag")
 		return
 	}
 
-	var versions []string
-	for _, tag := range p.Git.Tags {
-		if len(tag) > 1 && tag[0] == 'v' && tag[1] >= '0' && tag[1] <= '9' {
-			versions = append(versions, tag)
-		}
-	}
+	prefix := p.Scope.Prefix
+	versions := scopedVersionTags(p.Git.Tags, prefix)
 
 	switch len(versions) {
 	case 0:
-		p.add("tag", Fail, "HEAD has no version tag; tag a release or use --snapshot")
+		p.failNoVersionTag(prefix)
 		return
 	case 1:
 		// The ordinary case.
@@ -1450,16 +1460,44 @@ func (p *Plan) resolveVersion(ctx context.Context) {
 	}
 
 	p.Tag = versions[0]
-	p.Version = strings.TrimPrefix(p.Tag, "v")
+	versionTag := strings.TrimPrefix(p.Tag, prefix)
+	p.Version = strings.TrimPrefix(versionTag, "v")
 	p.note("version", p.Version, "git tag "+p.Tag)
 	p.add("tag", Pass, "%s is the only version tag on HEAD", p.Tag)
 
 	// The check nothing else in this category performs.
-	if err := p.Module.CheckTag(p.Tag); err != nil {
+	if err := p.Module.CheckTag(versionTag); err != nil {
 		p.add("module path", Fail, "%v", err)
 	} else {
 		p.add("module path", Pass, "%s agrees with tag %s", p.Module.Path, p.Tag)
 	}
+}
+
+// scopedVersionTags returns the tags that name a version of prefix's own
+// scope, in the same order they were given.
+func scopedVersionTags(tags []string, prefix string) []string {
+	var versions []string
+	for _, tag := range tags {
+		rest, ok := strings.CutPrefix(tag, prefix)
+		if !ok {
+			continue
+		}
+		if len(rest) > 1 && rest[0] == 'v' && rest[1] >= '0' && rest[1] <= '9' {
+			versions = append(versions, tag)
+		}
+	}
+	return versions
+}
+
+// failNoVersionTag records that this scope has no version tag on HEAD,
+// naming its own prefix when it has one: a root module's tag is a different
+// scope entirely, not this one's missing tag.
+func (p *Plan) failNoVersionTag(prefix string) {
+	if prefix == "" {
+		p.add("tag", Fail, "HEAD has no version tag; tag a release or use --snapshot")
+		return
+	}
+	p.add("tag", Fail, "HEAD has no %sv version tag; tag a release or use --snapshot", prefix)
 }
 
 func (p *Plan) checkWorktree(opts Options) {
