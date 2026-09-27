@@ -711,7 +711,11 @@ func proposeVersion(
 			bump.Signal{Source: "you", Level: force, Detail: "requested on the command line"})
 	}
 
-	commits, err := discover.Commits(ctx, module.Dir, previous, "HEAD")
+	nested, err := discover.NestedModuleDirs(module.Dir)
+	if err != nil {
+		return bump.Proposal{}, err
+	}
+	commits, err := discover.Commits(ctx, module.Dir, previous, "HEAD", nested...)
 	if err != nil {
 		return bump.Proposal{}, err
 	}

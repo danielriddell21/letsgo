@@ -102,6 +102,52 @@ func TestCollectUsesLocalHistoryWhenComplete(t *testing.T) {
 	}
 }
 
+// A nested module is a separate release with its own history: a commit that
+// only touched its files is not evidence for the root module's own bump or
+// changelog.
+func TestCollectExcludesANestedModulesOwnCommits(t *testing.T) {
+	dir := repoWithHistory(t)
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Dan", "GIT_AUTHOR_EMAIL=d@example.com",
+			"GIT_COMMITTER_NAME=Dan", "GIT_COMMITTER_EMAIL=d@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+
+	nested := filepath.Join(dir, "services", "api")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "go.mod"), []byte("module example.com/foo/services/api\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-q", "-m", "feat: nested module's own change")
+	run("tag", "v1.2.0")
+
+	previous, commits, err := changelog.Collect(context.Background(), changelog.Source{
+		Dir: dir, Tag: "v1.2.0",
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if previous != "v1.1.0" {
+		t.Errorf("previous = %q, want v1.1.0", previous)
+	}
+	for _, c := range commits {
+		if c.Subject == "feat: nested module's own change" {
+			t.Errorf("the nested module's own commit leaked into the root's changelog: %+v", commits)
+		}
+	}
+}
+
 // The point of the fallback: a shallow checkout is a normal CI clone, not a
 // mistake to be corrected with fetch-depth: 0.
 func TestCollectFallsBackToTheForgeWhenShallow(t *testing.T) {

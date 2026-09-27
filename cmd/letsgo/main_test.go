@@ -257,6 +257,53 @@ func TestProposeVersionStripsThePrefixBeforeParsingSemver(t *testing.T) {
 	}
 }
 
+// A commit that only touched a further-nested module (one inside the module
+// being tagged) is not evidence for this module's own bump: it belongs to a
+// release with its own history.
+func TestProposeVersionExcludesANestedModulesOwnCommits(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write := func(name, content string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	write("main.go", "package main\n\nfunc main() {}\n")
+	run("init", "-q", "-b", "main")
+	run("config", "user.name", "Test")
+	run("config", "user.email", "t@example.com")
+	run("add", ".")
+	run("commit", "-q", "-m", "first")
+	run("tag", "v1.0.0")
+
+	write("plugin/go.mod", "module github.com/you/foo/plugin\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "feat!: nested module's own breaking change")
+
+	module := discover.Module{Path: "github.com/you/foo", Dir: dir}
+	proposal, err := proposeVersion(context.Background(), module, discover.Scope{}, "v1.0.0", bump.None)
+	if err != nil {
+		t.Fatalf("proposeVersion: %v", err)
+	}
+	if proposal.Next != "v1.0.1" {
+		t.Errorf("Next = %q, want v1.0.1: the nested module's commit must not count as a signal here", proposal.Next)
+	}
+}
+
 // flagSet mirrors the shapes the real subcommands declare: a boolean, a
 // string, and a second string, so permutation is tested against flags that
 // differ in whether they take a value.

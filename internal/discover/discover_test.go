@@ -574,3 +574,71 @@ func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
 		t.Errorf("PreviousTag = %q, %v; want v1.0.0, not the nested module's tag", prev, err)
 	}
 }
+
+func TestNestedModuleDirs(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "go.mod", "module example.com/foo\n")
+	write(t, dir, "services/api/go.mod", "module example.com/foo/services/api\n")
+	write(t, dir, "services/api/internal/tool/go.mod", "module example.com/foo/services/api/tool\n")
+	write(t, dir, "web/go.mod", "module example.com/foo/web\n")
+	write(t, dir, "web/vendor/other/go.mod", "module example.com/vendored\n")
+
+	got, err := NestedModuleDirs(dir)
+	if err != nil {
+		t.Fatalf("NestedModuleDirs: %v", err)
+	}
+	want := []string{"services/api", "services/api/internal/tool", "web"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestNestedModuleDirsRelativeToANestedModuleItself(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "go.mod", "module example.com/foo\n")
+	write(t, dir, "services/api/go.mod", "module example.com/foo/services/api\n")
+	write(t, dir, "services/api/internal/tool/go.mod", "module example.com/foo/services/api/tool\n")
+
+	got, err := NestedModuleDirs(filepath.Join(dir, "services", "api"))
+	if err != nil {
+		t.Fatalf("NestedModuleDirs: %v", err)
+	}
+	if strings.Join(got, ",") != "internal/tool" {
+		t.Errorf("got %v, want [internal/tool]", got)
+	}
+}
+
+// The pathspec Commits builds from exclude must actually exclude, or the
+// nested module's own commits leak into a history they should never appear
+// in.
+func TestCommitsExcludesTheGivenDirectories(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) { gitRun(t, dir, args...) }
+
+	run("init", "-q", "-b", "main")
+	write(t, dir, "README.md", "hi\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "first")
+
+	write(t, dir, "services/api/main.go", "package main\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "second: touches the nested module only")
+
+	write(t, dir, "README.md", "changed\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "third: touches the root")
+
+	ctx := context.Background()
+	commits, err := Commits(ctx, dir, "", "HEAD", "services/api")
+	if err != nil {
+		t.Fatalf("Commits: %v", err)
+	}
+	for _, c := range commits {
+		if strings.Contains(c.Subject, "second") {
+			t.Errorf("the excluded directory's commit was not excluded: %+v", commits)
+		}
+	}
+	if len(commits) != 2 {
+		t.Errorf("got %d commits, want 2 (first and third)", len(commits))
+	}
+}
