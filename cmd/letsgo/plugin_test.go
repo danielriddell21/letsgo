@@ -53,24 +53,69 @@ func TestDescribePinFillsTheHookFromTheConfig(t *testing.T) {
 	}
 }
 
-// letsgo does not guess a hook it has not been told. A placeholder the user
-// has to fill is honest; a guessed hook that is wrong is a release nobody can
-// account for.
+// letsgo does not guess a hook it has not been told, for a plugin it does not
+// publish itself. A placeholder the user has to fill is honest; a guessed
+// hook that is wrong is a release nobody can account for.
 func TestDescribePinLeavesAnUnknownHookBlank(t *testing.T) {
 	t.Chdir(t.TempDir())
 	write(t, "letsgo.mod", "build linux/amd64\n")
 
 	var out bytes.Buffer
-	describePin(&out, "letsgo-env", &selfupdate.Update{
+	describePin(&out, "letsgo-third-party", &selfupdate.Update{
 		Version:      "0.2.0",
 		BinarySHA256: strings.Repeat("c", 64),
 	})
 
-	if !strings.Contains(out.String(), "plugin <hook> letsgo-env v0.2.0") {
+	if !strings.Contains(out.String(), "plugin <hook> letsgo-third-party v0.2.0") {
 		t.Errorf("describePin printed:\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), "the plugin documents") {
 		t.Error("an unfilled hook should say where to find it")
+	}
+}
+
+// A plugin letsgo publishes itself has a documented hook, so installing it
+// fresh should fill that in rather than leave a placeholder; one that
+// answers no hook must not be told to pin itself; and upgrading a plugin
+// already pinned must never silently move it to a different hook, even if
+// the catalogue disagreed.
+func TestDescribePinUsesTheCatalogue(t *testing.T) {
+	for _, tc := range []struct {
+		name, plugin, config, want, avoid string
+	}{
+		{
+			"fills a known plugin's hook", "letsgo-env", "",
+			"plugin ldflags letsgo-env v0.2.0", "<hook>",
+		},
+		{
+			"prefers the config over the catalogue", "letsgo-env",
+			"build linux/amd64\nplugin ldflags letsgo-env v0.1.0 sha256:" + strings.Repeat("a", 64) + "\n",
+			"plugin ldflags letsgo-env v0.2.0", "",
+		},
+		{
+			"reports a standalone plugin", "letsgo-cask", "",
+			"does not answer a hook", "pin it in letsgo.mod",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			if tc.config != "" {
+				write(t, "letsgo.mod", tc.config)
+			}
+
+			var out bytes.Buffer
+			describePin(&out, tc.plugin, &selfupdate.Update{
+				Version:      "0.2.0",
+				BinarySHA256: strings.Repeat("c", 64),
+			})
+
+			if !strings.Contains(out.String(), tc.want) {
+				t.Errorf("describePin printed:\n%s\nwant %q", out.String(), tc.want)
+			}
+			if tc.avoid != "" && strings.Contains(out.String(), tc.avoid) {
+				t.Errorf("describePin printed:\n%s\nwant it not to contain %q", out.String(), tc.avoid)
+			}
+		})
 	}
 }
 
@@ -224,6 +269,34 @@ func TestListPluginsWithNoPins(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "pins no plugins") {
 		t.Errorf("out = %q", out.String())
+	}
+}
+
+// plugin list --available answers "is there already a plugin for this"
+// without needing a letsgo.mod at all: it lists what letsgo publishes, not
+// what this repository pins.
+func TestListAvailablePluginsListsTheCatalogue(t *testing.T) {
+	var out bytes.Buffer
+	if err := listAvailablePlugins(&out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+
+	if !strings.Contains(got, "archive-layout") || !strings.Contains(got, "letsgo-multi") {
+		t.Errorf("out = %q, want letsgo-multi under archive-layout", got)
+	}
+	if !strings.Contains(got, "(standalone)") || !strings.Contains(got, "letsgo-cask") {
+		t.Errorf("out = %q, want letsgo-cask marked standalone", got)
+	}
+}
+
+// --available must work with no letsgo.mod in sight: it lists what could be
+// pinned, not what already is.
+func TestRunPluginListAvailableNeedsNoConfig(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	if err := runPluginList([]string{"--available"}); err != nil {
+		t.Errorf("runPluginList(--available) = %v", err)
 	}
 }
 

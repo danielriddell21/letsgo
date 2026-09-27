@@ -28,6 +28,7 @@ const pluginUsage = `letsgo plugin installs the external programs a release can 
 usage:
   letsgo plugin install <name>[@version]   download a plugin, verified, and print its pin
   letsgo plugin list                       the plugins this repository pins, and what is installed
+  letsgo plugin list --available           the plugins letsgo publishes, and what each answers
 
 run a subcommand with -h for its options.
 `
@@ -136,12 +137,22 @@ func installPlugin(ctx context.Context, w io.Writer, name, dest string, options 
 // filled in honestly.
 //
 // The hook comes from the repository's own config when the plugin is already
-// declared there — the common case, which is an upgrade — and is left as a
-// placeholder when it is not. letsgo does not guess it: a plugin documents the
-// hook it answers, and a core carrying a table of plugin names would be a core
-// that knows about particular plugins.
+// declared there — the common case, which is an upgrade. Failing that, a
+// plugin letsgo publishes itself has its hook looked up in the catalogue:
+// unlike a third-party plugin, letsgo already knows what it answers, and
+// making someone copy that out of a README would only invite a typo. A
+// plugin that answers no hook at all is told so instead of being pinned. An
+// unrecognised name is left as a placeholder, same as always: a plugin
+// documents the hook it answers, and a core carrying a table of every
+// plugin's hook would be a core that knows about particular plugins — every
+// one but its own.
 func describePin(w io.Writer, name string, release *selfupdate.Update) {
-	hook := pinnedHook(name)
+	hook, standalone := resolvePluginHook(name)
+	if standalone {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "  %s does not answer a hook, so there is nothing to pin; run it directly.\n", name)
+		return
+	}
 	if hook == "" {
 		hook = "<hook>"
 	}
@@ -155,6 +166,21 @@ func describePin(w io.Writer, name string, release *selfupdate.Update) {
 		fmt.Fprintln(w, "  the hook is the one the plugin documents that it answers; a plugin that")
 		fmt.Fprintln(w, "  answers none reads a finished release and is not pinned at all.")
 	}
+}
+
+// resolvePluginHook works out the hook to print a pin with: the repository's
+// own config first, so upgrading a plugin never changes what it is pinned to
+// even if the catalogue disagreed; failing that, the catalogue, for a plugin
+// letsgo publishes. standalone reports a catalogued plugin that answers no
+// hook.
+func resolvePluginHook(name string) (hook string, standalone bool) {
+	if hook := pinnedHook(name); hook != "" {
+		return hook, false
+	}
+	if known, ok := plugin.Lookup(name); ok {
+		return string(known.Hook), known.Hook == ""
+	}
+	return "", false
 }
 
 // pinnedHook reports the hook this repository already pins the plugin to, or
@@ -176,10 +202,29 @@ func pinnedHook(name string) string {
 
 func runPluginList(args []string) error {
 	fs := flag.NewFlagSet("plugin list", flag.ExitOnError)
+	available := fs.Bool("available", false, "list the plugins letsgo publishes, not what this repository pins")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	if *available {
+		return listAvailablePlugins(os.Stdout)
+	}
 	return listPlugins(os.Stdout)
+}
+
+// listAvailablePlugins prints the plugins letsgo publishes: the hook each
+// answers, and what it does. Nothing here is pinned or installed by being
+// listed — the point is to answer "is there already a plugin for this"
+// before writing one.
+func listAvailablePlugins(w io.Writer) error {
+	for _, k := range plugin.Known {
+		hook := string(k.Hook)
+		if hook == "" {
+			hook = "(standalone)"
+		}
+		fmt.Fprintf(w, "%-14s %-14s %s\n", hook, k.Command, k.Summary)
+	}
+	return nil
 }
 
 // listPlugins answers the question that follows every pin: is the program this
