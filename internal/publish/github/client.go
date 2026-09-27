@@ -441,17 +441,23 @@ func (c *Client) Compare(ctx context.Context, repo Repo, base, head string) ([]C
 // something nobody reads.
 const maxCommitPages = 10
 
-// CommitsUpTo lists the commits reachable from ref, newest first.
+// CommitsUpTo lists the commits reachable from ref, newest first. When path
+// is non-empty, only commits that touched it are returned — the commits
+// endpoint's own filter, so a nested module's release lists only its own
+// history even from a shallow clone.
 //
 // Used where Compare cannot be: a first release has no earlier tag to compare
 // against, and the compare endpoint requires a base.
-func (c *Client) CommitsUpTo(ctx context.Context, repo Repo, ref string) ([]CommitInfo, error) {
+func (c *Client) CommitsUpTo(ctx context.Context, repo Repo, ref, path string) ([]CommitInfo, error) {
 	var commits []CommitInfo
 
 	for page := 1; page <= maxCommitPages; page++ {
 		var batch []CommitInfo
 		url := fmt.Sprintf("%s/repos/%s/commits?sha=%s&per_page=100&page=%d",
 			c.api, repo, urlQueryEscape(ref), page)
+		if path != "" {
+			url += "&path=" + urlQueryEscape(path)
+		}
 
 		if err := c.do(ctx, http.MethodGet, url, nil, "", &batch); err != nil {
 			return nil, err

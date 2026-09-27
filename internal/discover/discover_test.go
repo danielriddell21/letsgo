@@ -226,6 +226,33 @@ func TestNewScope(t *testing.T) {
 	})
 }
 
+func TestScopeMatchesTag(t *testing.T) {
+	cases := []struct {
+		name      string
+		prefix    string
+		tag       string
+		wantRest  string
+		wantMatch bool
+	}{
+		{"root scope accepts a plain version", "", "v1.2.3", "v1.2.3", true},
+		{"root scope rejects another scope's tag", "", "services/api/v1.0.0", "", false},
+		{"nested scope accepts its own tag", "services/api/", "services/api/v1.0.0", "v1.0.0", true},
+		{"nested scope rejects the root's tag", "services/api/", "v1.0.0", "", false},
+		{"nested scope rejects a sibling's tag", "services/api/", "services/web/v1.0.0", "", false},
+		{"a prefix match without a version is not a tag", "services/api/", "services/api/latest", "", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			scope := Scope{Prefix: c.prefix}
+			rest, ok := scope.MatchesTag(c.tag)
+			if ok != c.wantMatch || rest != c.wantRest {
+				t.Errorf("MatchesTag(%q) = %q, %v, want %q, %v", c.tag, rest, ok, c.wantRest, c.wantMatch)
+			}
+		})
+	}
+}
+
 // The major-version gate. Getting this wrong publishes a release that `go get`
 // silently refuses to resolve, with no warning from any Go tool.
 func TestModuleCheckTag(t *testing.T) {

@@ -3,6 +3,7 @@ package discover
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 // Scope identifies which part of a repository a release covers.
@@ -50,6 +51,21 @@ func NewScope(topLevel, moduleDir string) (Scope, error) {
 	}
 
 	return Scope{Dir: rel, Prefix: rel + "/"}, nil
+}
+
+// MatchesTag reports whether tag names a version release in this scope: it
+// carries Prefix, and what follows looks like "vN...". It returns the part
+// after Prefix, since that is what every caller needs next — as a version to
+// parse, or a version to reattach Prefix to.
+func (s Scope) MatchesTag(tag string) (rest string, ok bool) {
+	rest, ok = strings.CutPrefix(tag, s.Prefix)
+	if !ok {
+		return "", false
+	}
+	if len(rest) < 2 || rest[0] != 'v' || rest[1] < '0' || rest[1] > '9' {
+		return "", false
+	}
+	return rest, true
 }
 
 // resolveSymlinks returns dir with its symlinks resolved, or dir itself if

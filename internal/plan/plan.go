@@ -1476,13 +1476,10 @@ func (p *Plan) resolveVersion(ctx context.Context) {
 // scopedVersionTags returns the tags that name a version of prefix's own
 // scope, in the same order they were given.
 func scopedVersionTags(tags []string, prefix string) []string {
+	scope := discover.Scope{Prefix: prefix}
 	var versions []string
 	for _, tag := range tags {
-		rest, ok := strings.CutPrefix(tag, prefix)
-		if !ok {
-			continue
-		}
-		if len(rest) > 1 && rest[0] == 'v' && rest[1] >= '0' && rest[1] <= '9' {
+		if _, ok := scope.MatchesTag(tag); ok {
 			versions = append(versions, tag)
 		}
 	}

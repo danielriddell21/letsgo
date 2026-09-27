@@ -294,6 +294,84 @@ func TestCollectListsFullHistoryForAFirstRelease(t *testing.T) {
 	}
 }
 
+// A nested module's tags parse as valid versions too, so picking the highest
+// of all of them would sometimes hand a scoped release someone else's
+// previous tag — the root's, if it happens to be newer.
+func TestCollectScopesTheForgePreviousTagToItsOwnPrefix(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "/tags"):
+			_ = json.NewEncoder(w).Encode([]github.Tag{
+				{Name: "v2.0.0"}, // the root's own, newer tag — a different scope
+				{Name: "services/api/v1.0.0"},
+				{Name: "services/api/v1.1.0"},
+			})
+		case strings.Contains(r.URL.Path, "/compare/"):
+			part := r.URL.Path[strings.Index(r.URL.Path, "/compare/")+len("/compare/"):]
+			base, _, _ := strings.Cut(part, "...")
+			if base != "services/api/v1.0.0" {
+				t.Errorf("compared against %q, want services/api/v1.0.0", base)
+			}
+			_ = json.NewEncoder(w).Encode(struct {
+				Commits []github.CommitInfo `json:"commits"`
+			}{})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+
+	previous, _, err := changelog.Collect(context.Background(), changelog.Source{
+		Dir: t.TempDir(), Tag: "services/api/v1.1.0", Prefix: "services/api/", Shallow: true,
+		Client: client, Repo: github.Repo{Owner: "you", Name: "foo"},
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if previous != "services/api/v1.0.0" {
+		t.Errorf("previous = %q, want services/api/v1.0.0", previous)
+	}
+}
+
+// A nested module's first release must not list some other module's commits
+// from a shallow clone either — the same guarantee the local path gets from
+// excluding nested modules' directories.
+func TestCollectScopesAFirstReleaseCommitListToItsOwnPath(t *testing.T) {
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "/tags"):
+			_ = json.NewEncoder(w).Encode([]github.Tag{{Name: "services/api/v1.0.0"}})
+		case strings.HasSuffix(r.URL.Path, "/commits"):
+			gotPath = r.URL.Query().Get("path")
+			_ = json.NewEncoder(w).Encode([]github.CommitInfo{})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+
+	_, _, err := changelog.Collect(context.Background(), changelog.Source{
+		Dir: t.TempDir(), Tag: "services/api/v1.0.0", Prefix: "services/api/", Shallow: true,
+		Client: client, Repo: github.Repo{Owner: "you", Name: "foo"},
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if gotPath != "services/api" {
+		t.Errorf("path = %q, want services/api", gotPath)
+	}
+}
+
 // Both paths must answer a first release the same way. Their disagreement is
 // what produced "No changes." for a release that had plenty.
 func TestFirstReleaseListsHistoryLocallyToo(t *testing.T) {
