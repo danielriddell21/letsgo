@@ -718,8 +718,11 @@ func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 }
 
 // apiCompatibility is the check name every step of checkAPICompatibility
-// reports under.
-const apiCompatibility = "api compatibility"
+// reports under. apiGate is the feature that check is gated and required by.
+const (
+	apiCompatibility = "api compatibility"
+	apiGate          = "api-gate"
+)
 
 // checkAPICompatibility refuses a release whose version promises more
 // compatibility than its API delivers.
@@ -729,18 +732,18 @@ const apiCompatibility = "api compatibility"
 // import path, and nothing enforces it, so the mistake is made quietly and
 // found by other people.
 func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
-	if !p.Features.On("api-gate") {
+	if !p.Features.On(apiGate) {
 		p.add(apiCompatibility, Skip, "disabled by config")
 		return
 	}
 	if p.Tag == "" {
-		p.skip(apiCompatibility, "api-gate", "not a tagged release")
+		p.skip(apiCompatibility, apiGate, "not a tagged release")
 		return
 	}
 
 	previous, err := discover.PreviousTag(ctx, p.RootDir)
 	if err != nil || previous == "" {
-		p.skip(apiCompatibility, "api-gate", "no earlier release to compare against")
+		p.skip(apiCompatibility, apiGate, "no earlier release to compare against")
 		return
 	}
 
@@ -754,7 +757,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 	changes, err := gate.APIDiff(ctx, old, p.Module.Dir)
 	switch {
 	case errors.Is(err, gate.ErrToolMissing), errors.Is(err, gate.ErrNothingExported):
-		p.skip(apiCompatibility, "api-gate", "%v", err)
+		p.skip(apiCompatibility, apiGate, "%v", err)
 		return
 	case err != nil:
 		p.add(apiCompatibility, Warn, "could not be checked: %v", err)
@@ -1716,6 +1719,9 @@ func filesUnder(tracked []string, dir string) []string {
 	return found
 }
 
+// installScript is the check name checkInstallScriptRequired reports under.
+const installScript = "install script"
+
 // checkInstallScriptRequired makes install.sh's absence a Fail rather than
 // silent, for a repository that required it.
 //
@@ -1730,13 +1736,13 @@ func (p *Plan) checkInstallScriptRequired() {
 
 	switch {
 	case p.Tag == "":
-		p.add("install script", Fail, "required, but there is no tag to build one for")
+		p.add(installScript, Fail, "required, but there is no tag to build one for")
 	case !p.HasRepo || p.Repo.Host != "github.com":
-		p.add("install script", Fail, "required, but the repository is not on GitHub")
+		p.add(installScript, Fail, "required, but the repository is not on GitHub")
 	case len(installablePlatforms(p.Targets)) == 0:
-		p.add("install script", Fail, "required, but no built target is one install.sh supports")
+		p.add(installScript, Fail, "required, but no built target is one install.sh supports")
 	default:
-		p.add("install script", Pass, "will be generated")
+		p.add(installScript, Pass, "will be generated")
 	}
 }
 
