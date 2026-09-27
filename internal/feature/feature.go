@@ -67,39 +67,69 @@ type Feature struct {
 // All is the closed set of features letsgo knows about, in the order they
 // are documented: integrity first, then gates, outputs and publish targets.
 var All = []Feature{
-	{Name: "reproducible", Kind: Integrity, Default: true,
-		Summary: "the build is reproducible from source"},
-	{Name: "source", Kind: Integrity, Default: true,
-		Summary: "a source archive is published with the release"},
-	{Name: "manifest", Kind: Integrity, Default: true,
-		Summary: "letsgo.json records what was built and how"},
-	{Name: "checksums", Kind: Integrity, Default: true,
-		Summary: "SHA256SUMS lists every artifact's digest"},
-	{Name: "tag-check", Kind: Integrity, Default: true,
-		Summary: "the tag matches the version letsgo resolved"},
-	{Name: "module-path", Kind: Integrity, Default: true,
-		Summary: "the module path matches its major version"},
+	{
+		Name: "reproducible", Kind: Integrity, Default: true,
+		Summary: "the build is reproducible from source",
+	},
+	{
+		Name: "source", Kind: Integrity, Default: true,
+		Summary: "a source archive is published with the release",
+	},
+	{
+		Name: "manifest", Kind: Integrity, Default: true,
+		Summary: "letsgo.json records what was built and how",
+	},
+	{
+		Name: "checksums", Kind: Integrity, Default: true,
+		Summary: "SHA256SUMS lists every artifact's digest",
+	},
+	{
+		Name: "tag-check", Kind: Integrity, Default: true,
+		Summary: "the tag matches the version letsgo resolved",
+	},
+	{
+		Name: "module-path", Kind: Integrity, Default: true,
+		Summary: "the module path matches its major version",
+	},
 
-	{Name: "vulncheck", Kind: Gate, Default: true, Disable: true, Require: true,
-		Summary: "govulncheck must find no reachable vulnerabilities"},
-	{Name: "api-gate", Kind: Gate, Default: true, Disable: true, Require: true,
-		Summary: "an incompatible API change needs a major version bump"},
-	{Name: "budget", Kind: Gate, Default: false, Enable: "budget",
-		Summary: "an artifact over its configured size fails the release"},
+	{
+		Name: "vulncheck", Kind: Gate, Default: true, Disable: true, Require: true,
+		Summary: "govulncheck must find no reachable vulnerabilities",
+	},
+	{
+		Name: "api-gate", Kind: Gate, Default: true, Disable: true, Require: true,
+		Summary: "an incompatible API change needs a major version bump",
+	},
+	{
+		Name: "budget", Kind: Gate, Default: false, Enable: "budget",
+		Summary: "an artifact over its configured size fails the release",
+	},
 
-	{Name: "sbom", Kind: Output, Default: true, Disable: true,
-		Summary: "a software bill of materials is published with the release"},
-	{Name: "install-script", Kind: Output, Default: true, Disable: true, Require: true,
-		Summary: "install.sh is generated for a GitHub release"},
-	{Name: "changelog", Kind: Output, Default: true, Disable: true,
-		Summary: "commits since the previous tag become the release body"},
+	{
+		Name: "sbom", Kind: Output, Default: true, Disable: true,
+		Summary: "a software bill of materials is published with the release",
+	},
+	{
+		Name: "install-script", Kind: Output, Default: true, Disable: true, Require: true,
+		Summary: "install.sh is generated for a GitHub release",
+	},
+	{
+		Name: "changelog", Kind: Output, Default: true, Disable: true,
+		Summary: "commits since the previous tag become the release body",
+	},
 
-	{Name: "proxy-warm", Kind: Publish, Default: true, Disable: true,
-		Summary: "proxy.golang.org is primed after publishing"},
-	{Name: "brew", Kind: Publish, Default: false, Enable: "brew",
-		Summary: "a Homebrew formula is written to a tap"},
-	{Name: "image", Kind: Publish, Default: false, Enable: "image",
-		Summary: "a container image is built and published"},
+	{
+		Name: "proxy-warm", Kind: Publish, Default: true, Disable: true,
+		Summary: "proxy.golang.org is primed after publishing",
+	},
+	{
+		Name: "brew", Kind: Publish, Default: false, Enable: "brew",
+		Summary: "a Homebrew formula is written to a tap",
+	},
+	{
+		Name: "image", Kind: Publish, Default: false, Enable: "image",
+		Summary: "a container image is built and published",
+	},
 }
 
 // Lookup returns the feature named name, and whether it exists.
