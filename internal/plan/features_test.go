@@ -102,3 +102,75 @@ func TestNoProxyWarmCombinesWithConfigDisable(t *testing.T) {
 		t.Errorf("features source = %q, want both origins named", source)
 	}
 }
+
+// `require` turns a Skip into a Fail: neither govulncheck nor apidiff is on
+// PATH in this environment (internal/gate's own tests rely on the same
+// thing), so both gates Skip by default and Fail once required.
+func TestRequireTurnsSkipsIntoFails(t *testing.T) {
+	r := minimalRepo(t, "require vulncheck\nrequire api-gate\n")
+	p := r.resolve(plan.Options{Analyse: true})
+
+	if got := check(t, p, "vulnerabilities"); got.Status != plan.Fail {
+		t.Errorf("vulnerabilities = %+v, want Fail", got)
+	}
+	if got := check(t, p, "api compatibility"); got.Status != plan.Fail {
+		t.Errorf("api compatibility = %+v, want Fail", got)
+	}
+
+	f := check(t, p, "features")
+	if !strings.Contains(f.Detail, "required: api-gate, vulncheck") {
+		t.Errorf("features detail = %q, want both names under required", f.Detail)
+	}
+}
+
+// Without `require`, the same missing tools are unremarkable: a Skip, not a
+// Fail.
+func TestWithoutRequireToolsAreSkippedNotFailed(t *testing.T) {
+	r := minimalRepo(t, "")
+	p := r.resolve(plan.Options{Analyse: true})
+
+	if got := check(t, p, "vulnerabilities"); got.Status != plan.Skip {
+		t.Errorf("vulnerabilities = %+v, want Skip", got)
+	}
+	if got := check(t, p, "api compatibility"); got.Status != plan.Skip {
+		t.Errorf("api compatibility = %+v, want Skip", got)
+	}
+}
+
+// require install-script makes its otherwise-silent absence a Fail, at plan
+// time rather than after a release has already shipped without one.
+func TestRequireInstallScriptFailsWithoutAGitHubRepo(t *testing.T) {
+	r := minimalRepo(t, "require install-script\n")
+	p := r.resolve(plan.Options{})
+
+	if got := check(t, p, "install script"); got.Status != plan.Fail {
+		t.Errorf("install script = %+v, want Fail", got)
+	}
+}
+
+func TestRequireInstallScriptPassesForAnOrdinaryGitHubRelease(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nvar version = \"dev\"\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "require install-script\n")
+	r.git("remote", "add", "origin", "https://github.com/you/foo.git")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+	if got := check(t, p, "install script"); got.Status != plan.Pass {
+		t.Errorf("install script = %+v, want Pass", got)
+	}
+}
+
+// Without require, install.sh's absence is not a check at all: the plan has
+// nothing to say about an output nobody asked to make mandatory.
+func TestInstallScriptHasNoCheckWithoutRequire(t *testing.T) {
+	r := minimalRepo(t, "")
+	p := r.resolve(plan.Options{})
+
+	for _, c := range p.Checks {
+		if c.Name == "install script" {
+			t.Fatalf("unexpected install script check: %+v", c)
+		}
+	}
+}

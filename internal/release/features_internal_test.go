@@ -39,3 +39,21 @@ func TestWriteInstallerSkippedWhenDisabled(t *testing.T) {
 		t.Errorf("writeInstaller = (%q, %q, %v), want empty and no error", name, sum, err)
 	}
 }
+
+// A consumer reading the manifest must be able to tell "required" apart from
+// "disabled", not just see one merged list.
+func TestFeaturesRecordIncludesRequired(t *testing.T) {
+	p := &plan.Plan{Required: []string{"vulncheck"}}
+
+	got := featuresRecord(p)
+	if got == nil || len(got.Disabled) != 0 || len(got.Required) != 1 || got.Required[0] != "vulncheck" {
+		t.Errorf("featuresRecord = %+v", got)
+	}
+}
+
+func TestFeaturesRecordNilWhenNothingDisabledOrRequired(t *testing.T) {
+	p := &plan.Plan{}
+	if got := featuresRecord(p); got != nil {
+		t.Errorf("featuresRecord = %+v, want nil", got)
+	}
+}

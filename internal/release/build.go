@@ -344,15 +344,15 @@ func apiChanges(p *plan.Plan) []manifest.APIChange {
 	return out
 }
 
-// featuresRecord carries which features this release disabled into the
-// manifest, or nil when every feature ran at its default — so an ordinary
-// release, which is most of them, adds nothing to the file.
+// featuresRecord carries which features this release disabled or required
+// into the manifest, or nil when every feature ran at its default — so an
+// ordinary release, which is most of them, adds nothing to the file.
 func featuresRecord(p *plan.Plan) *manifest.Features {
 	disabled := p.Features.Disabled()
-	if len(disabled) == 0 {
+	if len(disabled) == 0 && len(p.Required) == 0 {
 		return nil
 	}
-	return &manifest.Features{Disabled: disabled}
+	return &manifest.Features{Disabled: disabled, Required: p.Required}
 }
 
 // gates records what the release was checked against, so a consumer can see

@@ -30,6 +30,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
+	"github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -497,6 +498,10 @@ type Plan struct {
 	// the same thing.
 	Features feature.Set
 
+	// Required are the features whose Skip this release turns into a Fail,
+	// from letsgo.mod's `require` directive.
+	Required []string
+
 	Project  string
 	Version  string
 	Tag      string
@@ -606,6 +611,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveCommands(ctx)
 	p.resolveFiles(ctx)
 	p.resolveArtifacts(ctx)
+	p.checkInstallScriptRequired()
 
 	p.resolveTap()
 	p.resolveImage(ctx)
@@ -685,7 +691,7 @@ func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 	switch {
 	case errors.Is(err, gate.ErrToolMissing):
 		// A gate that did not run is not a gate that passed.
-		p.add("vulnerabilities", Skip, "%v", err)
+		p.skip("vulnerabilities", "vulncheck", "%v", err)
 		return
 	case err != nil:
 		p.add("vulnerabilities", Warn, "could not be checked: %v", err)
@@ -728,13 +734,13 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 		return
 	}
 	if p.Tag == "" {
-		p.add(apiCompatibility, Skip, "not a tagged release")
+		p.skip(apiCompatibility, "api-gate", "not a tagged release")
 		return
 	}
 
 	previous, err := discover.PreviousTag(ctx, p.RootDir)
 	if err != nil || previous == "" {
-		p.add(apiCompatibility, Skip, "no earlier release to compare against")
+		p.skip(apiCompatibility, "api-gate", "no earlier release to compare against")
 		return
 	}
 
@@ -748,7 +754,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 	changes, err := gate.APIDiff(ctx, old, p.Module.Dir)
 	switch {
 	case errors.Is(err, gate.ErrToolMissing), errors.Is(err, gate.ErrNothingExported):
-		p.add(apiCompatibility, Skip, "%v", err)
+		p.skip(apiCompatibility, "api-gate", "%v", err)
 		return
 	case err != nil:
 		p.add(apiCompatibility, Warn, "could not be checked: %v", err)
@@ -1158,13 +1164,45 @@ func (p *Plan) resolveFeatures(opts Options) {
 	}
 
 	p.Features = feature.Resolve(disabled)
-	if len(p.Features) == 0 {
+	p.Required = append([]string(nil), p.Config.Required...)
+	sort.Strings(p.Required)
+
+	if len(p.Features) == 0 && len(p.Required) == 0 {
 		return
 	}
 
-	names := strings.Join(p.Features.Disabled(), ", ")
-	p.note("features", names, from)
-	p.add("features", Pass, "disabled: %s", names)
+	var parts []string
+	if len(p.Features) > 0 {
+		parts = append(parts, "disabled: "+strings.Join(p.Features.Disabled(), ", "))
+	}
+	if len(p.Required) > 0 {
+		parts = append(parts, "required: "+strings.Join(p.Required, ", "))
+	}
+	detail := strings.Join(parts, "; ")
+
+	p.note("features", detail, from)
+	p.add("features", Pass, "%s", detail)
+}
+
+// required reports whether a feature's Skip must be a Fail instead.
+func (p *Plan) required(name string) bool {
+	for _, n := range p.Required {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// skip records a check as Skip, unless the feature behind it is required —
+// in which case a Skip is exactly the outcome require promised would not
+// happen.
+func (p *Plan) skip(check, feature, format string, args ...any) {
+	status := Skip
+	if p.required(feature) {
+		status = Fail
+	}
+	p.add(check, status, format, args...)
 }
 
 // resolveModule settles which module is built.
@@ -1676,6 +1714,40 @@ func filesUnder(tracked []string, dir string) []string {
 		}
 	}
 	return found
+}
+
+// checkInstallScriptRequired makes install.sh's absence a Fail rather than
+// silent, for a repository that required it.
+//
+// Every other case (no tag, no target platform install.sh supports) is
+// already how writeInstaller decides not to write one; require only asks
+// that letsgo say so at plan time instead of after a release that shipped
+// without it.
+func (p *Plan) checkInstallScriptRequired() {
+	if !p.required("install-script") {
+		return
+	}
+
+	switch {
+	case p.Tag == "":
+		p.add("install script", Fail, "required, but there is no tag to build one for")
+	case !p.HasRepo || p.Repo.Host != "github.com":
+		p.add("install script", Fail, "required, but the repository is not on GitHub")
+	case len(installablePlatforms(p.Targets)) == 0:
+		p.add("install script", Fail, "required, but no built target is one install.sh supports")
+	default:
+		p.add("install script", Pass, "will be generated")
+	}
+}
+
+// installablePlatforms is which of the release's targets install.sh would
+// carry, reusing the installer's own filter so the two can never disagree.
+func installablePlatforms(targets []gobuild.Target) []string {
+	ts := make([]install.Target, len(targets))
+	for i, t := range targets {
+		ts[i] = install.Target{OS: t.OS, Arch: t.Arch}
+	}
+	return install.Platforms(ts)
 }
 
 func (p *Plan) resolveArtifacts(ctx context.Context) {

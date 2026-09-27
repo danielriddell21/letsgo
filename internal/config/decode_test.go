@@ -317,6 +317,50 @@ func TestDisableDirectiveSuggestsAName(t *testing.T) {
 	}
 }
 
+func TestRequireDirective(t *testing.T) {
+	cfg := decode(t, "require vulncheck api-gate\n")
+	if strings.Join(cfg.Required, ",") != "vulncheck,api-gate" {
+		t.Errorf("Required = %q", cfg.Required)
+	}
+
+	cfg = decode(t, "require vulncheck\nrequire vulncheck\n")
+	if len(cfg.Required) != 1 {
+		t.Errorf("Required = %q, want one entry", cfg.Required)
+	}
+}
+
+func TestRequireDirectiveRejects(t *testing.T) {
+	for _, in := range []string{
+		"require\n",
+		"require nope\n",
+		// On by default with no Skip to strengthen, or off by default and
+		// enabled by its own directive: neither can be required.
+		"require reproducible\n",
+		"require sbom\n",
+		"require changelog\n",
+		"require proxy-warm\n",
+		"require brew\n",
+		"require image\n",
+		"require budget\n",
+	} {
+		if _, err := Decode(parse(t, in)); err == nil {
+			t.Errorf("%q should not have parsed", in)
+		}
+	}
+}
+
+// A feature cannot be both an opt-out and a stronger promise at once.
+func TestDisableAndRequireConflict(t *testing.T) {
+	for _, in := range []string{
+		"disable vulncheck\nrequire vulncheck\n",
+		"require vulncheck\ndisable vulncheck\n",
+	} {
+		if _, err := Decode(parse(t, in)); err == nil {
+			t.Errorf("%q should not have parsed", in)
+		}
+	}
+}
+
 func TestBrewDirectiveRejects(t *testing.T) {
 	for _, in := range []string{
 		"brew\n",

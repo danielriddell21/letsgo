@@ -98,6 +98,26 @@ func TestFeaturesRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFeaturesRequiredRoundTrip(t *testing.T) {
+	m := sample()
+	m.Features = &Features{Required: []string{"api-gate", "vulncheck"}}
+
+	data, err := m.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Features == nil || strings.Join(got.Features.Required, ",") != "api-gate,vulncheck" {
+		t.Errorf("Features = %+v", got.Features)
+	}
+	if len(got.Features.Disabled) != 0 {
+		t.Errorf("Disabled = %v, want none", got.Features.Disabled)
+	}
+}
+
 // A consumer that guesses at an unknown schema is worse than one that refuses.
 func TestDecodeRejectsUnknownSchema(t *testing.T) {
 	if _, err := Decode([]byte(`{"schema": 99}`)); err == nil {

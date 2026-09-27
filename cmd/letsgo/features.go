@@ -24,31 +24,46 @@ func runFeatures(args []string) error {
 // listFeatures prints the catalogue: what each feature is called, its state
 // in this repository, where that state came from, and how to change it.
 func listFeatures(w io.Writer) error {
-	disabled, err := configuredDisabled()
+	cfg, err := loadFeaturesConfig()
 	if err != nil {
 		return err
 	}
-	set := feature.Resolve(disabled)
+	set := feature.Resolve(cfg.Disabled)
+	required := make(map[string]bool, len(cfg.Required))
+	for _, name := range cfg.Required {
+		required[name] = true
+	}
 
 	for _, f := range feature.All {
+		// Set.On only means "not disabled", which describes a feature that is
+		// on unless told otherwise. One that is off unless told otherwise is
+		// on only when its own directive actually appears.
 		on := set.On(f.Name)
+		if !f.Default {
+			on = enabledByDirective(cfg, f.Name)
+		}
+		state := onOff(on)
+		if required[f.Name] {
+			state += ", required"
+		}
+
 		from := "default"
-		if on != f.Default {
+		if on != f.Default || required[f.Name] {
 			from = plan.ConfigFile
 		}
-		fmt.Fprintf(w, "%-14s %-9s %-3s %-11s %s\n", f.Name, f.Kind, onOff(on), from, changeHint(f))
+		fmt.Fprintf(w, "%-14s %-9s %-14s %-11s %s\n", f.Name, f.Kind, state, from, changeHint(f))
 	}
 	return nil
 }
 
-// configuredDisabled reads the repository's own disable directive, or none
-// when there is no config file: zero-config is the primary path, not a
-// problem.
-func configuredDisabled() ([]string, error) {
+// loadFeaturesConfig reads the repository's own disable/require directives,
+// or a zero Config when there is none: zero-config is the primary path, not
+// a problem.
+func loadFeaturesConfig() (*config.Config, error) {
 	data, err := os.ReadFile(plan.ConfigFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return &config.Config{}, nil
 		}
 		return nil, fmt.Errorf("letsgo: reading %s: %w", plan.ConfigFile, err)
 	}
@@ -57,11 +72,23 @@ func configuredDisabled() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := config.Decode(file)
-	if err != nil {
-		return nil, err
+	return config.Decode(file)
+}
+
+// enabledByDirective reports whether a feature that is off by default has
+// been turned on the only way it can be: by writing the directive that is
+// its own switch.
+func enabledByDirective(cfg *config.Config, name string) bool {
+	switch name {
+	case "budget":
+		return len(cfg.Budgets) > 0
+	case "brew":
+		return cfg.BrewTap != ""
+	case "image":
+		return cfg.Image != nil
+	default:
+		return false
 	}
-	return cfg.Disabled, nil
 }
 
 func onOff(on bool) string {
