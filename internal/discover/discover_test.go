@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -188,6 +189,36 @@ func TestNewScope(t *testing.T) {
 	t.Run("a directory outside the repository is refused", func(t *testing.T) {
 		if _, err := NewScope(top, t.TempDir()); err == nil {
 			t.Error("expected an error for a module outside the repository")
+		}
+	})
+
+	// git's own --show-toplevel already resolves symlinks (macOS's
+	// /tmp -> /private/tmp, among others), so a caller comparing against its
+	// own, unresolved directory must not conclude a module is outside its own
+	// repository merely because the two spellings disagree.
+	t.Run("a symlinked top level still matches the module inside it", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("creating a symlink needs elevated privileges on Windows")
+		}
+		real := filepath.Join(t.TempDir(), "real")
+		if err := os.Mkdir(real, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(t.TempDir(), "link")
+		if err := os.Symlink(real, link); err != nil {
+			t.Fatal(err)
+		}
+		nested := filepath.Join(link, "services", "api")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		s, err := NewScope(link, nested)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Dir != "services/api" {
+			t.Errorf("Scope = %+v", s)
 		}
 	})
 }

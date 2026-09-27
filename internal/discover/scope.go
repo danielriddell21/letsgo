@@ -25,8 +25,18 @@ type Scope struct {
 
 // NewScope derives a module's scope from its own directory and the git top
 // level of the repository containing it, both absolute.
+//
+// Each is resolved through its symlinks before being compared: git's own
+// --show-toplevel already canonicalizes its answer (through macOS's
+// /tmp -> /private/tmp, a Windows short name, or any other alias), and a
+// caller's own directory usually has not. Comparing the two textually
+// without matching that would call every module "outside" its own
+// repository, on every platform where the two happen to disagree.
 func NewScope(topLevel, moduleDir string) (Scope, error) {
-	rel, err := filepath.Rel(filepath.FromSlash(topLevel), moduleDir)
+	topLevel = resolveSymlinks(filepath.FromSlash(topLevel))
+	moduleDir = resolveSymlinks(moduleDir)
+
+	rel, err := filepath.Rel(topLevel, moduleDir)
 	if err != nil {
 		return Scope{}, fmt.Errorf("discover: %w", err)
 	}
@@ -40,4 +50,14 @@ func NewScope(topLevel, moduleDir string) (Scope, error) {
 	}
 
 	return Scope{Dir: rel, Prefix: rel + "/"}, nil
+}
+
+// resolveSymlinks returns dir with its symlinks resolved, or dir itself if
+// that fails — a directory git and FindModule already found is worth
+// comparing even when it cannot be canonicalized further.
+func resolveSymlinks(dir string) string {
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		return resolved
+	}
+	return dir
 }
