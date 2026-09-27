@@ -121,49 +121,27 @@ func TestReleaseTokenResolution(t *testing.T) {
 	noAmbientReleaseTokens(t)
 	t.Setenv("GITHUB_TOKEN", "release-env")
 
-	tests := []struct {
-		name       string
-		override   string
-		token      string
-		env        string
-		wantToken  string
-		wantSource string
-	}{
-		{
-			name:       "the flag wins",
-			override:   "flag",
-			env:        "env",
-			wantToken:  "flag",
-			wantSource: "--release-token",
-		},
-		{
-			name:       "then the environment",
-			env:        "env",
-			wantToken:  "env",
-			wantSource: "LETSGO_RELEASE_TOKEN",
-		},
-		{
-			name:       "then the plain token's flag",
-			token:      "token-flag",
-			wantToken:  "token-flag",
-			wantSource: "--token",
-		},
-		{
-			// The fallback that keeps every existing repository working.
-			name:       "and finally the plain token's environment",
-			wantToken:  "release-env",
-			wantSource: "GITHUB_TOKEN",
-		},
+	assertReleaseToken := func(t *testing.T, override, token, env, wantToken, wantSource string) {
+		t.Helper()
+		t.Setenv("LETSGO_RELEASE_TOKEN", env)
+		got, src := plan.ReleaseToken(override, token)
+		if got != wantToken || src != wantSource {
+			t.Errorf("ReleaseToken(%q, %q) with $LETSGO_RELEASE_TOKEN=%q = %q from %q, want %q from %q",
+				override, token, env, got, src, wantToken, wantSource)
+		}
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("LETSGO_RELEASE_TOKEN", tt.env)
-			token, source := plan.ReleaseToken(tt.override, tt.token)
-			if token != tt.wantToken || source != tt.wantSource {
-				t.Errorf("ReleaseToken(%q, %q) = %q from %q, want %q from %q",
-					tt.override, tt.token, token, source, tt.wantToken, tt.wantSource)
-			}
-		})
-	}
+	t.Run("the flag wins over everything", func(t *testing.T) {
+		assertReleaseToken(t, "flag", "token-flag", "env", "flag", "--release-token")
+	})
+	t.Run("the environment wins over the plain token", func(t *testing.T) {
+		assertReleaseToken(t, "", "token-flag", "env", "env", "LETSGO_RELEASE_TOKEN")
+	})
+	t.Run("falls back to the plain token's own flag", func(t *testing.T) {
+		assertReleaseToken(t, "", "token-flag", "", "token-flag", "--token")
+	})
+	t.Run("falls back to the plain token's own environment", func(t *testing.T) {
+		// The fallback that keeps every existing repository working.
+		assertReleaseToken(t, "", "", "", "release-env", "GITHUB_TOKEN")
+	})
 }

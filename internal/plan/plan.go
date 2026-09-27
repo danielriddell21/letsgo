@@ -1000,55 +1000,8 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 	}
 	p.note("token", source, "environment")
 
-	// The release is probed with the credential that will actually create
-	// it — its own, if one is configured, otherwise the plain token. Probing
-	// the wrong one is how a plan passes and the release then fails on its
-	// last step, which is the one failure this gate exists to prevent.
-	releaseToken, releaseSource := ReleaseToken(opts.ReleaseToken, opts.Token)
-	releaseClient, releaseAccess := client, access
-	if releaseToken != token {
-		releaseClient = github.New(releaseToken)
-		if opts.APIEndpoint != "" {
-			releaseClient.SetEndpoints(opts.APIEndpoint, opts.APIEndpoint)
-		}
-		releaseAccess, err = releaseClient.CheckAccess(ctx, repo)
-		if err != nil {
-			p.add("token", Fail, "%v", err)
-			return
-		}
-		if releaseAccess.Archived {
-			p.add("token", Fail, "%s is archived and cannot receive a release", p.Repo)
-			return
-		}
-		p.note("release token", releaseSource, "environment")
-	}
-
-	switch {
-	case releaseAccess.CanPush:
-		p.add("token", Pass, "%s can write to %s", releaseSource, p.Repo)
-
-	case !underActions():
-		// For a user token the reported permission is accurate, so this is a
-		// real answer and worth stopping for.
-		p.add("token", Fail, "%s", noWriteAccess(releaseSource, p.Repo.String()))
+	if !p.checkRelease(ctx, opts, repo, token, client, access) {
 		return
-
-	default:
-		// A workflow token is an installation token, whose permissions the
-		// repository endpoint does not describe. Ask the forge directly.
-		allowed, err := releaseClient.CanCreateRelease(ctx, repo)
-		switch {
-		case err != nil:
-			// Neither established nor refuted. Blocking here would refuse
-			// correctly configured releases on no evidence, and the publish
-			// attempt will give a definitive answer shortly.
-			p.add("token", Warn, "%s", unconfirmedUnderActions(p.Repo.String()))
-		case allowed:
-			p.add("token", Pass, "%s may create releases in %s", releaseSource, p.Repo)
-		default:
-			p.add("token", Fail, "%s", noActionsWriteAccess(p.Repo.String()))
-			return
-		}
 	}
 
 	// The tap is probed with the credential that will actually write to it.
@@ -1066,6 +1019,71 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 	}
 
 	p.checkTap(ctx, tapClient, tapSource)
+}
+
+// checkRelease establishes that the release can be created with whichever
+// credential will actually create it — its own, if one is configured,
+// otherwise the plain token — the same way checkTap establishes it for the
+// formula. Probing the wrong one is how a plan passes and the release then
+// fails on its last step, which is the one failure this gate exists to
+// prevent.
+//
+// client and access are what checkForge already established for the plain
+// token, reused when no release token is configured so the common case costs
+// no second API call.
+func (p *Plan) checkRelease(
+	ctx context.Context, opts Options, repo github.Repo, token string, client *github.Client, access github.Access,
+) bool {
+	releaseToken, releaseSource := ReleaseToken(opts.ReleaseToken, opts.Token)
+	releaseClient, releaseAccess := client, access
+	if releaseToken != token {
+		releaseClient = github.New(releaseToken)
+		if opts.APIEndpoint != "" {
+			releaseClient.SetEndpoints(opts.APIEndpoint, opts.APIEndpoint)
+		}
+		var err error
+		releaseAccess, err = releaseClient.CheckAccess(ctx, repo)
+		if err != nil {
+			p.add("token", Fail, "%v", err)
+			return false
+		}
+		if releaseAccess.Archived {
+			p.add("token", Fail, "%s is archived and cannot receive a release", p.Repo)
+			return false
+		}
+		p.note("release token", releaseSource, "environment")
+	}
+
+	switch {
+	case releaseAccess.CanPush:
+		p.add("token", Pass, "%s can write to %s", releaseSource, p.Repo)
+		return true
+
+	case !underActions():
+		// For a user token the reported permission is accurate, so this is a
+		// real answer and worth stopping for.
+		p.add("token", Fail, "%s", noWriteAccess(releaseSource, p.Repo.String()))
+		return false
+
+	default:
+		// A workflow token is an installation token, whose permissions the
+		// repository endpoint does not describe. Ask the forge directly.
+		allowed, err := releaseClient.CanCreateRelease(ctx, repo)
+		switch {
+		case err != nil:
+			// Neither established nor refuted. Blocking here would refuse
+			// correctly configured releases on no evidence, and the publish
+			// attempt will give a definitive answer shortly.
+			p.add("token", Warn, "%s", unconfirmedUnderActions(p.Repo.String()))
+			return true
+		case allowed:
+			p.add("token", Pass, "%s may create releases in %s", releaseSource, p.Repo)
+			return true
+		default:
+			p.add("token", Fail, "%s", noActionsWriteAccess(p.Repo.String()))
+			return false
+		}
+	}
 }
 
 // resolveTap parses the configured Homebrew tap.
