@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -33,6 +34,12 @@ type Options struct {
 
 	// GoMod is the path to the module's go.mod.
 	GoMod string
+
+	// Prefix is the module's scope prefix (see discover.Scope), empty for a
+	// root module. Tag carries it; go.mod's own retract directive does not,
+	// so it has to be stripped before the directive is written and reattached
+	// wherever a tag is proposed back to the caller.
+	Prefix string
 
 	// Tap and TapAPI revert a Homebrew formula to the previous release. Both
 	// are needed; either being absent means no tap to revert.
@@ -104,7 +111,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		return nil, fmt.Errorf("yank: no tag given")
 	}
 
-	result := &Result{Next: NextAfter(o.Tag)}
+	result := &Result{Next: NextAfter(o.Tag, o.Prefix)}
 
 	release, err := o.Client.ReleaseByTag(ctx, o.Repo, o.Tag)
 	if err != nil {
@@ -167,7 +174,10 @@ func (o Options) editGoMod(result *Result, logf func(string, ...any)) error {
 		return fmt.Errorf("yank: reading %s: %w", o.GoMod, err)
 	}
 
-	out, changed, err := Retract(data, o.Tag, o.Reason)
+	// go.mod's own retract directive names a version, never a scoped tag: the
+	// file already lives in the scope the prefix names.
+	version := strings.TrimPrefix(o.Tag, o.Prefix)
+	out, changed, err := Retract(data, version, o.Reason)
 	if err != nil {
 		return err
 	}
@@ -287,31 +297,48 @@ func FormulasFrom(m *manifest.Manifest, repo github.Repo, project, caveats strin
 	return out
 }
 
-// NextAfter returns the version a retraction of tag must be published in.
+// NextAfter returns the tag a retraction of tag must be published as, keeping
+// tag's own scope prefix.
 //
 // A patch bump, and never the retracted version itself: the directive lives in
 // go.mod, and go.mod is only visible to the toolchain through a version that
 // carries it. Retracting v1.2.3 and stopping there leaves the retraction in a
 // release nobody will fetch.
-func NextAfter(tag string) string {
-	v, ok := semver.Parse(tag)
+func NextAfter(tag, prefix string) string {
+	scope := discover.Scope{Prefix: prefix}
+	rest, ok := scope.MatchesTag(tag)
 	if !ok {
 		return ""
 	}
-	return fmt.Sprintf("v%d.%d.%d", v.Major, v.Minor, v.Patch+1)
+	v, ok := semver.Parse(rest)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%sv%d.%d.%d", prefix, v.Major, v.Minor, v.Patch+1)
 }
 
-// PreviousOf finds the release before tag, by version rather than by the order
-// the forge lists them in.
-func PreviousOf(tags []string, tag string) string {
-	target, ok := semver.Parse(tag)
+// PreviousOf finds the release before tag in tag's own scope, by version
+// rather than by the order the forge lists them in, and ignoring any tag
+// outside that scope — a nested module's tags parse as valid versions too.
+func PreviousOf(tags []string, tag, prefix string) string {
+	scope := discover.Scope{Prefix: prefix}
+
+	targetRest, ok := scope.MatchesTag(tag)
+	if !ok {
+		return ""
+	}
+	target, ok := semver.Parse(targetRest)
 	if !ok {
 		return ""
 	}
 
 	best, found := semver.Version{}, ""
 	for _, candidate := range tags {
-		v, ok := semver.Parse(candidate)
+		rest, ok := scope.MatchesTag(candidate)
+		if !ok {
+			continue
+		}
+		v, ok := semver.Parse(rest)
 		if !ok || semver.Compare(v, target) >= 0 {
 			continue
 		}

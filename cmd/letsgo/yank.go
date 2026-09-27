@@ -46,6 +46,15 @@ func runYank(args []string) error {
 	}
 	repo := github.Repo{Owner: found.Owner, Name: found.Name}
 
+	git, err := discover.FindGit(ctx, module.Dir)
+	if err != nil {
+		return fmt.Errorf("letsgo: %w", err)
+	}
+	scope, err := discover.NewScope(git.TopLevel, module.Dir)
+	if err != nil {
+		return fmt.Errorf("letsgo: %w", err)
+	}
+
 	tokenValue, _ := plan.Token(*token)
 	if tokenValue == "" {
 		return fmt.Errorf("letsgo: no token; set %s", envList())
@@ -53,7 +62,7 @@ func runYank(args []string) error {
 	client := github.New(tokenValue)
 	client.UserAgent = "letsgo/" + version
 
-	previous, err := previousRelease(ctx, client, repo, tag)
+	previous, err := previousRelease(ctx, client, repo, tag, scope.Prefix)
 	if err != nil {
 		return err
 	}
@@ -64,6 +73,7 @@ func runYank(args []string) error {
 		Tag:      tag,
 		Reason:   *reason,
 		GoMod:    filepath.Join(module.Dir, "go.mod"),
+		Prefix:   scope.Prefix,
 		Project:  module.Name,
 		Caveats:  brewCaveats(module.Dir),
 		Previous: previous,
@@ -94,12 +104,12 @@ func runYank(args []string) error {
 }
 
 // previousRelease finds the release the formula should roll back to.
-func previousRelease(ctx context.Context, client *github.Client, repo github.Repo, tag string) (string, error) {
+func previousRelease(ctx context.Context, client *github.Client, repo github.Repo, tag, prefix string) (string, error) {
 	tags, err := client.Tags(ctx, repo, 100)
 	if err != nil {
 		return "", err
 	}
-	return yank.PreviousOf(tags, tag), nil
+	return yank.PreviousOf(tags, tag, prefix), nil
 }
 
 // tapFor reads the configured Homebrew tap, if there is one, and the
