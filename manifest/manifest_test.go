@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,6 +80,18 @@ func TestWriteAndRead(t *testing.T) {
 	}
 }
 
+func TestReadMissingFile(t *testing.T) {
+	if _, err := Read(filepath.Join(t.TempDir(), "nope.json")); err == nil {
+		t.Error("Read should have reported the missing file")
+	}
+}
+
+func TestWriteToAnUnwritableDirectory(t *testing.T) {
+	if err := sample().Write(filepath.Join(t.TempDir(), "nope", FileName)); err == nil {
+		t.Error("Write should have reported the missing directory")
+	}
+}
+
 func TestArtifactLookup(t *testing.T) {
 	m := sample()
 	if _, ok := m.Artifact("foo_1.2.3_linux_amd64.tar.gz"); !ok {
@@ -110,11 +123,57 @@ func TestBaseNameStripsWhatTheBuilderAppended(t *testing.T) {
 	}
 }
 
+// Artifact.BaseName is the method form, which every caller outside this
+// package actually uses.
+func TestArtifactBaseNameMethod(t *testing.T) {
+	a := Artifact{Name: "foo_1.2.3_linux_amd64.tar.gz", OS: "linux", Arch: "amd64"}
+	if got := a.BaseName("1.2.3"); got != "foo" {
+		t.Errorf("BaseName = %q", got)
+	}
+}
+
+func TestBinaryNames(t *testing.T) {
+	multi := Artifact{Binaries: []Binary{{Name: "a"}, {Name: "b"}}}
+	if got := multi.BinaryNames(); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("BinaryNames() = %v", got)
+	}
+}
+
 func TestSortArtifacts(t *testing.T) {
 	artifacts := []Artifact{{Name: "b"}, {Name: "a"}}
 	SortArtifacts(artifacts)
 	if artifacts[0].Name != "a" || artifacts[1].Name != "b" {
 		t.Errorf("SortArtifacts did not sort: %+v", artifacts)
+	}
+}
+
+func TestSummariseModulesCountsDistinctModules(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "go.sum")
+	content := strings.Join([]string{
+		"github.com/a/b v1.0.0 h1:aaa=",
+		"github.com/a/b v1.0.0/go.mod h1:bbb=",
+		"golang.org/x/net v0.23.0 h1:ccc=",
+		"golang.org/x/net v0.23.0/go.mod h1:ddd=",
+		"golang.org/x/sys v0.1.0/go.mod h1:eee=",
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mods, err := SummariseModules(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mods.Count != 3 {
+		t.Errorf("Count = %d, want 3", mods.Count)
+	}
+	if len(mods.GoSumSHA256) != 64 {
+		t.Errorf("GoSumSHA256 = %q, want a sha256", mods.GoSumSHA256)
+	}
+	if len(mods.List) != 3 || mods.List[0].Path != "github.com/a/b" {
+		t.Errorf("List = %+v", mods.List)
 	}
 }
 
