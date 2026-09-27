@@ -21,19 +21,10 @@ import (
 	"github.com/danielriddell21/letsgo/internal/release"
 )
 
-// moduleFixture writes a minimal buildable module and commits it, so
-// plan.Resolve has a real repository to work from.
-func moduleFixture(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-
-	write := func(name, content string) {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("go.mod", "module example.com/demo\n\ngo 1.24\n")
-	write("main.go", `package main
+// demoMainGo is a program small enough to build in a test, but one that
+// answers --version: planAndBuild's smoke test insists on that from anything
+// it builds.
+const demoMainGo = `package main
 
 import (
 	"fmt"
@@ -49,30 +40,42 @@ var (
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		fmt.Printf("demo %s (%s) built %s\n", version, commit, date)
-		return
 	}
 }
-`)
-	write("letsgo.mod", "build "+gobuild.Host().String()+"\n")
+`
 
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
-			"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+// moduleFixture writes a minimal buildable module and commits it, so
+// plan.Resolve has a real repository to work from.
+//
+// Driven as one shell-independent command list, with the identity given as
+// -c flags rather than a GIT_AUTHOR_* environment: a test fixture belongs to
+// this file, not copied from the shape another package's already has.
+func moduleFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	for name, content := range map[string]string{
+		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
+		"main.go":    demoMainGo,
+		"letsgo.mod": "build " + gobuild.Host().String() + "\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
 		}
 	}
-	run("init", "-q", "-b", "main")
-	run("remote", "add", "origin", "https://github.com/you/demo.git")
-	run("add", ".")
-	run("commit", "-q", "-m", "feat: first release")
-	run("tag", "v1.2.3")
+
+	identity := []string{"-c", "user.name=Test", "-c", "user.email=t@example.com"}
+	for _, args := range [][]string{
+		{"-C", dir, "init", "-q", "-b", "main"},
+		{"-C", dir, "remote", "add", "origin", "https://github.com/you/demo.git"},
+		{"-C", dir, "add", "."},
+		append(append([]string{"-C", dir}, identity...), "commit", "-q", "-m", "feat: first release"),
+		{"-C", dir, "tag", "v1.2.3"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
 	return dir
 }
 
