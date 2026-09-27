@@ -7,110 +7,87 @@ import (
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
-// A known plugin already documents its hook, so pinning it to a different
-// one is not a config that happens to disagree with letsgo — it is wrong,
-// and the release should say so before anything is built.
-func TestKnownPluginPinnedToTheWrongHookFails(t *testing.T) {
-	r := newRepo(t)
-	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
-	r.write("main.go", "package main\n\nfunc main() {}\n")
-	r.write("letsgo.mod", "build linux/amd64\n"+
-		"plugin ldflags letsgo-multi v0.1.0 sha256:"+strings.Repeat("a", 64)+"\n")
-	r.commit("v1.0.0")
-
-	p := r.resolve(plan.Options{})
-	if p.OK() {
-		t.Fatal("letsgo-multi answers archive-layout, not ldflags")
+// resolveWithMod builds a module with the given commands (default: one
+// main.go) and letsgo.mod content, and resolves it.
+func resolveWithMod(t *testing.T, mod string, commands ...string) *plan.Plan {
+	t.Helper()
+	if len(commands) == 0 {
+		commands = []string{"main.go"}
 	}
-	c := check(t, p, "plugins")
-	if c.Status != plan.Fail || !strings.Contains(c.Detail, "archive-layout") {
-		t.Errorf("check = %+v", c)
-	}
-}
 
-// letsgo-cask answers no hook at all; pinning it to one is exactly as wrong
-// as pinning it to the wrong one.
-func TestStandaloneKnownPluginCannotBePinned(t *testing.T) {
-	r := newRepo(t)
-	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
-	r.write("main.go", "package main\n\nfunc main() {}\n")
-	r.write("letsgo.mod", "build linux/amd64\n"+
-		"plugin ldflags letsgo-cask v0.1.0 sha256:"+strings.Repeat("a", 64)+"\n")
-	r.commit("v1.0.0")
-
-	p := r.resolve(plan.Options{})
-	if p.OK() {
-		t.Fatal("letsgo-cask does not answer a hook")
-	}
-	c := check(t, p, "plugins")
-	if c.Status != plan.Fail || !strings.Contains(c.Detail, "does not answer a hook") {
-		t.Errorf("check = %+v", c)
-	}
-}
-
-// A repository building several commands without letsgo-multi is not wrong,
-// but it is exactly the shape the plugin exists for.
-func TestManyCommandsHintAtMulti(t *testing.T) {
-	r := newRepo(t)
-	r.write("go.mod", "module github.com/you/tools\n\ngo 1.24\n")
-	r.write("cmd/alpha/main.go", "package main\n\nfunc main() {}\n")
-	r.write("cmd/beta/main.go", "package main\n\nfunc main() {}\n")
-	r.commit("v1.0.0")
-
-	p := r.resolve(plan.Options{})
-
-	if !hasWarning(p, "letsgo-multi") {
-		t.Errorf("no hint toward letsgo-multi: %+v", p.Checks)
-	}
-}
-
-// Pinning letsgo-multi already is the answer to that hint, so it should stop
-// repeating itself.
-func TestManyCommandsWithMultiAlreadyPinnedHasNoHint(t *testing.T) {
-	r := newRepo(t)
-	r.write("go.mod", "module github.com/you/tools\n\ngo 1.24\n")
-	r.write("cmd/alpha/main.go", "package main\n\nfunc main() {}\n")
-	r.write("cmd/beta/main.go", "package main\n\nfunc main() {}\n")
-	r.write("letsgo.mod", "build linux/amd64\n"+
-		"plugin archive-layout letsgo-multi v0.1.0 sha256:"+strings.Repeat("a", 64)+"\n")
-	r.commit("v1.0.0")
-
-	p := r.resolve(plan.Options{})
-	if hasWarning(p, "letsgo-multi groups") {
-		t.Errorf("should not hint at a plugin that is already pinned: %+v", p.Checks)
-	}
-}
-
-// A darwin variant alongside a Homebrew tap is exactly what letsgo-cask
-// exists for.
-func TestDarwinVariantWithTapHintsAtCask(t *testing.T) {
 	r := newRepo(t)
 	r.write("go.mod", "module github.com/you/gambit\n\ngo 1.24\n")
-	r.write("main.go", "package main\n\nfunc main() {}\n")
-	r.write("letsgo.mod", "build linux/amd64\n"+
-		"brew you/tap\n"+
-		"variant gui (\n\tbuild darwin/arm64\n)\n")
+	for _, name := range commands {
+		r.write(name, "package main\n\nfunc main() {}\n")
+	}
+	if mod != "" {
+		r.write("letsgo.mod", mod)
+	}
 	r.commit("v1.0.0")
+	return r.resolve(plan.Options{})
+}
 
-	p := r.resolve(plan.Options{})
-
-	if !hasWarning(p, "letsgo-cask") {
-		t.Errorf("no hint toward letsgo-cask: %+v", p.Checks)
+// A known plugin already documents its hook, so pinning it to a different one
+// — or to none at all, for one that answers no hook — is wrong, and the
+// release should say so before anything is built.
+func TestKnownPluginPinnedWrong(t *testing.T) {
+	for _, tc := range []struct {
+		name, pin, want string
+	}{
+		{
+			"the wrong hook",
+			"plugin ldflags letsgo-multi v0.1.0 sha256:" + strings.Repeat("a", 64),
+			"archive-layout",
+		},
+		{
+			"no hook at all",
+			"plugin ldflags letsgo-cask v0.1.0 sha256:" + strings.Repeat("a", 64),
+			"does not answer a hook",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := resolveWithMod(t, "build linux/amd64\n"+tc.pin+"\n")
+			if p.OK() {
+				t.Fatal("a wrongly pinned known plugin should fail the plan")
+			}
+			c := check(t, p, "plugins")
+			if c.Status != plan.Fail || !strings.Contains(c.Detail, tc.want) {
+				t.Errorf("check = %+v", c)
+			}
+		})
 	}
 }
 
-// Without a tap, there is nowhere for a cask to be published, so no hint.
-func TestDarwinVariantWithoutTapHasNoCaskHint(t *testing.T) {
-	r := newRepo(t)
-	r.write("go.mod", "module github.com/you/gambit\n\ngo 1.24\n")
-	r.write("main.go", "package main\n\nfunc main() {}\n")
-	r.write("letsgo.mod", "build linux/amd64\n"+
-		"variant gui (\n\tbuild darwin/arm64\n)\n")
-	r.commit("v1.0.0")
+// A release's shape can match a first-party plugin's whole job — several
+// commands, or a darwin variant beside a Homebrew tap — without pinning one.
+// That is not wrong, just more work than it needs to be, so it is a hint
+// rather than a failure, and one that stops once the plugin is pinned.
+func TestPluginHints(t *testing.T) {
+	multiCommands := []string{"cmd/alpha/main.go", "cmd/beta/main.go"}
+	multiPin := "plugin archive-layout letsgo-multi v0.1.0 sha256:" + strings.Repeat("a", 64) + "\n"
+	darwinVariant := "variant gui (\n\tbuild darwin/arm64\n)\n"
 
-	p := r.resolve(plan.Options{})
-	if hasWarning(p, "letsgo-cask") {
-		t.Errorf("should not hint without a tap: %+v", p.Checks)
+	for _, tc := range []struct {
+		name     string
+		mod      string
+		commands []string
+		want     string
+		hinted   bool
+	}{
+		{"many commands hint at multi", "", multiCommands, "letsgo-multi", true},
+		{
+			"multi already pinned has no hint",
+			"build linux/amd64\n" + multiPin, multiCommands, "letsgo-multi groups", false,
+		},
+		{"darwin variant with a tap hints at cask", "build linux/amd64\nbrew you/tap\n" + darwinVariant, nil, "letsgo-cask", true},
+		{"darwin variant without a tap has no hint", "build linux/amd64\n" + darwinVariant, nil, "letsgo-cask", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := resolveWithMod(t, tc.mod, tc.commands...)
+			if got := hasWarning(p, tc.want); got != tc.hinted {
+				t.Errorf("hasWarning(%q) = %v, checks: %+v", tc.want, got, p.Checks)
+			}
+		})
 	}
 }
 

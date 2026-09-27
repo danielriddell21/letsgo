@@ -74,61 +74,48 @@ func TestDescribePinLeavesAnUnknownHookBlank(t *testing.T) {
 	}
 }
 
-// A plugin letsgo publishes itself has a documented hook, and installing it
-// fresh — no letsgo.mod pinning it yet — should not make someone copy that
-// hook out of a README by hand.
-func TestDescribePinFillsTheHookFromTheCatalogueForAKnownPlugin(t *testing.T) {
-	t.Chdir(t.TempDir())
+// A plugin letsgo publishes itself has a documented hook, so installing it
+// fresh should fill that in rather than leave a placeholder; one that
+// answers no hook must not be told to pin itself; and upgrading a plugin
+// already pinned must never silently move it to a different hook, even if
+// the catalogue disagreed.
+func TestDescribePinUsesTheCatalogue(t *testing.T) {
+	for _, tc := range []struct {
+		name, plugin, config, want, avoid string
+	}{
+		{
+			"fills a known plugin's hook", "letsgo-env", "",
+			"plugin ldflags letsgo-env v0.2.0", "<hook>",
+		},
+		{
+			"prefers the config over the catalogue", "letsgo-env",
+			"build linux/amd64\nplugin ldflags letsgo-env v0.1.0 sha256:" + strings.Repeat("a", 64) + "\n",
+			"plugin ldflags letsgo-env v0.2.0", "",
+		},
+		{
+			"reports a standalone plugin", "letsgo-cask", "",
+			"does not answer a hook", "pin it in letsgo.mod",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			if tc.config != "" {
+				write(t, "letsgo.mod", tc.config)
+			}
 
-	var out bytes.Buffer
-	describePin(&out, "letsgo-env", &selfupdate.Update{
-		Version:      "0.2.0",
-		BinarySHA256: strings.Repeat("c", 64),
-	})
+			var out bytes.Buffer
+			describePin(&out, tc.plugin, &selfupdate.Update{
+				Version:      "0.2.0",
+				BinarySHA256: strings.Repeat("c", 64),
+			})
 
-	want := "plugin ldflags letsgo-env v0.2.0"
-	if !strings.Contains(out.String(), want) {
-		t.Errorf("describePin printed:\n%s\nwant a line %q", out.String(), want)
-	}
-	if strings.Contains(out.String(), "<hook>") {
-		t.Error("a catalogued plugin's hook should not have been left blank")
-	}
-}
-
-// letsgo-cask answers no hook: it reads a finished release, so there is
-// nothing to pin it to, and describePin must not invent one.
-func TestDescribePinReportsAStandalonePlugin(t *testing.T) {
-	t.Chdir(t.TempDir())
-
-	var out bytes.Buffer
-	describePin(&out, "letsgo-cask", &selfupdate.Update{
-		Version:      "0.2.0",
-		BinarySHA256: strings.Repeat("c", 64),
-	})
-
-	if !strings.Contains(out.String(), "does not answer a hook") {
-		t.Errorf("describePin printed:\n%s", out.String())
-	}
-	if strings.Contains(out.String(), "pin it in letsgo.mod") {
-		t.Error("a standalone plugin should not be told to pin itself")
-	}
-}
-
-// Upgrading a plugin already pinned to a hook must never silently move it to
-// a different one, even if the catalogue disagrees with the config.
-func TestDescribePinPrefersTheConfigOverTheCatalogue(t *testing.T) {
-	t.Chdir(t.TempDir())
-	write(t, "letsgo.mod", "build linux/amd64\n"+
-		"plugin ldflags letsgo-env v0.1.0 sha256:"+strings.Repeat("a", 64)+"\n")
-
-	var out bytes.Buffer
-	describePin(&out, "letsgo-env", &selfupdate.Update{
-		Version:      "0.2.0",
-		BinarySHA256: strings.Repeat("c", 64),
-	})
-
-	if !strings.Contains(out.String(), "plugin ldflags letsgo-env v0.2.0") {
-		t.Errorf("describePin printed:\n%s", out.String())
+			if !strings.Contains(out.String(), tc.want) {
+				t.Errorf("describePin printed:\n%s\nwant %q", out.String(), tc.want)
+			}
+			if tc.avoid != "" && strings.Contains(out.String(), tc.avoid) {
+				t.Errorf("describePin printed:\n%s\nwant it not to contain %q", out.String(), tc.avoid)
+			}
+		})
 	}
 }
 
