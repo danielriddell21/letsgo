@@ -26,10 +26,16 @@ const (
 	// HookArchiveLayout asks which binaries share an archive. The answer is
 	// recorded as the artifact's binaries.
 	HookArchiveLayout Hook = "archive-layout"
+
+	// HookTapFiles asks what else belongs in the Homebrew tap beside the
+	// formula, a cask most often. Core writes what comes back and records it
+	// in the manifest; it never changes a released byte, so verification has
+	// nothing to replay.
+	HookTapFiles Hook = "tap-files"
 )
 
 // Hooks is the closed set, in the order they run.
-var Hooks = []Hook{HookLDFlags, HookArchiveLayout}
+var Hooks = []Hook{HookLDFlags, HookArchiveLayout, HookTapFiles}
 
 // Valid reports whether a hook is one letsgo knows.
 func (h Hook) Valid() bool {
@@ -100,6 +106,65 @@ type OutputArchive struct {
 
 	// Binaries are the executables inside it, named as the input named them.
 	Binaries []string `json:"binaries"`
+}
+
+// TapFilesInput is what the tap-files hook is told: everything a formula
+// writer already has, so a plugin never rebuilds a download URL or asks the
+// forge a question core has already answered.
+type TapFilesInput struct {
+	Project string `json:"project"`
+	Version string `json:"version"`
+	Tag     string `json:"tag"`
+
+	// Repo and Tap are "owner/name".
+	Repo string `json:"repo"`
+	Tap  string `json:"tap"`
+
+	// Description, License and Homepage come from the repository, not a
+	// flag: the same facts a formula is written with.
+	Description string `json:"description,omitempty"`
+	License     string `json:"license,omitempty"`
+	Homepage    string `json:"homepage,omitempty"`
+	Caveats     string `json:"caveats,omitempty"`
+
+	Artifacts []TapArtifact `json:"artifacts"`
+}
+
+// TapArtifact is one archive the plugin can point a file at.
+type TapArtifact struct {
+	Archive string `json:"archive"`
+
+	// Variant is the group name a non-default build was made for, empty for
+	// the release's ordinary archives. A cask usually exists for a variant a
+	// formula does not carry, such as a windowed build.
+	Variant string `json:"variant,omitempty"`
+
+	OS     string `json:"os"`
+	Arch   string `json:"arch"`
+	SHA256 string `json:"sha256"`
+
+	// URL is already built from core's own escaping, so a plugin never
+	// reimplements it and never disagrees with the formula about a tag
+	// containing a slash.
+	URL string `json:"url"`
+
+	Binaries []string `json:"binaries"`
+}
+
+// TapFilesOutput is what the hook answers: files to write into the tap,
+// beside the formula.
+type TapFilesOutput struct {
+	Files []TapFile `json:"files"`
+}
+
+// TapFile is one file to write into the tap.
+type TapFile struct {
+	// Path is relative to the tap's root, and must stay under Casks/: the
+	// plugin decides what goes in the tap, not where in the repository it may
+	// write.
+	Path string `json:"path"`
+
+	Content string `json:"content"`
 }
 
 // Main runs a hook and exits: the whole of a plugin's main function.

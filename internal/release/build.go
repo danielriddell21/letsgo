@@ -35,6 +35,11 @@ type Result struct {
 	// which is why the manifest can name them.
 	Images []ImageBuild
 
+	// TapFiles are what a tap-files plugin rendered for the Homebrew tap,
+	// already validated. Publishing writes them; nothing here has written
+	// anything yet.
+	TapFiles []plugin.TapFile
+
 	// Files are the names of every file to publish, in upload order.
 	Files []string
 }
@@ -87,7 +92,12 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 		return nil, err
 	}
 
-	m := describe(p, toolVersion, goVersion, source, mods, artifacts, images)
+	tapFiles, err := applyTapFilesPlugin(ctx, p, artifacts)
+	if err != nil {
+		return nil, err
+	}
+
+	m := describe(p, toolVersion, goVersion, source, mods, artifacts, images, tapFiles)
 
 	files, err := writeMetadata(p, m, toolVersion, dir, artifacts, source)
 	if err != nil {
@@ -96,7 +106,7 @@ func Build(ctx context.Context, p *plan.Plan, dir string, toolVersion string, wa
 
 	return &Result{
 		Dir: dir, Manifest: m, Artifacts: artifacts, Source: source,
-		Images: images, Files: files,
+		Images: images, TapFiles: tapFiles, Files: files,
 	}, nil
 }
 
@@ -171,6 +181,7 @@ func describe(
 	mods manifest.Modules,
 	artifacts []build.Artifact,
 	images []ImageBuild,
+	tapFiles []plugin.TapFile,
 ) *manifest.Manifest {
 	m := &manifest.Manifest{
 		Schema:          manifest.Schema,
@@ -187,6 +198,7 @@ func describe(
 		Features:        featuresRecord(p),
 		APIChanges:      apiChanges(p),
 		Images:          imageRecords(images),
+		TapFiles:        tapFileRecords(tapFiles),
 		Artifacts:       make([]manifest.Artifact, 0, len(artifacts)),
 	}
 

@@ -78,6 +78,7 @@ func fixture(t *testing.T, extraConfig ...string) *plan.Plan {
 		}
 	}
 	run("init", "-q", "-b", "main")
+	run("remote", "add", "origin", "https://github.com/you/demo.git")
 	run("add", ".")
 	run("commit", "-q", "-m", "feat: first release")
 	run("tag", "v1.2.3")
@@ -278,6 +279,72 @@ func TestBuildRefusesAFailedPlan(t *testing.T) {
 
 	if _, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil); err == nil {
 		t.Error("Build proceeded despite a failed gate")
+	}
+}
+
+// A release with a tap-files plugin pinned writes what it rendered into the
+// manifest, without publishing anything: publishing is a separate call, made
+// once the release's assets exist to be linked to.
+func TestBuildRecordsTapFiles(t *testing.T) {
+	scriptDir := t.TempDir()
+	script := filepath.Join(scriptDir, "cask-fixture")
+	if err := os.WriteFile(script, []byte(
+		"#!/bin/sh\ncat > /dev/null\necho '{\"files\":[{\"path\":\"Casks/demo.rb\",\"content\":\"cask demo\"}]}'\n",
+	), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	data, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+
+	p := fixture(t, "brew you/tap", "plugin tap-files cask-fixture v0.1.0 "+digest)
+
+	result, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if len(result.TapFiles) != 1 || result.TapFiles[0].Path != "Casks/demo.rb" {
+		t.Fatalf("result.TapFiles = %+v", result.TapFiles)
+	}
+
+	wantSum := sha256.Sum256([]byte("cask demo"))
+	want := hex.EncodeToString(wantSum[:])
+	if len(result.Manifest.TapFiles) != 1 ||
+		result.Manifest.TapFiles[0].Path != "Casks/demo.rb" || result.Manifest.TapFiles[0].SHA256 != want {
+		t.Errorf("manifest.TapFiles = %+v", result.Manifest.TapFiles)
+	}
+}
+
+// A tap-files plugin that reaches outside Casks/ must stop the release before
+// the manifest — or anything else — is written to disk.
+func TestBuildFailsOnAnInvalidTapFilePath(t *testing.T) {
+	scriptDir := t.TempDir()
+	script := filepath.Join(scriptDir, "cask-fixture")
+	if err := os.WriteFile(script, []byte(
+		"#!/bin/sh\ncat > /dev/null\necho '{\"files\":[{\"path\":\"../Formula/x.rb\",\"content\":\"x\"}]}'\n",
+	), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	data, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+
+	p := fixture(t, "brew you/tap", "plugin tap-files cask-fixture v0.1.0 "+digest)
+
+	if _, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil); err == nil ||
+		!strings.Contains(err.Error(), "not a valid tap path") {
+		t.Errorf("err = %v", err)
 	}
 }
 

@@ -34,6 +34,7 @@ type (
 	Artifact      = pub.Artifact
 	Binary        = pub.Binary
 	Build         = pub.Build
+	TapFile       = pub.TapFile
 )
 
 // Decode parses a manifest, rejecting schema versions it does not understand.
