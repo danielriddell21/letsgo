@@ -306,13 +306,14 @@ func readQuoted(file string, lineNo, col int, runes []rune, start int) (string, 
 	return unquoted, i, nil
 }
 
-// endOfBareToken finds where an unquoted token ends: at whitespace, at a
-// comment, or at a self-delimiting parenthesis.
+// endOfBareToken finds where an unquoted token ends: at whitespace, or at a
+// self-delimiting parenthesis.
+//
+// A trailing "//" comment is recognised by the caller before a bare token
+// starts, not here — so a "//" reached partway through one (as in a
+// "https://" URL) is just two more characters of the token, not a comment.
 func endOfBareToken(runes []rune, i int) int {
 	for i < len(runes) && runes[i] != ' ' && runes[i] != '\t' {
-		if runes[i] == '/' && i+1 < len(runes) && runes[i+1] == '/' {
-			break
-		}
 		if runes[i] == '(' || runes[i] == ')' {
 			break
 		}

@@ -34,6 +34,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/plugin"
+	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
@@ -249,6 +250,29 @@ func (p *Plan) checkPluginConfigFiles() {
 				configured.Command, legacy, modern)
 		}
 	}
+}
+
+// resolveGlobalConfig loads the machine's global config and records where
+// each machine-level value it can influence — the go toolchain, git, and the
+// module proxy — actually came from, so `plan --explain` can name the source
+// of each (CD-10). A malformed global file is a Fail here rather than a
+// silent fallback: every other package that consults the global config falls
+// back to its defaults on error, trusting this check to surface the problem
+// once instead of nowhere.
+func (p *Plan) resolveGlobalConfig() {
+	if _, err := config.LoadGlobal(); err != nil {
+		p.add("global config", Fail, "%v", err)
+	}
+
+	if path, source, err := gobuild.ToolchainSource(); err == nil {
+		p.note("go", path, source)
+	}
+	if path, source, err := discover.GitSource(); err == nil {
+		p.note("git", path, source)
+	}
+	proxy, source := publish.ResolveProxy()
+	p.Proxy = proxy
+	p.note("proxy", proxy, source)
 }
 
 // hintPlugins nudges toward a first-party plugin whose job matches this
@@ -644,6 +668,10 @@ type Plan struct {
 	// configured, which is the default.
 	Image *ImageTarget
 
+	// Proxy is the module proxy this release would warm, resolved from
+	// GOPROXY, the global config, or the fixed default.
+	Proxy string
+
 	Checks  []Check
 	Sources []Source
 
@@ -706,6 +734,8 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 		p.Repo, p.HasRepo = repo, true
 		p.note("repository", repo.String(), "git remote origin")
 	}
+
+	p.resolveGlobalConfig()
 
 	// The config is read before the module is settled, because it is what can
 	// move it: `module web` says the go.mod to build is not the one beside

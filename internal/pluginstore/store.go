@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/internal/config"
 )
 
 // StoreEnvOverride names a directory to use as the store instead of the
@@ -37,11 +39,25 @@ type Store struct {
 }
 
 // Open prepares a store under dir. An empty dir uses StoreEnvOverride when
-// set, else the default location: $XDG_DATA_HOME/letsgo/plugins, or its
-// platform equivalent.
+// set, else the global config's `plugins` directive, else the default
+// location: $XDG_DATA_HOME/letsgo/plugins, or its platform equivalent.
 func Open(dir string) (*Store, error) {
+	global, err := config.LoadGlobal()
+	if err != nil {
+		global = &config.Global{}
+	}
+	return openWith(dir, global)
+}
+
+// openWith is Open's core logic, taking the global config directly rather
+// than loading it, so tests can exercise the `plugins` directive without
+// relying on config.LoadGlobal's process-wide memoization.
+func openWith(dir string, global *config.Global) (*Store, error) {
 	if dir == "" {
 		dir = os.Getenv(StoreEnvOverride)
+	}
+	if dir == "" {
+		dir = global.PluginsDir
 	}
 	if dir == "" {
 		home, err := dataHome()

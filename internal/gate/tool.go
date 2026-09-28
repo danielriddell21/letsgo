@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/safeexec"
 )
 
@@ -54,6 +55,29 @@ func (e *MissingToolError) Unwrap() error { return ErrToolMissing }
 // user chose to install is a tool they chose to trust, and refusing to look
 // where Go puts things would mean never finding them.
 func find(tool, install string) (string, error) {
+	global, err := config.LoadGlobal()
+	if err != nil {
+		global = &config.Global{}
+	}
+	return findWith(tool, install, global)
+}
+
+// findWith is find's core logic, taking the global config directly rather
+// than loading it, so tests can exercise the override without relying on
+// config.LoadGlobal's process-wide memoization.
+func findWith(tool, install string, global *config.Global) (string, error) {
+	// An explicit override wins outright: it names the tool to run, not
+	// another place to look for it.
+	if override := global.Tools[tool]; override != "" {
+		if !filepath.IsAbs(override) {
+			return "", fmt.Errorf("gate: tool %s %q in %s must be an absolute path", tool, override, global.Path)
+		}
+		if !safeexec.IsExecutable(override) {
+			return "", fmt.Errorf("gate: tool %s %q in %s is not an executable file", tool, override, global.Path)
+		}
+		return override, nil
+	}
+
 	var candidates []string
 
 	if gobin := os.Getenv("GOBIN"); gobin != "" {

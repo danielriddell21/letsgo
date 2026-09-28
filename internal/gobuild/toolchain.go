@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/safeexec"
 )
 
@@ -15,9 +16,10 @@ import (
 const ToolchainEnvOverride = "LETSGO_GO"
 
 var (
-	toolchainOnce sync.Once
-	toolchainPath string
-	toolchainErr  error
+	toolchainOnce   sync.Once
+	toolchainPath   string
+	toolchainSource string
+	toolchainErr    error
 )
 
 // Toolchain resolves the go command to an absolute path.
@@ -39,48 +41,78 @@ var (
 // invoked directly, and the subprocess is given a fixed PATH regardless (see
 // Env), so nothing it execs can be redirected. LETSGO_GO pins the choice
 // outright where that matters more than following the user's toolchain
-// manager.
+// manager, and the global config's `go` directive pins it machine-wide
+// between the two.
 func Toolchain() (string, error) {
-	toolchainOnce.Do(func() {
-		toolchainPath, toolchainErr = resolveToolchain()
-	})
-	return toolchainPath, toolchainErr
+	path, _, err := ToolchainSource()
+	return path, err
 }
 
-func resolveToolchain() (string, error) {
+// ToolchainSource resolves the go command, like Toolchain, and also reports
+// where the choice came from — the env override, the global config file, or
+// the fixed GOROOT/PATH search — so plan --explain can say why.
+func ToolchainSource() (path, source string, err error) {
+	toolchainOnce.Do(func() {
+		toolchainPath, toolchainSource, toolchainErr = resolveToolchain()
+	})
+	return toolchainPath, toolchainSource, toolchainErr
+}
+
+func resolveToolchain() (path, source string, err error) {
+	global, globalErr := config.LoadGlobal()
+	if globalErr != nil {
+		global = &config.Global{}
+	}
+	return resolveToolchainWith(global)
+}
+
+// resolveToolchainWith is resolveToolchain's core logic, taking the global
+// config directly rather than loading it, so tests can exercise the global
+// tier without relying on config.LoadGlobal's process-wide memoization.
+func resolveToolchainWith(global *config.Global) (path, source string, err error) {
 	name := safeexec.Exe("go")
 
 	if override := os.Getenv(ToolchainEnvOverride); override != "" {
 		if !filepath.IsAbs(override) {
-			return "", fmt.Errorf("gobuild: %s must be an absolute path, got %q",
+			return "", "", fmt.Errorf("gobuild: %s must be an absolute path, got %q",
 				ToolchainEnvOverride, override)
 		}
 		if !safeexec.IsExecutable(override) {
-			return "", fmt.Errorf("gobuild: %s=%q is not an executable file",
+			return "", "", fmt.Errorf("gobuild: %s=%q is not an executable file",
 				ToolchainEnvOverride, override)
 		}
-		return override, nil
+		return override, ToolchainEnvOverride, nil
+	}
+
+	if global.Go != "" {
+		if !filepath.IsAbs(global.Go) {
+			return "", "", fmt.Errorf("gobuild: go %q in %s must be an absolute path", global.Go, global.Path)
+		}
+		if !safeexec.IsExecutable(global.Go) {
+			return "", "", fmt.Errorf("gobuild: go %q in %s is not an executable file", global.Go, global.Path)
+		}
+		return global.Go, global.Path, nil
 	}
 
 	if goroot := os.Getenv("GOROOT"); goroot != "" {
 		if candidate := filepath.Join(goroot, "bin", name); safeexec.IsExecutable(candidate) {
-			return candidate, nil
+			return candidate, "GOROOT", nil
 		}
 	}
 
 	// Deliberately PATH and not the system directories: see above.
-	found, err := exec.LookPath(name)
-	if err != nil {
-		return "", fmt.Errorf(
+	found, lookErr := exec.LookPath(name)
+	if lookErr != nil {
+		return "", "", fmt.Errorf(
 			"gobuild: the go command was not found\n"+
 				"  set %s to its absolute path if it is installed somewhere unusual",
 			ToolchainEnvOverride)
 	}
-	absolute, err := filepath.Abs(found)
-	if err != nil {
-		return "", fmt.Errorf("gobuild: %w", err)
+	absolute, absErr := filepath.Abs(found)
+	if absErr != nil {
+		return "", "", fmt.Errorf("gobuild: %w", absErr)
 	}
-	return absolute, nil
+	return absolute, "PATH", nil
 }
 
 // toolchainDir is the directory holding the resolved go command, which the

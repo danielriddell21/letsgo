@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/danielriddell21/letsgo/internal/config"
 )
 
 func binary(t *testing.T, content string) string {
@@ -103,6 +105,39 @@ func TestEmptyKeyDisablesCaching(t *testing.T) {
 	c.Put("", binary(t, "x"))
 	if c.Get("", filepath.Join(t.TempDir(), "out")) {
 		t.Error("an empty key produced a hit")
+	}
+}
+
+// The global config's `cache off` disables the cache when no explicit
+// directory is given.
+func TestOpenCacheWithHonoursGlobalCacheOff(t *testing.T) {
+	if openCacheWith("", &config.Global{CacheOff: true}) != nil {
+		t.Error("cache off did not disable the cache")
+	}
+}
+
+// The global config's `cache <dir>` picks the directory when no explicit
+// one is given.
+func TestOpenCacheWithHonoursGlobalCacheDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cache")
+	c := openCacheWith("", &config.Global{CacheDir: dir})
+	if c == nil {
+		t.Fatal("expected a cache")
+	}
+	if c.dir != dir {
+		t.Errorf("dir = %q, want %q", c.dir, dir)
+	}
+}
+
+// An explicit dir outranks the global config entirely.
+func TestOpenCacheWithExplicitDirOutranksGlobalConfig(t *testing.T) {
+	dir := t.TempDir()
+	c := openCacheWith(dir, &config.Global{CacheOff: true, CacheDir: "/should/not/be/used"})
+	if c == nil {
+		t.Fatal("an explicit dir was overridden by cache off")
+	}
+	if c.dir != dir {
+		t.Errorf("dir = %q, want %q", c.dir, dir)
 	}
 }
 

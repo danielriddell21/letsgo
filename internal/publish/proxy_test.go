@@ -6,7 +6,30 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/danielriddell21/letsgo/internal/config"
 )
+
+func TestResolveProxyWithDefaultsWithNothingSet(t *testing.T) {
+	proxy, source := resolveProxyWith("", &config.Global{})
+	if proxy != DefaultProxy || source != "the default" {
+		t.Errorf("got %q from %q, want %q from the default", proxy, source, DefaultProxy)
+	}
+}
+
+func TestResolveProxyWithHonoursTheGlobalConfig(t *testing.T) {
+	proxy, source := resolveProxyWith("", &config.Global{Path: "/etc/letsgo/config.mod", Proxy: "https://p.internal"})
+	if proxy != "https://p.internal" || source != "/etc/letsgo/config.mod" {
+		t.Errorf("got %q from %q, want the global proxy", proxy, source)
+	}
+}
+
+func TestResolveProxyWithGOPROXYOutranksTheGlobalConfig(t *testing.T) {
+	proxy, source := resolveProxyWith("https://env.example", &config.Global{Path: "config.mod", Proxy: "https://p.internal"})
+	if proxy != "https://env.example" || source != "GOPROXY" {
+		t.Errorf("got %q from %q, want the env proxy", proxy, source)
+	}
+}
 
 func TestEscapeModulePath(t *testing.T) {
 	cases := map[string]string{

@@ -4,10 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/safeexec"
 )
 
@@ -83,7 +85,7 @@ func TestToolchainFollowsPathNotSystemDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := resolveToolchain()
+	got, _, err := resolveToolchain()
 	if err != nil {
 		t.Fatalf("resolveToolchain: %v", err)
 	}
@@ -108,7 +110,7 @@ func TestGorootOutranksPath(t *testing.T) {
 	t.Setenv(ToolchainEnvOverride, "")
 	t.Setenv("GOROOT", dir)
 
-	got, err := resolveToolchain()
+	got, _, err := resolveToolchain()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,19 +127,78 @@ func TestToolchainOverrideMustBeAbsoluteAndExecutable(t *testing.T) {
 	}
 
 	t.Setenv(ToolchainEnvOverride, good)
-	if got, err := resolveToolchain(); err != nil || got != good {
+	if got, _, err := resolveToolchain(); err != nil || got != good {
 		t.Errorf("resolveToolchain() = %q, %v; want %q", got, err, good)
 	}
 
 	// A bare name would be resolved through PATH by the operating system,
 	// reintroducing exactly what this avoids.
 	t.Setenv(ToolchainEnvOverride, "go")
-	if _, err := resolveToolchain(); err == nil {
+	if _, _, err := resolveToolchain(); err == nil {
 		t.Error("a bare name was accepted as an override")
 	}
 
 	t.Setenv(ToolchainEnvOverride, filepath.Join(dir, "absent"))
-	if _, err := resolveToolchain(); err == nil {
+	if _, _, err := resolveToolchain(); err == nil {
 		t.Error("a missing file was accepted as an override")
+	}
+}
+
+// LETSGO_GO outranks the global config: an override set for one invocation
+// must not be silently second-guessed by a machine-wide default.
+func TestToolchainEnvOverrideOutranksGlobalConfig(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "go")
+	if err := os.WriteFile(good, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(ToolchainEnvOverride, good)
+
+	got, source, err := resolveToolchainWith(&config.Global{Path: "config.mod", Go: "/other/go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != good || source != ToolchainEnvOverride {
+		t.Errorf("got %q from %q, want %q from %q", got, source, good, ToolchainEnvOverride)
+	}
+}
+
+// The global config's `go` directive outranks GOROOT and PATH, between the
+// env override and the fixed search.
+func TestToolchainGlobalConfigOutranksGorootAndPath(t *testing.T) {
+	dir := t.TempDir()
+	pinned := filepath.Join(dir, "go")
+	if err := os.WriteFile(pinned, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(ToolchainEnvOverride, "")
+	t.Setenv("GOROOT", "")
+
+	got, source, err := resolveToolchainWith(&config.Global{Path: "/etc/letsgo/config.mod", Go: pinned})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != pinned || source != "/etc/letsgo/config.mod" {
+		t.Errorf("got %q from %q, want %q from the global config path", got, source, pinned)
+	}
+}
+
+func TestToolchainGlobalConfigMustBeAbsoluteAndExecutable(t *testing.T) {
+	t.Setenv(ToolchainEnvOverride, "")
+
+	if _, _, err := resolveToolchainWith(&config.Global{Path: "config.mod", Go: "go"}); err == nil {
+		t.Error("a relative path was accepted from the global config")
+	}
+
+	if runtime.GOOS == "windows" {
+		return
+	}
+	dir := t.TempDir()
+	notExecutable := filepath.Join(dir, "go")
+	if err := os.WriteFile(notExecutable, []byte("#!/bin/sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := resolveToolchainWith(&config.Global{Path: "config.mod", Go: notExecutable}); err == nil {
+		t.Error("a non-executable path was accepted from the global config")
 	}
 }
