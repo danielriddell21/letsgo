@@ -42,6 +42,7 @@ usage:
   letsgo release --snapshot              rehearse a release without publishing
   letsgo verify [tag]                    rebuild a published release and compare it
   letsgo diff <from> [to]                compare two releases: size, dependencies, API
+  letsgo promote <rc-tag>                rebuild a prerelease as a stable release
   letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
   letsgo tag [--major|--minor|--patch]   work out the next version and tag it
   letsgo update [--check]                update letsgo itself, verified against its manifest
@@ -66,6 +67,7 @@ var commands = map[string]func([]string) error{
 	"release":  runRelease,
 	"verify":   runVerify,
 	"diff":     runDiff,
+	"promote":  runPromote,
 	"yank":     runYank,
 	"update":   runUpdate,
 	"plugin":   runPlugin,
