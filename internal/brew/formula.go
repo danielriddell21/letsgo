@@ -75,6 +75,11 @@ func (f Formula) ClassName() string {
 	upper := true
 	for _, r := range f.Name {
 		switch {
+		case r == '@':
+			// Ruby class names can't contain "@": Homebrew's own versioned
+			// formulas (openssl@1.1 -> OpensslAT11) spell it out as "AT".
+			b.WriteString("AT")
+			upper = true
 		case r == '-' || r == '_' || r == '.' || r == '+':
 			upper = true
 		case upper:
