@@ -345,20 +345,8 @@ func latestRelease(ctx context.Context, o Options) (*release, error) {
 		return nil, err
 	}
 
-	scope := discover.Scope{Prefix: o.Prefix}
-	fullTag := make(map[string]string, len(tags))
-	versions := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		rest, ok := scope.MatchesTag(tag)
-		if !ok {
-			continue
-		}
-		versions = append(versions, rest)
-		fullTag[rest] = tag
-	}
-
-	tag := fullTag[semver.Latest(versions)]
-	if tag == "" {
+	tag, ok := (discover.Scope{Prefix: o.Prefix}).LatestTag(tags)
+	if !ok {
 		return nil, fmt.Errorf("selfupdate: %s has no releases", o.Repo)
 	}
 	return releaseForTag(ctx, o, tag)
