@@ -582,18 +582,23 @@ func channelForge(t *testing.T, repo string, releases []releaseFixture) string {
 	return server.URL
 }
 
+// checkChannel runs Check against a forge serving releases, on channel.
+func checkChannel(t *testing.T, releases []releaseFixture, channel string) (*selfupdate.Update, error) {
+	t.Helper()
+	url := channelForge(t, "you/tool", releases)
+	return selfupdate.Check(context.Background(), selfupdate.Options{
+		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
+		Channel: channel,
+	})
+}
+
 // A channel always includes stable: with no release on it yet, it follows the
 // newest stable release.
 func TestCheckWithChannelFallsBackToStableWhenNoChannelReleaseExists(t *testing.T) {
-	url := channelForge(t, "you/tool", []releaseFixture{
+	update, err := checkChannel(t, []releaseFixture{
 		{tag: "v1.0.0"},
 		{tag: "v1.1.0-beta.1"},
-	})
-
-	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
-		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
-		Channel: "rc",
-	})
+	}, "rc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,15 +609,10 @@ func TestCheckWithChannelFallsBackToStableWhenNoChannelReleaseExists(t *testing.
 
 // PR-17: the highest of stable plus the channel wins, whichever that is.
 func TestCheckWithChannelPicksTheHigherOfStableAndTheChannel(t *testing.T) {
-	url := channelForge(t, "you/tool", []releaseFixture{
+	update, err := checkChannel(t, []releaseFixture{
 		{tag: "v1.0.0"},
 		{tag: "v1.1.0-beta.1"},
-	})
-
-	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
-		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
-		Channel: "beta",
-	})
+	}, "beta")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -623,16 +623,11 @@ func TestCheckWithChannelPicksTheHigherOfStableAndTheChannel(t *testing.T) {
 
 // "next" follows any prerelease, not only ones under its own channel name.
 func TestCheckWithChannelNextFollowsAnyPrerelease(t *testing.T) {
-	url := channelForge(t, "you/tool", []releaseFixture{
+	update, err := checkChannel(t, []releaseFixture{
 		{tag: "v1.0.0"},
 		{tag: "v1.1.0-beta.1"},
 		{tag: "v1.1.0-rc.1"},
-	})
-
-	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
-		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
-		Channel: "next",
-	})
+	}, "next")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -642,15 +637,10 @@ func TestCheckWithChannelNextFollowsAnyPrerelease(t *testing.T) {
 }
 
 func TestCheckWithChannelExcludesADraftRelease(t *testing.T) {
-	url := channelForge(t, "you/tool", []releaseFixture{
+	update, err := checkChannel(t, []releaseFixture{
 		{tag: "v1.1.0-beta.2", draft: true},
 		{tag: "v1.1.0-beta.1"},
-	})
-
-	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
-		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
-		Channel: "beta",
-	})
+	}, "beta")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -661,15 +651,10 @@ func TestCheckWithChannelExcludesADraftRelease(t *testing.T) {
 
 // A yanked stable release must not be what a channel falls back to.
 func TestCheckWithChannelExcludesAYankedRelease(t *testing.T) {
-	url := channelForge(t, "you/tool", []releaseFixture{
+	update, err := checkChannel(t, []releaseFixture{
 		{tag: "v1.1.0", body: "> [!CAUTION]\n> **This release is retracted.** bad.\n"},
 		{tag: "v1.0.0"},
-	})
-
-	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
-		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
-		Channel: "rc",
-	})
+	}, "rc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -679,14 +664,7 @@ func TestCheckWithChannelExcludesAYankedRelease(t *testing.T) {
 }
 
 func TestCheckWithChannelReportsNoQualifyingRelease(t *testing.T) {
-	url := channelForge(t, "you/tool", []releaseFixture{
-		{tag: "v1.0.0", draft: true},
-	})
-
-	_, err := selfupdate.Check(context.Background(), selfupdate.Options{
-		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
-		Channel: "beta",
-	})
+	_, err := checkChannel(t, []releaseFixture{{tag: "v1.0.0", draft: true}}, "beta")
 	if err == nil || !strings.Contains(err.Error(), "no releases on the beta channel") {
 		t.Fatalf("err = %v", err)
 	}
