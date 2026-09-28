@@ -75,17 +75,7 @@ func (s Scope) MatchesTag(tag string) (rest string, ok bool) {
 // are: an unscoped repository with no releases yet, or a monorepo module
 // whose own prefix matches nothing.
 func (s Scope) LatestTag(tags []string) (tag string, ok bool) {
-	fullTag := make(map[string]string, len(tags))
-	versions := make([]string, 0, len(tags))
-	for _, t := range tags {
-		rest, matched := s.MatchesTag(t)
-		if !matched {
-			continue
-		}
-		versions = append(versions, rest)
-		fullTag[rest] = t
-	}
-
+	versions, fullTag := s.scopedVersions(tags, nil)
 	tag, ok = fullTag[semver.Latest(versions)]
 	return tag, ok
 }
@@ -99,17 +89,7 @@ func (s Scope) PreviousTag(tags []string, tag string) (previous string, ok bool)
 		return "", false
 	}
 
-	fullTag := make(map[string]string, len(tags))
-	versions := make([]string, 0, len(tags))
-	for _, t := range tags {
-		rest, matched := s.MatchesTag(t)
-		if !matched {
-			continue
-		}
-		versions = append(versions, rest)
-		fullTag[rest] = t
-	}
-
+	versions, fullTag := s.scopedVersions(tags, nil)
 	previous, ok = fullTag[semver.Previous(versions, current)]
 	return previous, ok
 }
@@ -118,19 +98,10 @@ func (s Scope) PreviousTag(tags []string, tag string) (previous string, ok bool)
 // are in this scope and not listed in exclude, and returns its full tag name
 // (Prefix included). ok is false when none qualify.
 func (s Scope) LatestStableTag(tags []string, exclude ...string) (tag string, ok bool) {
-	fullTag := make(map[string]string, len(tags))
-	versions := make([]string, 0, len(tags))
-	for _, t := range tags {
-		rest, matched := s.MatchesTag(t)
-		if !matched {
-			continue
-		}
-		if v, ok := semver.Parse(rest); !ok || v.IsPrerelease() {
-			continue
-		}
-		versions = append(versions, rest)
-		fullTag[rest] = t
-	}
+	versions, fullTag := s.scopedVersions(tags, func(rest string) bool {
+		v, ok := semver.Parse(rest)
+		return ok && !v.IsPrerelease()
+	})
 
 	skipRest := make([]string, 0, len(exclude))
 	for _, e := range exclude {
@@ -141,6 +112,22 @@ func (s Scope) LatestStableTag(tags []string, exclude ...string) (tag string, ok
 
 	tag, ok = fullTag[semver.Latest(versions, skipRest...)]
 	return tag, ok
+}
+
+// scopedVersions strips Prefix from every tag in scope, keeping those where
+// keep is nil or reports true for the stripped version, and returns the
+// stripped versions alongside a map back to each one's full tag name.
+func (s Scope) scopedVersions(tags []string, keep func(rest string) bool) (versions []string, fullTag map[string]string) {
+	fullTag = make(map[string]string, len(tags))
+	for _, t := range tags {
+		rest, matched := s.MatchesTag(t)
+		if !matched || (keep != nil && !keep(rest)) {
+			continue
+		}
+		versions = append(versions, rest)
+		fullTag[rest] = t
+	}
+	return versions, fullTag
 }
 
 // resolveSymlinks returns dir with its symlinks resolved, or dir itself if
