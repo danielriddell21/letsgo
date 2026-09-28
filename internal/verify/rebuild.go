@@ -152,13 +152,13 @@ func compareRebuilt(
 	for _, group := range groups {
 		produced, err := build.Run(ctx, build.Options{
 			ModuleDir:    moduleDir,
-			FilesDir:     source,
+			FilesDir:     moduleDir,
 			Commands:     group.commands,
 			Name:         group.name,
 			Version:      m.Version,
 			ModTime:      sourceDate(m),
 			Targets:      group.targets,
-			ExtraFiles:   build.FindDocumentation(source),
+			ExtraFiles:   build.FindDocumentation(moduleDir),
 			ExactLDFlags: exactFlags(group.artifacts),
 			Tags:         recordedTags(group.artifacts),
 			Toolchain:    m.Builder.Go,

@@ -418,6 +418,205 @@ func TestVerifyRejectsAnUnknownSchema(t *testing.T) {
 	}
 }
 
+// A monorepo carries a root module and a nested one, each with its own go.mod
+// and its own tag. Both are built and released for real, then verified
+// end-to-end — rebuild included — to prove that verifying one never leans on
+// the other's tag, version, or source directory.
+func TestMonorepoRootAndNestedModuleReleaseAndVerifyIndependently(t *testing.T) {
+	dir := t.TempDir()
+	nested := filepath.Join(dir, "services/api")
+
+	write := func(path, content string) {
+		full := filepath.Join(dir, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/demo\n\ngo 1.24\n")
+	write("main.go", mainGo)
+	write("README.md", "# demo\n")
+	write("letsgo.mod", "build "+gobuild.Host().String()+"\n")
+	write("services/api/go.mod", "module example.com/demo/services/api\n\ngo 1.24\n")
+	write("services/api/main.go", mainGo)
+	write("services/api/letsgo.mod", "build "+gobuild.Host().String()+"\n")
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
+			"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	run("config", "core.autocrlf", "true")
+	run("add", ".")
+	run("commit", "-q", "-m", "feat: first release")
+	run("tag", "v1.0.0")
+	run("tag", "services/api/v1.5.0")
+
+	build := func(modDir string) (*release.Result, string) {
+		t.Helper()
+		p, err := plan.Resolve(context.Background(), plan.Options{Dir: modDir})
+		if err != nil || !p.OK() {
+			t.Fatalf("plan(%s): %v %+v", modDir, err, p.Checks)
+		}
+		dist := t.TempDir()
+		result, err := release.Build(context.Background(), p, dist, "test", nil, nil)
+		if err != nil {
+			t.Fatalf("release.Build(%s): %v", modDir, err)
+		}
+		return result, dist
+	}
+
+	rootResult, rootDist := build(dir)
+	apiResult, apiDist := build(nested)
+
+	if rootResult.Manifest.TagPrefix != "" {
+		t.Errorf("root TagPrefix = %q, want empty", rootResult.Manifest.TagPrefix)
+	}
+	if apiResult.Manifest.TagPrefix != "services/api/" {
+		t.Errorf("api TagPrefix = %q, want %q", apiResult.Manifest.TagPrefix, "services/api/")
+	}
+	if apiResult.Manifest.ModuleDir != "services/api" {
+		t.Errorf("api ModuleDir = %q, want %q", apiResult.Manifest.ModuleDir, "services/api")
+	}
+
+	// assets, keyed by ID across both releases, since a real forge has one ID
+	// space for the whole repository, not one per release.
+	assetsOf := func(dist string, result *release.Result, startID int64) ([]github.Asset, map[int64]string) {
+		var assets []github.Asset
+		byID := map[int64]string{}
+		id := startID
+		for _, name := range result.Files {
+			data, err := os.ReadFile(filepath.Join(dist, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			id++
+			assets = append(assets, github.Asset{ID: id, Name: name, Size: int64(len(data)), Digest: "sha256:" + sha256Of(data)})
+			byID[id] = name
+		}
+		return assets, byID
+	}
+	rootAssets, rootByID := assetsOf(rootDist, rootResult, 100)
+	apiAssets, apiByID := assetsOf(apiDist, apiResult, 200)
+
+	dists := map[string]string{"v1.0.0": rootDist, "services/api/v1.5.0": apiDist}
+	releaseFor := func(tag string) github.Release {
+		if tag == "v1.0.0" {
+			return github.Release{ID: 1, TagName: tag, Assets: rootAssets}
+		}
+		return github.Release{ID: 2, TagName: tag, Assets: apiAssets}
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/tags"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]github.Tag{{Name: "v1.0.0"}, {Name: "services/api/v1.5.0"}})
+
+		case strings.Contains(r.URL.Path, "/releases/tags/"):
+			idx := strings.LastIndex(r.URL.Path, "/releases/tags/")
+			tag := r.URL.Path[idx+len("/releases/tags/"):]
+			if _, ok := dists[tag]; !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(releaseFor(tag))
+
+		case strings.HasSuffix(r.URL.Path, "/releases/latest"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(releaseFor("v1.0.0"))
+
+		case strings.Contains(r.URL.Path, "/releases/assets/"):
+			idText := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			id, _ := strconv.ParseInt(idText, 10, 64)
+			if name, ok := rootByID[id]; ok {
+				data, err := os.ReadFile(filepath.Join(rootDist, name))
+				if err != nil {
+					t.Error(err)
+				}
+				_, _ = w.Write(data)
+				return
+			}
+			if name, ok := apiByID[id]; ok {
+				data, err := os.ReadFile(filepath.Join(apiDist, name))
+				if err != nil {
+					t.Error(err)
+				}
+				_, _ = w.Write(data)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+
+		case strings.Contains(r.URL.Path, "/attestations/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"attestations": []any{}})
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+	repo := github.Repo{Owner: "you", Name: "demo"}
+
+	rootVerify, err := verify.Run(context.Background(), verify.Options{
+		Client: client, Repo: repo, Tag: "v1.0.0", Dir: dir, WorkDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("verify root: %v", err)
+	}
+	if !rootVerify.OK() {
+		t.Errorf("root release did not verify: %+v", rootVerify.Checks)
+	}
+
+	apiVerify, err := verify.Run(context.Background(), verify.Options{
+		Client: client, Repo: repo, Tag: "services/api/v1.5.0", Dir: nested, WorkDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("verify api: %v", err)
+	}
+	if !apiVerify.OK() {
+		t.Errorf("nested release did not verify: %+v", apiVerify.Checks)
+	}
+
+	// With no tag given, each scope must resolve its own release, not the
+	// other's — the root's tag never leaks into the nested prefix, and the
+	// nested tag (however new) never outranks the root's own "latest".
+	noTagAPI, err := verify.Run(context.Background(), verify.Options{
+		Client: client, Repo: repo, Prefix: "services/api/", SkipRebuild: true, WorkDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("verify api with no tag: %v", err)
+	}
+	if noTagAPI.Tag != "services/api/v1.5.0" {
+		t.Errorf("api Tag = %q, want the nested module's own release", noTagAPI.Tag)
+	}
+
+	noTagRoot, err := verify.Run(context.Background(), verify.Options{
+		Client: client, Repo: repo, Dir: dir, SkipRebuild: true, WorkDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("verify root with no tag: %v", err)
+	}
+	if noTagRoot.Tag != "v1.0.0" {
+		t.Errorf("root Tag = %q, want the root's own release", noTagRoot.Tag)
+	}
+}
+
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
 
 func sha256Of(data []byte) string {

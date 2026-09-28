@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -202,7 +203,7 @@ func describe(p *plan.Plan, toolVersion, goVersion string, out buildOutputs) *ma
 		Tag:             p.Tag,
 		Commit:          p.Git.Commit,
 		SourceDateEpoch: p.Git.CommitTime.Unix(),
-		ModuleDir:       p.Config.ModuleDir,
+		ModuleDir:       path.Join(p.Scope.Dir, p.Config.ModuleDir),
 		TagPrefix:       p.Scope.Prefix,
 		Builder:         builder(p, toolVersion, goVersion),
 		Source:          &manifest.Source{Archive: out.source.Name, SHA256: out.source.SHA256},
