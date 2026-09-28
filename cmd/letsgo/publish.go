@@ -72,6 +72,15 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 		return nil
 	}
 
+	// A prerelease's formula would overwrite the stable tap entry that
+	// `brew install foo` still relies on. Until foo@next exists (a later
+	// phase), a prerelease publishes nothing to the tap rather than clobber
+	// it.
+	if isPrerelease(p) {
+		fmt.Println("  ! skipped the Homebrew tap: a prerelease must not overwrite the stable formula")
+		return nil
+	}
+
 	if names := variantNames(p); len(names) > 0 {
 		fmt.Printf("  ! no formula for variant %s: a variant's package is the repository's to choose\n",
 			strings.Join(names, ", "))
