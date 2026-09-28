@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -189,6 +190,9 @@ func TestToolchainGlobalConfigMustBeAbsoluteAndExecutable(t *testing.T) {
 		t.Error("a relative path was accepted from the global config")
 	}
 
+	if runtime.GOOS == "windows" {
+		return
+	}
 	dir := t.TempDir()
 	notExecutable := filepath.Join(dir, "go")
 	if err := os.WriteFile(notExecutable, []byte("#!/bin/sh\n"), 0o600); err != nil {

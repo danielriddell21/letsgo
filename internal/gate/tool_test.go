@@ -3,6 +3,7 @@ package gate
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/config"
@@ -47,6 +48,9 @@ func TestFindWithGlobalOverrideMustBeAbsoluteAndExecutable(t *testing.T) {
 		t.Error("a relative path was accepted from the global config")
 	}
 
+	if runtime.GOOS == "windows" {
+		return
+	}
 	dir := t.TempDir()
 	notExecutable := filepath.Join(dir, "govulncheck")
 	if err := os.WriteFile(notExecutable, []byte("x"), 0o600); err != nil {
