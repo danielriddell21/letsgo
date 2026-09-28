@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/pluginstore"
 	pub "github.com/danielriddell21/letsgo/plugin"
 )
 
@@ -136,9 +137,27 @@ func withoutEnv(env []string, drop ...string) []string {
 }
 
 // resolve finds the executable and proves it is the one that was pinned.
+//
+// The store is checked first, because that is where `plugin install` now
+// puts things and it needs no PATH entry to find. A store entry that exists
+// but no longer hashes to its own path fails outright rather than falling
+// through to PATH, which would turn a tampered store into a silent
+// substitution instead of the failure it should be. Nothing in the store
+// stays trusted just for having been found there, either: PATH is re-hashed
+// against the pin exactly as before.
 func resolve(p Plugin) (string, error) {
 	if p.Hook == "" || !p.Hook.Valid() {
 		return "", fmt.Errorf("plugin %s: %q is not a hook letsgo knows", p.Command, p.Hook)
+	}
+
+	if store, err := pluginstore.Open(""); err == nil {
+		path, ok, err := store.Lookup(p.Digest, p.Command)
+		if err != nil {
+			return "", fmt.Errorf("plugin %s: %w", p.Command, err)
+		}
+		if ok {
+			return path, nil
+		}
 	}
 
 	path, err := exec.LookPath(p.Command)

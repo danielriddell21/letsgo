@@ -47,8 +47,9 @@ letsgo diff <from> [to]                compare two releases: size, dependencies,
 letsgo tag [--major|--minor|--patch]   work out the next version and tag it
 letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
 letsgo update [--check]                update letsgo itself, verified against its manifest
-letsgo plugin install <name>           install a plugin, verified against its manifest
+letsgo plugin install [<name>]         install a plugin, verified against its manifest (or every pin, with none)
 letsgo plugin list                     the plugins this repository pins, and what is installed
+letsgo plugin prune                    remove store entries no pin in this repository references
 letsgo fmt [file]                      format letsgo.mod
 letsgo version                         print the version (also --version)
 ```
