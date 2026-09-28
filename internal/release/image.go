@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/build"
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
 // ImageBuild is one repository's assembled, unpushed image.
@@ -25,7 +26,20 @@ type ImageBuild struct {
 	Registry   string
 	APIHost    string
 	Repository string
-	Tags       []string
+
+	// Version is the plain semver this image was built for, kept alongside
+	// Tags so a push can compare it against whatever a floating tag
+	// currently points at.
+	Version string
+
+	// Tags are pushed unconditionally: the version tag, and a prerelease's
+	// channel tag.
+	Tags []string
+
+	// Floating are pushed only if Version is newer than what the tag
+	// currently points at: a stable release's major.minor, major, latest,
+	// and every channel this module has ever published a prerelease under.
+	Floating []string
 
 	Images []*oci.Image
 	Index  oci.Blob
@@ -48,7 +62,7 @@ func buildImages(ctx context.Context, p *plan.Plan, artifacts []build.Artifact, 
 		return nil, fmt.Errorf("release: an image was asked for but no linux binary was built")
 	}
 
-	tags, err := imageTags(p)
+	tags, floating, err := imageTags(ctx, p)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +79,9 @@ func buildImages(ctx context.Context, p *plan.Plan, artifacts []build.Artifact, 
 			Registry:   p.Image.Registry,
 			APIHost:    p.Image.APIHost,
 			Repository: repos[binary],
+			Version:    p.Version,
 			Tags:       tags,
+			Floating:   floating,
 		}
 
 		if err := buildOne(ctx, p, &built, binary, byBinary[binary], annotations, cache, warnf); err != nil {
@@ -185,26 +201,69 @@ func (cache bases) resolve(ctx context.Context, p *plan.Plan, platform oci.Platf
 	return base, nil
 }
 
-// imageTags is what the index is published under: the version always, and
-// `latest` for a release people should be getting by default.
-func imageTags(p *plan.Plan) ([]string, error) {
+// imageTags is what a release targets the index under: tags that are always
+// pushed, and floating tags that move only when this release is newer than
+// what they currently point at (internal/release/push.go decides that; this
+// only computes the candidates, from the version and, for a stable release,
+// this module's own channel history — never the registry, so the same commit
+// always plans the same tags regardless of what has or hasn't shipped yet).
+func imageTags(ctx context.Context, p *plan.Plan) (tags, floating []string, err error) {
 	version, err := oci.Tag(p.Version)
+	if err != nil {
+		return nil, nil, err
+	}
+	v, ok := semver.Parse(p.Version)
+	if !ok {
+		return nil, nil, fmt.Errorf("release: %q is not a version image tags can be derived from", p.Version)
+	}
+
+	if v.IsPrerelease() {
+		channel, _ := oci.Channel(p.Version)
+		return []string{version, channel}, nil, nil
+	}
+
+	tags = []string{version}
+	if p.Snapshot {
+		return tags, nil, nil
+	}
+
+	channels, err := channelHistory(ctx, p)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	major := fmt.Sprintf("%d", v.Major)
+	floating = make([]string, 0, 3+len(channels))
+	floating = append(floating, fmt.Sprintf("%s.%d", major, v.Minor), major, "latest")
+	return tags, append(floating, channels...), nil
+}
+
+// channelHistory finds every channel this module has ever published a
+// prerelease under, from its own tags: the set a stable release must
+// consider advancing (a channel that has ever existed keeps being tracked,
+// so a channel's followers move to stable once it's newer).
+func channelHistory(ctx context.Context, p *plan.Plan) ([]string, error) {
+	tags, err := discover.Tags(ctx, p.RootDir, p.Scope.Prefix)
 	if err != nil {
 		return nil, err
 	}
-	tags := []string{version}
-	if !p.Snapshot && !prerelease(p.Version) {
-		tags = append(tags, "latest")
-	}
-	return tags, nil
-}
 
-// prerelease reports whether a version carries a prerelease segment, which is
-// the one thing `latest` must never point at. Build metadata after "+" is not
-// part of that judgement and can itself contain a hyphen.
-func prerelease(version string) bool {
-	base, _, _ := strings.Cut(version, "+")
-	return strings.Contains(base, "-")
+	seen := map[string]bool{}
+	var channels []string
+	for _, tag := range tags {
+		rest, ok := p.Scope.MatchesTag(tag)
+		if !ok {
+			continue
+		}
+		channel, ok := oci.Channel(rest)
+		if !ok || seen[channel] {
+			continue
+		}
+		seen[channel] = true
+		channels = append(channels, channel)
+	}
+	sort.Strings(channels)
+	return channels, nil
 }
 
 // imageRecords describes the built images for the release manifest.
@@ -224,7 +283,7 @@ func imageRecords(builds []ImageBuild) []manifest.Image {
 		record := manifest.Image{
 			Reference: b.Registry + "/" + b.Repository,
 			Digest:    string(b.Index.Digest),
-			Tags:      b.Tags,
+			Tags:      append(append([]string{}, b.Tags...), b.Floating...),
 			Platforms: platforms,
 		}
 		if b.Base != nil {
