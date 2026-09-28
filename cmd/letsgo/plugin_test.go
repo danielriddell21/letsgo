@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,8 +15,18 @@ import (
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/forgetest"
 	"github.com/danielriddell21/letsgo/internal/plugin"
+	"github.com/danielriddell21/letsgo/internal/pluginstore"
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
+
+// noStore points plugin installation at a scratch store for the duration of
+// a test, so nothing it writes or reads touches the real machine's store.
+func noStore(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv(pluginstore.StoreEnvOverride, dir)
+	return dir
+}
 
 // withStandalonePlugin temporarily adds a known plugin that answers no hook,
 // so the reporting that treats one specially can be exercised even though
@@ -410,25 +422,35 @@ func TestCommandsCoverTheUsage(t *testing.T) {
 	}
 }
 
-// The whole point of the command: the executable that lands on disk is the one
-// the release's manifest describes.
+// The whole point of the command: the executable that lands in the store is
+// the one the release's manifest describes.
 func TestInstallPluginWritesTheVerifiedBinary(t *testing.T) {
+	storeDir := noStore(t)
 	f := forgetest.New(t, "you/plugins", "v0.2.0")
 	f.PublishCommands(t, "letsgo-plugins", "0.2.0", "letsgo-multi", "letsgo-env")
 
-	dest := t.TempDir()
 	t.Chdir(t.TempDir())
 
 	options := f.Options()
 	options.Binary = "letsgo-env"
 
 	var out bytes.Buffer
-	if err := installPlugin(context.Background(), &out, "letsgo-env", dest, options); err != nil {
+	if err := installPlugin(context.Background(), &out, "letsgo-env", options, "", false); err != nil {
 		t.Fatal(err)
 	}
 
+	digest := "sha256:" + forgetest.Sum([]byte(forgetest.Content("letsgo-env")))
+
 	// The named plugin, not whichever artifact the platform matched first.
-	got, err := os.ReadFile(filepath.Join(dest, "letsgo-env"))
+	store, err := pluginstore.Open(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, ok, err := store.Lookup(digest, "letsgo-env")
+	if err != nil || !ok {
+		t.Fatalf("Lookup = %q, %v, %v", path, ok, err)
+	}
+	got, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,45 +459,77 @@ func TestInstallPluginWritesTheVerifiedBinary(t *testing.T) {
 	}
 
 	// The pin it prints has to carry the digest of what it just wrote.
-	want := "sha256:" + forgetest.Sum([]byte(forgetest.Content("letsgo-env")))
-	if !strings.Contains(out.String(), want) {
-		t.Errorf("printed:\n%s\nwant the pin to name %s", out.String(), want)
+	if !strings.Contains(out.String(), digest) {
+		t.Errorf("printed:\n%s\nwant the pin to name %s", out.String(), digest)
 	}
 	if !strings.Contains(out.String(), "installed letsgo-env v0.2.0") {
 		t.Errorf("printed:\n%s", out.String())
 	}
 }
 
-// A tampered archive must not reach the disk at all.
+// --link additionally puts a copy where PATH will find it, for running the
+// plugin by hand.
+func TestInstallPluginWithLinkAlsoPlacesACopyOnPATH(t *testing.T) {
+	noStore(t)
+	f := forgetest.New(t, "you/plugins", "v0.2.0")
+	f.PublishCommands(t, "letsgo-plugins", "0.2.0", "letsgo-multi")
+
+	t.Chdir(t.TempDir())
+	linkDir := t.TempDir()
+
+	options := f.Options()
+	options.Binary = "letsgo-multi"
+
+	var out bytes.Buffer
+	if err := installPlugin(context.Background(), &out, "letsgo-multi", options, linkDir, true); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(linkDir, "letsgo-multi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != forgetest.Content("letsgo-multi") {
+		t.Errorf("linked %q", got)
+	}
+}
+
+// A tampered archive must not reach the store at all.
 func TestInstallPluginRefusesATamperedArchive(t *testing.T) {
+	storeDir := noStore(t)
 	f := forgetest.New(t, "you/plugins", "v0.2.0")
 	f.PublishCommands(t, "letsgo-plugins", "0.2.0", "letsgo-multi")
 	for name := range f.Archives {
 		f.Archives[name] = []byte("not the archive that was published")
 	}
 
-	dest := t.TempDir()
 	t.Chdir(t.TempDir())
 
 	options := f.Options()
 	options.Binary = "letsgo-multi"
 
-	err := installPlugin(context.Background(), io.Discard, "letsgo-multi", dest, options)
+	err := installPlugin(context.Background(), io.Discard, "letsgo-multi", options, "", false)
 	if err == nil {
 		t.Fatal("a tampered archive should be refused")
 	}
-	if _, err := os.Stat(filepath.Join(dest, "letsgo-multi")); !os.IsNotExist(err) {
-		t.Error("nothing should have been written")
+
+	store, err := pluginstore.Open(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := store.Entries()
+	if err != nil || len(entries) != 0 {
+		t.Errorf("nothing should have been written: entries = %+v, err = %v", entries, err)
 	}
 }
 
 // Installing an exact version is the pinned-plugin workflow, and must not be
 // treated as an update check.
 func TestInstallPluginByTag(t *testing.T) {
+	noStore(t)
 	f := forgetest.New(t, "you/plugins", "v0.1.0")
 	f.PublishCommands(t, "letsgo-plugins", "0.1.0", "letsgo-multi")
 
-	dest := t.TempDir()
 	t.Chdir(t.TempDir())
 
 	options := f.Options()
@@ -483,7 +537,7 @@ func TestInstallPluginByTag(t *testing.T) {
 	options.Tag = "v0.1.0"
 
 	var out bytes.Buffer
-	if err := installPlugin(context.Background(), &out, "letsgo-multi", dest, options); err != nil {
+	if err := installPlugin(context.Background(), &out, "letsgo-multi", options, "", false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "v0.1.0") {
@@ -491,11 +545,37 @@ func TestInstallPluginByTag(t *testing.T) {
 	}
 }
 
-func TestRunPluginInstallNeedsExactlyOnePlugin(t *testing.T) {
-	for _, args := range [][]string{{}, {"letsgo-multi", "letsgo-env"}} {
-		if err := runPluginInstall(args); err == nil {
-			t.Errorf("runPluginInstall(%q) should have failed", args)
-		}
+// More than one positional argument is ambiguous: install one plugin, or
+// every pin, never a chosen few.
+func TestRunPluginInstallRejectsMoreThanOnePlugin(t *testing.T) {
+	if err := runPluginInstall([]string{"letsgo-multi", "letsgo-env"}); err == nil {
+		t.Error("runPluginInstall with two plugins should have failed")
+	}
+}
+
+// With no arguments, install falls through to every pin in letsgo.mod
+// (CD-4) — an empty config is reported rather than treated as an error.
+func TestInstallAllPinsReportsNoPins(t *testing.T) {
+	t.Chdir(t.TempDir())
+	write(t, "letsgo.mod", "build linux/amd64\n")
+
+	var out bytes.Buffer
+	if err := installAllPins(context.Background(), &out, "you/plugins", "", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "pins no plugins") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+}
+
+// The wrapper's job is to find letsgo.mod and hand off to pruneStore.
+func TestRunPluginPrune(t *testing.T) {
+	noStore(t)
+	t.Chdir(t.TempDir())
+	write(t, "letsgo.mod", "build linux/amd64\n")
+
+	if err := runPluginPrune(nil); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -522,5 +602,98 @@ func TestWriteExecutableReportsAnUnwritableDir(t *testing.T) {
 
 	if err := writeExecutable(missing, []byte("bytes")); err == nil {
 		t.Fatal("writing into a directory that does not exist should fail")
+	}
+}
+
+// putInStore writes content into the store directly, as if it had been
+// installed, and returns its digest.
+func putInStore(t *testing.T, storeDir, name, content string) string {
+	t.Helper()
+	store, err := pluginstore.Open(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(content))
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+	if _, err := store.Put(digest, name, []byte(content)); err != nil {
+		t.Fatal(err)
+	}
+	return digest
+}
+
+// Prune removes only what no pin in this repository references (CD-5).
+func TestPruneStoreRemovesUnreferencedEntries(t *testing.T) {
+	storeDir := noStore(t)
+	t.Chdir(t.TempDir())
+
+	kept := putInStore(t, storeDir, "letsgo-multi", "kept")
+	putInStore(t, storeDir, "letsgo-env", "dropped")
+	write(t, "letsgo.mod", "build linux/amd64\n"+
+		"plugin archive-layout letsgo-multi v0.1.0 "+kept+"\n")
+
+	var out bytes.Buffer
+	if err := pruneStore(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "letsgo-env") {
+		t.Errorf("printed:\n%s\nwant the unreferenced entry named", out.String())
+	}
+	if strings.Contains(out.String(), "letsgo-multi") {
+		t.Errorf("printed:\n%s\nwant the referenced entry left out", out.String())
+	}
+
+	store, err := pluginstore.Open(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.Lookup(kept, "letsgo-multi"); err != nil || !ok {
+		t.Errorf("the referenced entry should survive: %v, %v", ok, err)
+	}
+	entries, err := store.Entries()
+	if err != nil || len(entries) != 1 {
+		t.Errorf("entries = %+v, err = %v", entries, err)
+	}
+}
+
+func TestPruneStoreReportsNothingToPrune(t *testing.T) {
+	storeDir := noStore(t)
+	t.Chdir(t.TempDir())
+
+	kept := putInStore(t, storeDir, "letsgo-multi", "kept")
+	write(t, "letsgo.mod", "build linux/amd64\n"+
+		"plugin archive-layout letsgo-multi v0.1.0 "+kept+"\n")
+
+	var out bytes.Buffer
+	if err := pruneStore(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "nothing to prune") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+}
+
+// letsgo plugin list names what prune would remove, so pruning is never a
+// surprise.
+func TestListPluginsReportsUnreferencedStoreEntries(t *testing.T) {
+	storeDir := noStore(t)
+	t.Chdir(t.TempDir())
+
+	kept := putInStore(t, storeDir, "letsgo-multi", "kept")
+	putInStore(t, storeDir, "letsgo-env", "dropped")
+	write(t, "letsgo.mod", "build linux/amd64\n"+
+		"plugin archive-layout letsgo-multi v0.1.0 "+kept+"\n")
+
+	var out bytes.Buffer
+	if err := listPlugins(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "unreferenced by any pin here") {
+		t.Errorf("printed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "letsgo-env") {
+		t.Errorf("printed:\n%s\nwant the unreferenced entry named", out.String())
+	}
+	if !strings.Contains(out.String(), "letsgo plugin prune") {
+		t.Errorf("printed:\n%s\nwant the prune hint", out.String())
 	}
 }

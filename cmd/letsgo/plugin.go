@@ -14,6 +14,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
+	"github.com/danielriddell21/letsgo/internal/pluginstore"
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
 
@@ -26,9 +27,12 @@ const pluginRepo = "danielriddell21/letsgo-plugins"
 const pluginUsage = `letsgo plugin installs the external programs a release can call.
 
 usage:
-  letsgo plugin install <name>[@version]   download a plugin, verified, and print its pin
+  letsgo plugin install                    install every plugin this repository pins
+  letsgo plugin install <name>[@version]   download one plugin, verified, and print its pin
+  letsgo plugin install --link             also put the plugin on PATH, for running it by hand
   letsgo plugin list                       the plugins this repository pins, and what is installed
   letsgo plugin list --available           the plugins letsgo publishes, and what each answers
+  letsgo plugin prune                      remove store entries no pin in this repository references
 
 run a subcommand with -h for its options.
 `
@@ -44,6 +48,8 @@ func runPlugin(args []string) error {
 		return runPluginInstall(args[1:])
 	case "list":
 		return runPluginList(args[1:])
+	case "prune":
+		return runPluginPrune(args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(pluginUsage)
 	default:
@@ -58,31 +64,34 @@ func runPlugin(args []string) error {
 // in a README. The recipe it replaces fetched an archive over TLS and trusted
 // it; this checks the archive against the release's own manifest, and the
 // executable inside the archive against the manifest too.
+//
+// With no arguments it installs every plugin this repository pins in
+// letsgo.mod — one command for a fresh clone, and one step in CI.
 func runPluginInstall(args []string) error {
 	fs := flag.NewFlagSet("plugin install", flag.ExitOnError)
-	dir := fs.String("o", "", "directory to install into (default: $GOBIN, or $GOPATH/bin)")
+	dir := fs.String("o", "", "with --link, directory to link into (default: $GOBIN, or $GOPATH/bin)")
+	link := fs.Bool("link", false, "also put the plugin on PATH, for running it by hand")
 	repo := fs.String("repo", pluginRepo, "repository to install from, as owner/name")
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
-		return fmt.Errorf("letsgo plugin install: expected one plugin, as letsgo-multi or letsgo-multi@v0.2.0")
+	if fs.NArg() > 1 {
+		return fmt.Errorf("letsgo plugin install: expected one plugin, as letsgo-multi or letsgo-multi@v0.2.0, " +
+			"or no arguments to install every pin in " + plan.ConfigFile)
+	}
+
+	ctx := context.Background()
+	tokenValue, _ := plan.Token(*token)
+
+	if fs.NArg() == 0 {
+		return installAllPins(ctx, os.Stdout, *repo, tokenValue, *dir, *link)
 	}
 
 	name, requested := splitPluginRef(fs.Arg(0))
 	if name == "" {
 		return fmt.Errorf("letsgo plugin install: no plugin name in %q", fs.Arg(0))
 	}
-
-	ctx := context.Background()
-
-	dest, err := installDir(ctx, *dir)
-	if err != nil {
-		return err
-	}
-
-	tokenValue, _ := plan.Token(*token)
 
 	// Current is left empty on purpose. This is not an update, and a plugin
 	// that happens to be installed already has no say in which version the
@@ -97,17 +106,50 @@ func runPluginInstall(args []string) error {
 		options.Tag = requested
 	}
 
-	return installPlugin(ctx, os.Stdout, name, dest, options)
+	return installPlugin(ctx, os.Stdout, name, options, *dir, *link)
 }
 
-// installPlugin resolves the release, checks what it downloads and puts the
-// executable in dest.
+// installAllPins installs every plugin the repository's own config pins, in
+// the order they appear in the file.
+func installAllPins(ctx context.Context, w io.Writer, repo, token, linkDir string, link bool) error {
+	cfg, err := loadPluginConfig()
+	if err != nil {
+		return err
+	}
+	if len(cfg.Plugins) == 0 {
+		fmt.Fprintf(w, "%s pins no plugins\n", plan.ConfigFile)
+		return nil
+	}
+
+	for i, p := range cfg.Plugins {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		options := selfupdate.Options{
+			Repo:      repo,
+			Token:     token,
+			UserAgent: "letsgo/" + version,
+			Binary:    p.Command,
+			Tag:       p.Version,
+		}
+		if err := installPlugin(ctx, w, p.Command, options, linkDir, link); err != nil {
+			return fmt.Errorf("letsgo plugin install: %s: %w", p.Command, err)
+		}
+	}
+	return nil
+}
+
+// installPlugin resolves the release, checks what it downloads, and writes
+// the executable into the plugin store at its own digest — that is what
+// plugin.Run looks up, and what lets two repositories pinning two different
+// versions of the same plugin coexist. --link additionally puts a copy on
+// PATH, for a plugin someone wants to run by hand.
 //
 // Separated from the flags and from os.Stdout so that the behaviour worth
 // asserting — that a verified binary lands where it was asked to, and that the
 // pin printed afterwards names its digest — can be tested against a forge
 // rather than against the network.
-func installPlugin(ctx context.Context, w io.Writer, name, dest string, options selfupdate.Options) error {
+func installPlugin(ctx context.Context, w io.Writer, name string, options selfupdate.Options, linkDir string, link bool) error {
 	release, err := selfupdate.Check(ctx, options)
 	if err != nil {
 		return err
@@ -121,14 +163,31 @@ func installPlugin(ctx context.Context, w io.Writer, name, dest string, options 
 		return err
 	}
 
-	path := filepath.Join(dest, release.Binary)
-	if err := writeExecutable(path, binary); err != nil {
-		return err
+	store, err := pluginstore.Open("")
+	if err != nil {
+		return fmt.Errorf("letsgo plugin install: %w", err)
+	}
+	path, err := store.Put("sha256:"+release.BinarySHA256, release.Binary, binary)
+	if err != nil {
+		return fmt.Errorf("letsgo plugin install: %w", err)
 	}
 
 	fmt.Fprintf(w, "installed %s %s\n", name, release.Tag)
 	fmt.Fprintf(w, "  %s\n", path)
 	fmt.Fprintf(w, "  archive %s\n  binary  %s\n", short(release.SHA256), short(release.BinarySHA256))
+
+	if link {
+		dest, err := installDir(ctx, linkDir)
+		if err != nil {
+			return err
+		}
+		linked := filepath.Join(dest, release.Binary)
+		if err := writeExecutable(linked, binary); err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "  linked  %s\n", linked)
+	}
+
 	describePin(w, name, release)
 	return nil
 }
@@ -257,11 +316,103 @@ func listPlugins(w io.Writer) error {
 		fmt.Fprintln(w, "  install a missing or mismatched plugin with")
 		fmt.Fprintln(w, "  letsgo plugin install <name>@<version>")
 	}
+
+	reportUnreferencedStoreEntries(w, cfg)
 	return nil
 }
 
-// pluginStatus resolves one pin against what is on PATH.
+// reportUnreferencedStoreEntries names what letsgo plugin prune would remove,
+// so pruning is never a surprise.
+func reportUnreferencedStoreEntries(w io.Writer, cfg *config.Config) {
+	store, err := pluginstore.Open("")
+	if err != nil {
+		return
+	}
+	entries, err := store.Entries()
+	if err != nil || len(entries) == 0 {
+		return
+	}
+
+	referenced := pinsByDigestAndName(cfg)
+	var unreferenced []pluginstore.Entry
+	for _, e := range entries {
+		if !referenced[digestAndName{e.Digest, e.Name}] {
+			unreferenced = append(unreferenced, e)
+		}
+	}
+	if len(unreferenced) == 0 {
+		return
+	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  the store also holds, unreferenced by any pin here:")
+	for _, e := range unreferenced {
+		fmt.Fprintf(w, "  %-14s %s\n", e.Name, shortDigest(e.Digest))
+	}
+	fmt.Fprintln(w, "  remove them with letsgo plugin prune")
+}
+
+// digestAndName identifies one store entry the same way its pin does: a
+// plugin is only ever the same plugin when both agree.
+type digestAndName struct {
+	Digest, Name string
+}
+
+func pinsByDigestAndName(cfg *config.Config) map[digestAndName]bool {
+	referenced := make(map[digestAndName]bool, len(cfg.Plugins))
+	for _, p := range cfg.Plugins {
+		referenced[digestAndName{p.Digest, p.Command}] = true
+	}
+	return referenced
+}
+
+// runPluginPrune removes every store entry this repository's letsgo.mod does
+// not pin.
+func runPluginPrune(args []string) error {
+	fs := flag.NewFlagSet("plugin prune", flag.ExitOnError)
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	return pruneStore(os.Stdout)
+}
+
+func pruneStore(w io.Writer) error {
+	cfg, err := loadPluginConfig()
+	if err != nil {
+		return err
+	}
+	store, err := pluginstore.Open("")
+	if err != nil {
+		return fmt.Errorf("letsgo plugin prune: %w", err)
+	}
+
+	referenced := pinsByDigestAndName(cfg)
+	removed, err := store.Prune(func(digest, name string) bool {
+		return referenced[digestAndName{digest, name}]
+	})
+	if err != nil {
+		return fmt.Errorf("letsgo plugin prune: %w", err)
+	}
+
+	if len(removed) == 0 {
+		fmt.Fprintln(w, "nothing to prune")
+		return nil
+	}
+	for _, e := range removed {
+		fmt.Fprintf(w, "removed %-14s %s\n", e.Name, shortDigest(e.Digest))
+	}
+	return nil
+}
+
+// pluginStatus resolves one pin the same way plugin.Run does: the store
+// first, then PATH.
 func pluginStatus(p config.Plugin) (string, bool) {
+	if store, err := pluginstore.Open(""); err == nil {
+		if path, ok, err := store.Lookup(p.Digest, p.Command); err == nil && ok {
+			return "ok  " + path, true
+		}
+	}
+
 	path, err := exec.LookPath(p.Command)
 	if err != nil {
 		return "not installed", false

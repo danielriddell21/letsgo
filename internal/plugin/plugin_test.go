@@ -11,7 +11,16 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/plugin"
+	"github.com/danielriddell21/letsgo/internal/pluginstore"
 )
+
+// noStore keeps a test's plugin resolution off the real machine's store,
+// which every test not specifically about the store should do: none of them
+// mean to depend on, or leave behind, whatever else is on this machine.
+func noStore(t *testing.T) {
+	t.Helper()
+	t.Setenv(pluginstore.StoreEnvOverride, t.TempDir())
+}
 
 // fake writes an executable that echoes a fixed answer, and returns its
 // digest. A shell script is enough: the contract is a subprocess reading JSON
@@ -37,6 +46,7 @@ func fake(t *testing.T, body string) (dir, digest string) {
 }
 
 func TestRunSendsInputAndDecodesTheAnswer(t *testing.T) {
+	noStore(t)
 	dir, digest := fake(t, `cat > /dev/null; echo '{"archives":[{"name":"tools","binaries":["a","b"]}]}'`)
 	t.Setenv("PATH", dir)
 
@@ -59,6 +69,7 @@ func TestRunSendsInputAndDecodesTheAnswer(t *testing.T) {
 // a different program than the one recorded would produce a release nobody
 // could account for.
 func TestRunRefusesAProgramThatDoesNotMatchThePin(t *testing.T) {
+	noStore(t)
 	dir, _ := fake(t, `echo '{}'`)
 	t.Setenv("PATH", dir)
 
@@ -76,6 +87,7 @@ func TestRunRefusesAProgramThatDoesNotMatchThePin(t *testing.T) {
 }
 
 func TestRunReportsWhatThePluginPrintedOnFailure(t *testing.T) {
+	noStore(t)
 	dir, digest := fake(t, `echo "the module builds no commands" >&2; exit 1`)
 	t.Setenv("PATH", dir)
 
@@ -100,6 +112,99 @@ func TestRunRejectsAnUnknownHook(t *testing.T) {
 	}
 }
 
+// The store is checked before PATH, and a plugin found there needs no PATH
+// entry at all — that is the whole point of it.
+func TestRunFindsAPluginInTheStoreWithoutPATH(t *testing.T) {
+	dir, digest := fake(t, `echo '{}'`)
+	t.Setenv("PATH", t.TempDir())
+
+	storeDir := t.TempDir()
+	t.Setenv(pluginstore.StoreEnvOverride, storeDir)
+	putInStore(t, storeDir, digest, "letsgo-fake", filepath.Join(dir, "letsgo-fake"))
+
+	err := plugin.Run(context.Background(),
+		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digest},
+		t.TempDir(), struct{}{}, &struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Two repositories pinning two different digests of the same-named plugin
+// must both work on one machine, at once, with neither reinstalling.
+func TestRunResolvesTwoDigestsOfTheSameNameFromTheStore(t *testing.T) {
+	dirA, digestA := fake(t, `echo '{"archives":[{"name":"a"}]}'`)
+	dirB, digestB := fake(t, `echo '{"archives":[{"name":"b"}]}'`)
+	t.Setenv("PATH", t.TempDir())
+
+	storeDir := t.TempDir()
+	t.Setenv(pluginstore.StoreEnvOverride, storeDir)
+	putInStore(t, storeDir, digestA, "letsgo-fake", filepath.Join(dirA, "letsgo-fake"))
+	putInStore(t, storeDir, digestB, "letsgo-fake", filepath.Join(dirB, "letsgo-fake"))
+
+	var outA, outB plugin.ArchiveLayoutOutput
+	if err := plugin.Run(context.Background(),
+		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digestA},
+		t.TempDir(), struct{}{}, &outA); err != nil {
+		t.Fatal(err)
+	}
+	if err := plugin.Run(context.Background(),
+		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digestB},
+		t.TempDir(), struct{}{}, &outB); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(outA.Archives) != 1 || outA.Archives[0].Name != "a" {
+		t.Errorf("A resolved to %+v", outA)
+	}
+	if len(outB.Archives) != 1 || outB.Archives[0].Name != "b" {
+		t.Errorf("B resolved to %+v", outB)
+	}
+}
+
+// A store entry that has been altered on disk must fail outright, never fall
+// back to PATH as if the store had simply missed.
+func TestRunFailsOnATamperedStoreEntry(t *testing.T) {
+	dir, digest := fake(t, `echo '{}'`)
+
+	storeDir := t.TempDir()
+	t.Setenv(pluginstore.StoreEnvOverride, storeDir)
+	putInStore(t, storeDir, digest, "letsgo-fake", filepath.Join(dir, "letsgo-fake"))
+
+	hex := strings.TrimPrefix(digest, "sha256:")
+	tampered := filepath.Join(storeDir, "sha256", hex, "letsgo-fake")
+	if err := os.WriteFile(tampered, []byte("#!/bin/sh\necho tampered\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := plugin.Run(context.Background(),
+		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digest},
+		t.TempDir(), struct{}{}, &struct{}{})
+	if err == nil {
+		t.Fatal("a tampered store entry should not have run")
+	}
+	if !strings.Contains(err.Error(), "tampered") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// putInStore copies src into store as name at digest, the way `plugin
+// install` would have.
+func putInStore(t *testing.T, storeDir, digest, name, src string) {
+	t.Helper()
+	store, err := pluginstore.Open(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Put(digest, name, data); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHooksAreAClosedSet(t *testing.T) {
 	if !plugin.HookLDFlags.Valid() || !plugin.HookArchiveLayout.Valid() || !plugin.HookTapFiles.Valid() {
 		t.Error("a documented hook is not valid")
@@ -112,6 +217,7 @@ func TestHooksAreAClosedSet(t *testing.T) {
 // A credential that can publish to another repository has no reason to be
 // visible to a plugin that only renders files for core to write.
 func TestRunStripsTokensFromTheTapFilesHookEnv(t *testing.T) {
+	noStore(t)
 	dir, digest := fake(t, `
 if [ -n "$GITHUB_TOKEN$GH_TOKEN$LETSGO_TAP_TOKEN" ]; then
   echo "a token reached the plugin" >&2
@@ -135,6 +241,7 @@ echo '{"files":[]}'`)
 // Every other hook keeps the whole environment: only tap-files talks about a
 // tap, so only it needs the token kept out.
 func TestRunLeavesOtherHooksEnvWhole(t *testing.T) {
+	noStore(t)
 	dir, digest := fake(t, `
 if [ -z "$GITHUB_TOKEN" ]; then
   echo "the token was stripped" >&2
