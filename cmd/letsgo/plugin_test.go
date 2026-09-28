@@ -568,6 +568,17 @@ func TestInstallAllPinsReportsNoPins(t *testing.T) {
 	}
 }
 
+// The wrapper's job is to find letsgo.mod and hand off to pruneStore.
+func TestRunPluginPrune(t *testing.T) {
+	noStore(t)
+	t.Chdir(t.TempDir())
+	write(t, "letsgo.mod", "build linux/amd64\n")
+
+	if err := runPluginPrune(nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunPluginInstallNeedsAName(t *testing.T) {
 	err := runPluginInstall([]string{"@v0.2.0"})
 	if err == nil || !strings.Contains(err.Error(), "no plugin name") {
