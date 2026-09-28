@@ -90,6 +90,59 @@ func (s Scope) LatestTag(tags []string) (tag string, ok bool) {
 	return tag, ok
 }
 
+// PreviousTag returns the release, among tags in this scope, that tag
+// follows, using semver.Previous's release-kind rule. ok is false when tag
+// itself is not in scope, or nothing in tags qualifies.
+func (s Scope) PreviousTag(tags []string, tag string) (previous string, ok bool) {
+	current, matched := s.MatchesTag(tag)
+	if !matched {
+		return "", false
+	}
+
+	fullTag := make(map[string]string, len(tags))
+	versions := make([]string, 0, len(tags))
+	for _, t := range tags {
+		rest, matched := s.MatchesTag(t)
+		if !matched {
+			continue
+		}
+		versions = append(versions, rest)
+		fullTag[rest] = t
+	}
+
+	previous, ok = fullTag[semver.Previous(versions, current)]
+	return previous, ok
+}
+
+// LatestStableTag picks the highest non-prerelease version among tags that
+// are in this scope and not listed in exclude, and returns its full tag name
+// (Prefix included). ok is false when none qualify.
+func (s Scope) LatestStableTag(tags []string, exclude ...string) (tag string, ok bool) {
+	fullTag := make(map[string]string, len(tags))
+	versions := make([]string, 0, len(tags))
+	for _, t := range tags {
+		rest, matched := s.MatchesTag(t)
+		if !matched {
+			continue
+		}
+		if v, ok := semver.Parse(rest); !ok || v.IsPrerelease() {
+			continue
+		}
+		versions = append(versions, rest)
+		fullTag[rest] = t
+	}
+
+	skipRest := make([]string, 0, len(exclude))
+	for _, e := range exclude {
+		if rest, matched := s.MatchesTag(e); matched {
+			skipRest = append(skipRest, rest)
+		}
+	}
+
+	tag, ok = fullTag[semver.Latest(versions, skipRest...)]
+	return tag, ok
+}
+
 // resolveSymlinks returns dir with its symlinks resolved, or dir itself if
 // that fails — a directory git and FindModule already found is worth
 // comparing even when it cannot be canonicalized further.

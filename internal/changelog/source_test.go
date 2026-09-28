@@ -102,6 +102,43 @@ func TestCollectUsesLocalHistoryWhenComplete(t *testing.T) {
 	}
 }
 
+// A prerelease in between two stables must not be picked as the previous
+// release: upgraders on the last stable should see everything since then, and
+// an intervening rc must not hide any of it.
+func TestCollectSkipsAPrereleaseWhenPickingTheLocalPrevious(t *testing.T) {
+	dir := repoWithHistory(t)
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Dan", "GIT_AUTHOR_EMAIL=d@example.com",
+			"GIT_COMMITTER_NAME=Dan", "GIT_COMMITTER_EMAIL=d@example.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	run("tag", "v1.1.5-rc.1")
+	if err := os.WriteFile(filepath.Join(dir, "d"), []byte("d"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", ".")
+	run("commit", "-q", "-m", "feat: fourth")
+	run("tag", "v1.2.0")
+
+	previous, _, err := changelog.Collect(context.Background(), changelog.Source{
+		Dir: dir, Tag: "v1.2.0",
+	})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if previous != "v1.1.0" {
+		t.Errorf("previous = %q, want v1.1.0, not the intervening rc", previous)
+	}
+}
+
 // A nested module is a separate release with its own history: a commit that
 // only touched its files is not evidence for the root module's own bump or
 // changelog.

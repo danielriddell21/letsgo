@@ -142,6 +142,25 @@ func TestAPIChangesReachThePlan(t *testing.T) {
 	}
 }
 
+// A breaking change that landed only in an intervening rc must still be
+// caught when the next stable releases: comparing against the rc (whose API
+// already carries the same breakage) would silently pass, since nothing
+// changed between the rc and the stable that followed it.
+func TestAPIGateComparesAgainstTheLastStableNotAnInterveningRC(t *testing.T) {
+	requireAPIDiff(t)
+	r := library(t, withDo, withoutDo, "v1.1.0-rc.1")
+	r.write("README.md", "notes\n")
+	r.commit("v1.1.0")
+
+	c := apiCheck(t, r, false)
+	if c.Status != plan.Fail {
+		t.Fatalf("api compatibility = %+v, want fail: the rc must not hide the break from the last stable", c)
+	}
+	if !strings.Contains(c.Detail, "v1.0.0") {
+		t.Errorf("detail should name v1.0.0 as the previous release, not the rc:\n%s", c.Detail)
+	}
+}
+
 // A first release has nothing to compare against.
 func TestAPIGateSkipsAFirstRelease(t *testing.T) {
 	r := newRepo(t)

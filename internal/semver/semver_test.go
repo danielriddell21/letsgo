@@ -79,6 +79,42 @@ func TestLatestPicksHighestNotLast(t *testing.T) {
 	}
 }
 
+func TestPrevious(t *testing.T) {
+	tags := []string{"v1.2.8", "v1.3.0-rc.1", "v1.3.0-rc.2", "v1.3.0", "not-a-version"}
+
+	cases := []struct {
+		name    string
+		current string
+		want    string
+	}{
+		{
+			"a prerelease's previous is the highest release of any kind below it",
+			"v1.3.0-rc.2", "v1.3.0-rc.1",
+		},
+		{
+			"a stable release's previous is the highest stable below it, skipping any rc",
+			"v1.3.0", "v1.2.8",
+		},
+		{
+			"a backport's previous is the highest stable below it, same rule as stable",
+			"v1.2.9", "v1.2.8",
+		},
+		{"a first release has no previous", "v1.0.0", ""},
+		{"an unparseable current has no previous", "not-a-version", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := Previous(tags, c.current); got != c.want {
+				t.Errorf("Previous(tags, %q) = %q, want %q", c.current, got, c.want)
+			}
+		})
+	}
+
+	if got := Previous(nil, "v1.0.0"); got != "" {
+		t.Errorf("Previous(nil, ...) = %q, want empty", got)
+	}
+}
+
 func TestIsPrerelease(t *testing.T) {
 	v, _ := Parse("v1.0.0-rc1")
 	if !v.IsPrerelease() {

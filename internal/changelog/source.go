@@ -8,7 +8,6 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
-	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
 // Source describes where to read history from.
@@ -67,32 +66,15 @@ func convert(infos []github.CommitInfo) []discover.Commit {
 	return commits
 }
 
-// scopedLatestTag returns the tag naming the highest version in prefix's
-// scope, other than exclude, or "" if there is none.
-func scopedLatestTag(tags []string, prefix, exclude string) string {
-	scope := discover.Scope{Prefix: prefix}
-
-	fullTag := make(map[string]string, len(tags))
-	versions := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		rest, ok := scope.MatchesTag(tag)
-		if !ok {
-			continue
-		}
-		versions = append(versions, rest)
-		fullTag[rest] = tag
-	}
-
-	excludeRest, _ := scope.MatchesTag(exclude)
-	return fullTag[semver.Latest(versions, excludeRest)]
-}
-
 func Collect(ctx context.Context, s Source) (previous string, commits []discover.Commit, err error) {
+	scope := discover.Scope{Prefix: s.Prefix}
+
 	if !s.Shallow {
-		previous, err = discover.PreviousTag(ctx, s.Dir, s.Prefix)
+		tags, err := discover.Tags(ctx, s.Dir, s.Prefix)
 		if err != nil {
 			return "", nil, err
 		}
+		previous, _ = scope.PreviousTag(tags, s.Tag)
 		nested, err := discover.NestedModuleDirs(s.Dir)
 		if err != nil {
 			return "", nil, err
@@ -120,8 +102,9 @@ func Collect(ctx context.Context, s Source) (previous string, commits []discover
 	// A nested module's tags parse as valid versions too, so picking the
 	// highest of all of them would sometimes hand a scoped release someone
 	// else's previous tag. Restricting to this scope before comparing is what
-	// the local path gets for free from PreviousTag's own --match pattern.
-	previous = scopedLatestTag(tags, s.Prefix, s.Tag)
+	// the local path gets for free from Scope.PreviousTag's own MatchesTag
+	// filter.
+	previous, _ = scope.PreviousTag(tags, s.Tag)
 
 	// A first release has nothing to compare against, and the compare endpoint
 	// requires a base. Reporting no changes would be wrong in the way that is

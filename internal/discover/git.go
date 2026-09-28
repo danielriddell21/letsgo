@@ -126,6 +126,22 @@ func PreviousTag(ctx context.Context, dir, prefix string) (string, error) {
 	return out, nil
 }
 
+// Tags lists every tag reachable from HEAD matching "<prefix>v[0-9]*", in no
+// particular order. Unlike PreviousTag, which walks nearest-by-ancestry to a
+// single answer, this returns every candidate so the caller can apply its own
+// version-order rule (see semver.Previous and Scope.PreviousTag). An empty
+// result is not an error, which is the normal state for a first release.
+func Tags(ctx context.Context, dir, prefix string) ([]string, error) {
+	out, err := git(ctx, dir, "tag", "--list", "--merged", "HEAD", prefix+"v[0-9]*")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	return strings.Split(out, "\n"), nil
+}
+
 func git(ctx context.Context, dir string, args ...string) (string, error) {
 	// Resolved to an absolute path in a system directory rather than looked up
 	// through the inherited PATH. See exec.go for why.
