@@ -95,6 +95,77 @@ func fixture(t *testing.T, extraConfig ...string) *plan.Plan {
 	return p
 }
 
+// scopedFixture builds a plan for a module nested in a monorepo, tagged with
+// its own prefixed tag, the same layout internal/plan's TestScopedRelease
+// uses.
+func scopedFixture(t *testing.T) *plan.Plan {
+	t.Helper()
+	dir := t.TempDir()
+
+	write := func(name, content string) {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module example.com/monorepo\n\ngo 1.24\n")
+	write("main.go", mainGo)
+	write("services/api/go.mod", "module example.com/monorepo/services/api\n\ngo 1.24\n")
+	write("services/api/main.go", mainGo)
+	write("services/api/README.md", "# api\n")
+	write("services/api/letsgo.mod", "build "+gobuild.Host().String()+"\n")
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
+			"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	run("init", "-q", "-b", "main")
+	run("remote", "add", "origin", "https://github.com/you/monorepo.git")
+	run("add", ".")
+	run("commit", "-q", "-m", "feat: first release")
+	run("tag", "services/api/v1.2.0")
+
+	p, err := plan.Resolve(context.Background(), plan.Options{Dir: filepath.Join(dir, "services/api")})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !p.OK() {
+		t.Fatalf("plan did not pass: %+v", p.Checks)
+	}
+	return p
+}
+
+// A scoped release's manifest has to carry the prefix separately from Tag,
+// so a reader can recover the plain version without assuming Tag's shape.
+func TestBuildRecordsTheTagPrefixForAScopedRelease(t *testing.T) {
+	p := scopedFixture(t)
+
+	result, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	m := result.Manifest
+	if m.Tag != "services/api/v1.2.0" || m.Version != "1.2.0" {
+		t.Fatalf("manifest header = %+v", m)
+	}
+	if m.TagPrefix != "services/api/" {
+		t.Errorf("TagPrefix = %q, want %q", m.TagPrefix, "services/api/")
+	}
+}
+
 func TestBuildProducesACompleteRelease(t *testing.T) {
 	p := fixture(t)
 	dir := t.TempDir()
@@ -122,6 +193,9 @@ func TestBuildProducesACompleteRelease(t *testing.T) {
 	m := result.Manifest
 	if m.Schema != manifest.Schema || m.Version != "1.2.3" || m.Tag != "v1.2.3" {
 		t.Errorf("manifest header = %+v", m)
+	}
+	if m.TagPrefix != "" {
+		t.Errorf("TagPrefix = %q, want empty for a root module", m.TagPrefix)
 	}
 	if m.SourceDateEpoch != p.Git.CommitTime.Unix() {
 		t.Errorf("SourceDateEpoch = %d, want the commit time", m.SourceDateEpoch)

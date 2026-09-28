@@ -54,6 +54,12 @@ type Manifest struct {
 	// rebuild it in.
 	ModuleDir string `json:"module_dir,omitempty"`
 
+	// TagPrefix is the module's scope prefix (see discover.Scope) — the part
+	// of Tag before the "vX.Y.Z" Go itself expects, empty for a root module.
+	// Recorded so a reader can recover the plain version from Tag without
+	// assuming a shape for it: Tag is TagPrefix + "v" + Version.
+	TagPrefix string `json:"tag_prefix,omitempty"`
+
 	Builder Builder           `json:"builder"`
 	Source  *Source           `json:"source,omitempty"`
 	Modules Modules           `json:"modules"`
