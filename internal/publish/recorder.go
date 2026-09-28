@@ -111,6 +111,9 @@ func flags(in github.ReleaseInput) string {
 	if in.Prerelease {
 		set = append(set, "prerelease")
 	}
+	if in.MakeLatest != "" && in.MakeLatest != "true" {
+		set = append(set, "latest="+in.MakeLatest)
+	}
 	if len(set) == 0 {
 		return ""
 	}

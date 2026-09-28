@@ -489,6 +489,31 @@ func TestIsPrerelease(t *testing.T) {
 	}
 }
 
+func TestIsLatest(t *testing.T) {
+	tests := map[string]struct {
+		prefix string
+		config string
+		want   string
+	}{
+		"root, auto":        {"", "auto", "true"},
+		"scoped, auto":      {"services/api/", "auto", "false"},
+		"root, forced off":  {"", "false", "false"},
+		"scoped, forced on": {"services/api/", "true", "true"},
+	}
+
+	for name, c := range tests {
+		t.Run(name, func(t *testing.T) {
+			p := &plan.Plan{
+				Scope:  discover.Scope{Prefix: c.prefix},
+				Config: &config.Config{Latest: c.config},
+			}
+			if got := isLatest(p); got != c.want {
+				t.Errorf("isLatest(prefix=%q, config=%q) = %q, want %q", c.prefix, c.config, got, c.want)
+			}
+		})
+	}
+}
+
 // disable changelog must stop the changelog from being built at all, not
 // merely from being shown: a nil client proves this returns before it would
 // have made a network call.

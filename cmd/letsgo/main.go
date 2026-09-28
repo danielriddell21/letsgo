@@ -342,6 +342,7 @@ func runRelease(args []string) error {
 			Body:            notes,
 			Draft:           *draft || p.Config.Draft,
 			Prerelease:      isPrerelease(p),
+			MakeLatest:      isLatest(p),
 			TargetCommitish: p.Git.Commit,
 		},
 		Logf: func(format string, args ...any) {
@@ -902,6 +903,21 @@ func isPrerelease(p *plan.Plan) bool {
 	}
 	base, _, _ := strings.Cut(p.Version, "+")
 	return strings.Contains(base, "-")
+}
+
+// isLatest reports GitHub's make_latest value: a repository has one "latest"
+// release, so auto claims it for a root module and defers for a scoped one
+// (see discover.Scope), rather than fight whichever module released last for
+// the badge.
+func isLatest(p *plan.Plan) string {
+	switch p.Config.Latest {
+	case "true", "false":
+		return p.Config.Latest
+	}
+	if p.Scope.Prefix == "" {
+		return "true"
+	}
+	return "false"
 }
 
 // took formats an elapsed duration at a resolution a person cares about.
