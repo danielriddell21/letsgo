@@ -107,29 +107,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		return nil, err
 	}
 
-	rc, err := findRelease(ctx, o, o.RCTag)
-	if err != nil {
-		return nil, err
-	}
-	if rc == nil {
-		return nil, fmt.Errorf("promote: %s has no release tagged %s", o.Repo, o.RCTag)
-	}
-	if rc.Draft {
-		return nil, fmt.Errorf("promote: the release for %s is a draft; publish it before promoting", o.RCTag)
-	}
-	if yank.IsRetracted(rc.Body) {
-		return nil, fmt.Errorf("promote: %s is yanked and cannot be promoted", o.RCTag)
-	}
-
-	existing, err := findRelease(ctx, o, stableTag)
-	if err != nil {
-		return nil, err
-	}
-	if existing != nil {
-		return nil, fmt.Errorf("promote: %s already exists; refusing to run again", stableTag)
-	}
-
-	rcManifest, rcManifestSHA256, err := fetchManifest(ctx, o, rc)
+	rc, rcManifest, rcManifestSHA256, err := resolveRC(ctx, o, stableTag)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +177,42 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	return &Result{
 		StableTag: stableTag, RC: restored, Plan: p, Build: built, Published: published,
 	}, nil
+}
+
+// resolveRC finds and validates the RC release — every refusal condition
+// PR-14 names, checked before anything is written — and returns it alongside
+// its own manifest and that manifest's digest, ready for step 2 onward.
+//
+// Split out of Run so that the refusal checks read as one block rather than
+// adding their own branch to the five-step pipeline's own complexity.
+func resolveRC(ctx context.Context, o Options, stableTag string) (*github.Release, *manifest.Manifest, string, error) {
+	rc, err := findRelease(ctx, o, o.RCTag)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if rc == nil {
+		return nil, nil, "", fmt.Errorf("promote: %s has no release tagged %s", o.Repo, o.RCTag)
+	}
+	if rc.Draft {
+		return nil, nil, "", fmt.Errorf("promote: the release for %s is a draft; publish it before promoting", o.RCTag)
+	}
+	if yank.IsRetracted(rc.Body) {
+		return nil, nil, "", fmt.Errorf("promote: %s is yanked and cannot be promoted", o.RCTag)
+	}
+
+	existing, err := findRelease(ctx, o, stableTag)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if existing != nil {
+		return nil, nil, "", fmt.Errorf("promote: %s already exists; refusing to run again", stableTag)
+	}
+
+	rcManifest, rcManifestSHA256, err := fetchManifest(ctx, o, rc)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return rc, rcManifest, rcManifestSHA256, nil
 }
 
 // stableTagFor derives the target tag: the RC's own tag minus its prerelease

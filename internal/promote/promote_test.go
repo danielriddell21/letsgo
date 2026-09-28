@@ -133,6 +133,7 @@ type fakeForge struct {
 }
 
 func newFakeForge(t *testing.T, repo string) *fakeForge {
+	t.Helper()
 	return &fakeForge{t: t, repo: repo, nextAssetID: 1000}
 }
 
