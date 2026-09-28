@@ -114,7 +114,10 @@ type Image struct {
 	Reference string `json:"reference"`
 	Digest    string `json:"digest"`
 
-	// Tags are every tag the index was published under.
+	// Tags are every tag this release targets for the index. A floating one
+	// among them (a channel, a major/minor alias, or latest) moves only if
+	// this release is newer than what it currently points at, so it may
+	// already have been left alone rather than moved.
 	Tags []string `json:"tags,omitempty"`
 
 	Platforms []string `json:"platforms"`
