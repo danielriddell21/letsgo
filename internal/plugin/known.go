@@ -1,5 +1,7 @@
 package plugin
 
+import "strings"
+
 // KnownPlugin describes one of the plugins letsgo itself publishes: the hook
 // it answers, and what it does.
 //
@@ -44,4 +46,12 @@ func Lookup(command string) (KnownPlugin, bool) {
 		}
 	}
 	return KnownPlugin{}, false
+}
+
+// ShortName is a plugin's command with the "letsgo-" convention stripped,
+// e.g. "letsgo-env" becomes "env". It names the file a plugin's own config
+// lives in under .letsgo/, and is defined for any command, not just one in
+// Known — a third-party plugin follows the same naming convention.
+func ShortName(command string) string {
+	return strings.TrimPrefix(command, "letsgo-")
 }

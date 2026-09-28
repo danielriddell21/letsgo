@@ -23,3 +23,15 @@ func TestLookupFindsCasksHook(t *testing.T) {
 		t.Errorf("Lookup(letsgo-cask) = %+v, %v, want %s", got, ok, HookTapFiles)
 	}
 }
+
+func TestShortName(t *testing.T) {
+	for _, c := range []struct{ command, want string }{
+		{"letsgo-env", "env"},
+		{"letsgo-cask", "cask"},
+		{"third-party", "third-party"},
+	} {
+		if got := ShortName(c.command); got != c.want {
+			t.Errorf("ShortName(%q) = %q, want %q", c.command, got, c.want)
+		}
+	}
+}
