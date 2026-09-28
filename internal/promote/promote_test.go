@@ -353,14 +353,7 @@ func (f *fakeForge) seedRC(tag string, manifestData []byte) *fakeRelease {
 // The whole loop: build a real RC, publish it through the fake forge, promote
 // it, and check the stable release the pipeline produced.
 func TestRunPromotesACleanRC(t *testing.T) {
-	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{
-		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
-		"main.go":    mainGo,
-		"README.md":  "# demo\n",
-		"letsgo.mod": "build " + gobuild.Host().String() + "\n",
-	})
-	gitInit(t, dir, "v1.3.0-rc.1")
+	dir := demoRepo(t, "v1.3.0-rc.1")
 
 	rc := buildRC(t, dir)
 	manifestData, err := os.ReadFile(filepath.Join(rc.Dir, manifest.FileName))
@@ -372,11 +365,7 @@ func TestRunPromotesACleanRC(t *testing.T) {
 	forge.seedRC("v1.3.0-rc.1", manifestData)
 	client := forge.client()
 
-	result, err := promote.Run(context.Background(), promote.Options{
-		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
-		RCTag: "v1.3.0-rc.1", Dir: dir, ModuleDir: dir,
-		ToolVersion: "test", WorkDir: t.TempDir(), Logf: t.Logf,
-	})
+	result, err := runPromote(t, client, "v1.3.0-rc.1", dir)
 	if err != nil {
 		t.Fatalf("promote.Run: %v", err)
 	}
@@ -397,14 +386,7 @@ func TestRunPromotesACleanRC(t *testing.T) {
 		t.Errorf("PromotedFrom = %+v, want tag v1.3.0-rc.1", result.Build.Manifest.PromotedFrom)
 	}
 
-	forge.mu.Lock()
-	defer forge.mu.Unlock()
-	if forge.updateCalls != 1 {
-		t.Errorf("UpdateRelease was called %d times, want exactly 1 (restoring the RC)", forge.updateCalls)
-	}
-	if forge.createCalls != 1 {
-		t.Errorf("CreateRelease was called %d times, want exactly 1", forge.createCalls)
-	}
+	assertForgeCalls(t, forge, 1, 1)
 	if !forge.lastCreateOK || forge.lastCreate.MakeLatest != "true" {
 		t.Errorf("the stable release was not created with make_latest=true: %+v", forge.lastCreate)
 	}
@@ -417,14 +399,7 @@ func TestRunPromotesACleanRC(t *testing.T) {
 // must not create the stable release — the RC's release is still restored
 // first, because that step is unconditional.
 func TestRunRefusesAMismatchedRebuild(t *testing.T) {
-	dir := t.TempDir()
-	writeFiles(t, dir, map[string]string{
-		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
-		"main.go":    mainGo,
-		"README.md":  "# demo\n",
-		"letsgo.mod": "build " + gobuild.Host().String() + "\n",
-	})
-	gitInit(t, dir, "v1.3.0-rc.1")
+	dir := demoRepo(t, "v1.3.0-rc.1")
 
 	rc := buildRC(t, dir)
 	m, err := manifest.Decode(mustRead(t, filepath.Join(rc.Dir, manifest.FileName)))
@@ -443,11 +418,7 @@ func TestRunRefusesAMismatchedRebuild(t *testing.T) {
 	forge.seedRC("v1.3.0-rc.1", tampered)
 	client := forge.client()
 
-	_, err = promote.Run(context.Background(), promote.Options{
-		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
-		RCTag: "v1.3.0-rc.1", Dir: dir, ModuleDir: dir,
-		ToolVersion: "test", WorkDir: t.TempDir(), Logf: t.Logf,
-	})
+	_, err = runPromote(t, client, "v1.3.0-rc.1", dir)
 	if err == nil {
 		t.Fatal("a rebuild that disagrees with the RC's manifest was promoted")
 	}
@@ -455,13 +426,46 @@ func TestRunRefusesAMismatchedRebuild(t *testing.T) {
 		t.Errorf("error = %v, want it to name the go version difference", err)
 	}
 
+	assertForgeCalls(t, forge, 1, 0)
+}
+
+// demoRepo writes a minimal buildable module, committed and tagged rcTag —
+// the fixture every test in this file rebuilds from.
+func demoRepo(t *testing.T, rcTag string) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{
+		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
+		"main.go":    mainGo,
+		"README.md":  "# demo\n",
+		"letsgo.mod": "build " + gobuild.Host().String() + "\n",
+	})
+	gitInit(t, dir, rcTag)
+	return dir
+}
+
+// runPromote calls promote.Run with the options every test in this file
+// shares, only rcTag and dir varying per case.
+func runPromote(t *testing.T, client *github.Client, rcTag, dir string) (*promote.Result, error) {
+	t.Helper()
+	return promote.Run(context.Background(), promote.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		RCTag: rcTag, Dir: dir, ModuleDir: dir,
+		ToolVersion: "test", WorkDir: t.TempDir(), Logf: t.Logf,
+	})
+}
+
+// assertForgeCalls checks how many times the fake forge's two write
+// endpoints were called — a refusal or a failed rebuild must write nothing.
+func assertForgeCalls(t *testing.T, forge *fakeForge, wantUpdate, wantCreate int) {
+	t.Helper()
 	forge.mu.Lock()
 	defer forge.mu.Unlock()
-	if forge.updateCalls != 1 {
-		t.Errorf("UpdateRelease was called %d times, want exactly 1 (the RC is still restored first)", forge.updateCalls)
+	if forge.updateCalls != wantUpdate {
+		t.Errorf("UpdateRelease was called %d times, want %d", forge.updateCalls, wantUpdate)
 	}
-	if forge.createCalls != 0 {
-		t.Error("a stable release was created despite the mismatch")
+	if forge.createCalls != wantCreate {
+		t.Errorf("CreateRelease was called %d times, want %d", forge.createCalls, wantCreate)
 	}
 }
 
@@ -525,23 +529,13 @@ func TestRunRefusalConditions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
-			writeFiles(t, dir, map[string]string{
-				"go.mod":     "module example.com/demo\n\ngo 1.24\n",
-				"main.go":    mainGo,
-				"letsgo.mod": "build " + gobuild.Host().String() + "\n",
-			})
-			gitInit(t, dir, "v1.3.0-rc.1")
+			dir := demoRepo(t, "v1.3.0-rc.1")
 
 			forge := newFakeForge(t, "you/demo")
 			tc.setup(forge)
 			client := forge.client()
 
-			_, err := promote.Run(context.Background(), promote.Options{
-				Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
-				RCTag: tc.rcTag, Dir: dir, ModuleDir: dir,
-				ToolVersion: "test", WorkDir: t.TempDir(), Logf: t.Logf,
-			})
+			_, err := runPromote(t, client, tc.rcTag, dir)
 			if err == nil {
 				t.Fatal("expected a refusal, got no error")
 			}
@@ -549,14 +543,7 @@ func TestRunRefusalConditions(t *testing.T) {
 				t.Errorf("error = %v, want it to contain %q", err, tc.want)
 			}
 
-			forge.mu.Lock()
-			defer forge.mu.Unlock()
-			if forge.updateCalls != 0 {
-				t.Errorf("UpdateRelease was called %d times; a refusal must write nothing", forge.updateCalls)
-			}
-			if forge.createCalls != 0 {
-				t.Errorf("CreateRelease was called %d times; a refusal must write nothing", forge.createCalls)
-			}
+			assertForgeCalls(t, forge, 0, 0)
 		})
 	}
 }
