@@ -2,6 +2,7 @@ name: reproducibility
 
 on:
   push:
+    branches: [trunk]
   pull_request:
 
 jobs:
