@@ -352,6 +352,66 @@ func TestVerifyWithNoTagIsScopedToThePrefix(t *testing.T) {
 	}
 }
 
+// With no tag and no prefix, the most recent release comes from the forge's
+// own "latest release" endpoint rather than a tag listing: a root module has
+// no scope to filter tags by, so there is nothing for the tag-listing path to
+// add.
+func TestVerifyWithNoTagAndNoPrefixUsesLatestRelease(t *testing.T) {
+	p := buildRelease(t)
+	result := run(t, p, verify.Options{Dir: p.dir, SkipRebuild: true})
+
+	if result.Tag != "v1.2.3" {
+		t.Errorf("Tag = %q, want v1.2.3 from the latest-release endpoint", result.Tag)
+	}
+}
+
+// A prefix that matches no tag means the module has no release yet, and that
+// has to surface as "no releases" rather than a nil pointer.
+func TestVerifyScopedToAPrefixWithNoMatchingTagHasNoReleases(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/tags") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]github.Tag{{Name: "other/v1.0.0"}})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+
+	_, err := verify.Run(context.Background(), verify.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Prefix: "services/api/", WorkDir: t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "has no releases") {
+		t.Errorf("err = %v, want \"has no releases\" for a prefix with no matching tag", err)
+	}
+}
+
+// A forge error listing tags must surface, not be swallowed as "no releases".
+func TestVerifyScopedToAPrefixSurfacesATagsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+
+	_, err := verify.Run(context.Background(), verify.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Prefix: "services/api/", WorkDir: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("a failed tag listing verified")
+	}
+	if strings.Contains(err.Error(), "has no releases") {
+		t.Errorf("err = %v, want the underlying tags error, not \"has no releases\"", err)
+	}
+}
+
 func TestVerifyRejectsAnUnknownSchema(t *testing.T) {
 	if _, err := manifest.Decode([]byte(`{"schema":99}`)); err == nil {
 		t.Error("an unknown schema was accepted")
