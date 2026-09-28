@@ -12,6 +12,7 @@ package diff
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -336,6 +337,42 @@ func markdownAPI(changes []manifest.APIChange) string {
 		parts[i] = fmt.Sprintf("%s %s", marker, c.Text)
 	}
 	return strings.Join(parts, " · ")
+}
+
+// Notes renders the collapsed release-notes section: the same table Markdown
+// renders, minus API (the changelog already shows it) and with size rows
+// limited to changes worth a reader's attention. Empty when nothing survives
+// that filter — a first release, or one where nothing tracked here moved.
+func (r *Result) Notes(previous string) string {
+	table := (&Result{
+		Toolchain:    r.Toolchain,
+		Dependencies: r.Dependencies,
+		Sizes:        notableSizes(r.Sizes),
+		SizeKind:     r.SizeKind,
+	}).Markdown()
+	if table == "" {
+		return ""
+	}
+	return fmt.Sprintf("<details><summary>What shipped (vs %s)</summary>\n\n%s</details>\n", previous, table)
+}
+
+// notableSizes keeps only the size changes worth a release-notes row: over
+// 1%, at most five, largest first. A table of every rounding-error percent
+// point would bury the change that matters.
+func notableSizes(sizes []SizeChange) []SizeChange {
+	var kept []SizeChange
+	for _, s := range sizes {
+		if math.Abs(s.Percent()) > 1 {
+			kept = append(kept, s)
+		}
+	}
+	sort.Slice(kept, func(i, j int) bool {
+		return math.Abs(kept[i].Percent()) > math.Abs(kept[j].Percent())
+	})
+	if len(kept) > 5 {
+		kept = kept[:5]
+	}
+	return kept
 }
 
 // jsonResult is Result's wire form: schema-versioned, so a consumer can tell

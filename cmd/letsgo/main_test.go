@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"flag"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -643,9 +645,156 @@ func TestIsLatest(t *testing.T) {
 func TestReleaseNotesSkippedWhenChangelogDisabled(t *testing.T) {
 	p := &plan.Plan{Features: feature.Resolve([]string{"changelog"})}
 
-	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{})
+	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, nil)
 	if err != nil || notes != "" {
 		t.Errorf("releaseNotes = (%q, %v), want empty and no error", notes, err)
+	}
+}
+
+// manifestForge serves one release whose only asset (when m is non-nil) is
+// the manifest itself, reachable the way DownloadAsset actually fetches it:
+// by numeric asset ID through the API host, not a browser_download_url.
+func manifestForge(t *testing.T, repoName, tag string, m *manifest.Manifest) *github.Client {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	release := func(w http.ResponseWriter, _ *http.Request) {
+		var assets []map[string]any
+		if m != nil {
+			assets = append(assets, map[string]any{"id": 1, "name": manifest.FileName})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": tag, "assets": assets})
+	}
+	mux.HandleFunc("/repos/"+repoName+"/releases/tags/"+tag, release)
+	mux.HandleFunc("/repos/"+repoName+"/releases/assets/1", func(w http.ResponseWriter, _ *http.Request) {
+		data, err := m.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write(data)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	client := github.New("")
+	client.SetEndpoints(srv.URL, srv.URL)
+	return client
+}
+
+// A first release has no previous tag to diff against, so there is nothing
+// to fetch: whatShipped must return before it would have made a network
+// call, same guarantee TestReleaseNotesSkippedWhenChangelogDisabled proves
+// for the changelog-disabled case.
+func TestWhatShippedSkipsAFirstRelease(t *testing.T) {
+	out := whatShipped(context.Background(), nil, github.Repo{}, "", &manifest.Manifest{Version: "v1.0.0"})
+	if out != "" {
+		t.Errorf("whatShipped = %q, want empty for a first release", out)
+	}
+}
+
+// A previous release published before letsgo recorded a manifest leaves
+// nothing to fetch; the release must still go out, just without this
+// section.
+func TestWhatShippedSkipsAPreviousReleaseWithNoManifest(t *testing.T) {
+	client := manifestForge(t, "you/demo", "v1.0.0", nil) // no manifest: no asset to find
+	repo := github.Repo{Owner: "you", Name: "demo"}
+	current := &manifest.Manifest{Version: "v1.1.0", Builder: manifest.Builder{Go: "go1.26.2"}}
+
+	var out string
+	stdout := captureStdout(t, func() {
+		out = whatShipped(context.Background(), client, repo, "v1.0.0", current)
+	})
+	if out != "" {
+		t.Errorf("whatShipped = %q, want empty", out)
+	}
+	if !strings.Contains(stdout, `skipped the "what shipped" section`) {
+		t.Errorf("stdout = %q, want a skip notice", stdout)
+	}
+}
+
+func TestWhatShippedRendersTheCollapsedSection(t *testing.T) {
+	previous := &manifest.Manifest{
+		Schema: manifest.Schema, Version: "v1.0.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.1"},
+	}
+	client := manifestForge(t, "you/demo", "v1.0.0", previous)
+	repo := github.Repo{Owner: "you", Name: "demo"}
+	current := &manifest.Manifest{
+		Schema: manifest.Schema, Version: "v1.1.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.2"},
+	}
+
+	out := whatShipped(context.Background(), client, repo, "v1.0.0", current)
+	if !strings.Contains(out, "<details><summary>What shipped (vs v1.0.0)</summary>") {
+		t.Errorf("whatShipped = %q, want the collapsed summary", out)
+	}
+	if !strings.Contains(out, "go1.26.1 → go1.26.2") {
+		t.Errorf("whatShipped = %q, want the toolchain row", out)
+	}
+}
+
+// historyFixture writes a repository with two tags, so a local changelog
+// Collect can resolve a real "previous" release without touching the
+// network — the same value whatShipped's forge fetch below must agree with.
+func historyFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	identity := []string{"-c", "user.name=Test", "-c", "user.email=t@example.com"}
+	run := func(args ...string) {
+		t.Helper()
+		full := append(append([]string{"-C", dir}, identity...), args...)
+		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", full, err, out)
+		}
+	}
+	commit := func(name, message string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		run("add", ".")
+		run("commit", "-q", "-m", message)
+	}
+
+	run("init", "-q", "-b", "main")
+	commit("a", "feat: first release")
+	run("tag", "v1.0.0")
+	commit("b", "feat: second release")
+	run("tag", "v1.1.0")
+
+	return dir
+}
+
+// The notes section must compare against the same previous release the
+// changelog above it just used, and must be appended after it (WS-1).
+func TestReleaseNotesAppendsWhatShippedUsingTheChangelogsPreviousRelease(t *testing.T) {
+	dir := historyFixture(t)
+
+	previous := &manifest.Manifest{
+		Schema: manifest.Schema, Version: "v1.0.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.1"},
+	}
+	client := manifestForge(t, "you/demo", "v1.0.0", previous)
+	repo := github.Repo{Owner: "you", Name: "demo"}
+
+	p := &plan.Plan{
+		Features: feature.Resolve(nil),
+		Module:   discover.Module{Dir: dir},
+		Tag:      "v1.1.0",
+	}
+	current := &manifest.Manifest{
+		Schema: manifest.Schema, Version: "v1.1.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.2"},
+	}
+
+	notes, err := releaseNotes(context.Background(), p, client, repo, current)
+	if err != nil {
+		t.Fatalf("releaseNotes: %v", err)
+	}
+	if !strings.Contains(notes, "second release") {
+		t.Errorf("notes = %q, want the changelog entry", notes)
+	}
+	if !strings.Contains(notes, "<details><summary>What shipped (vs v1.0.0)</summary>") {
+		t.Errorf("notes = %q, want the what-shipped section against v1.0.0", notes)
+	}
+	if strings.Index(notes, "second release") > strings.Index(notes, "What shipped") {
+		t.Errorf("notes = %q, want the what-shipped section after the changelog", notes)
 	}
 }
 
