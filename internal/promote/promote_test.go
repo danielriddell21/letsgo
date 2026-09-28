@@ -76,6 +76,11 @@ func gitInit(t *testing.T, dir string, tags ...string) {
 		}
 	}
 	run("init", "-q", "-b", "main")
+	// A local identity, not just the env vars above: promote.Run itself later
+	// tags the RC's commit via discover.CreateTagAt, outside this helper's
+	// env, and needs one already configured on the repo to do that.
+	run("config", "user.name", "Test")
+	run("config", "user.email", "t@example.com")
 	run("add", ".")
 	run("commit", "-q", "-m", "feat: first")
 	for _, tag := range tags {
