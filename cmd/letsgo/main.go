@@ -314,7 +314,7 @@ func runRelease(args []string) error {
 
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 
-	notes, err := releaseNotes(ctx, p, client, repo)
+	notes, err := releaseNotes(ctx, p, client, repo, result.Manifest)
 	if err != nil {
 		return err
 	}
@@ -931,11 +931,15 @@ func notesMode(appendNotes bool) publish.NotesMode {
 	return publish.NotesReplace
 }
 
-// releaseNotes builds the changelog for everything since the previous tag.
+// releaseNotes builds the changelog for everything since the previous tag,
+// plus the collapsed "what shipped" section comparing this release's
+// manifest against that same previous release.
 //
 // A shallow checkout is the normal shape of a CI clone, so the history is
 // fetched from the forge rather than demanded of the caller.
-func releaseNotes(ctx context.Context, p *plan.Plan, client *github.Client, repo github.Repo) (string, error) {
+func releaseNotes(
+	ctx context.Context, p *plan.Plan, client *github.Client, repo github.Repo, current *manifest.Manifest,
+) (string, error) {
 	if !p.Features.On("changelog") {
 		return "", nil
 	}
@@ -954,7 +958,26 @@ func releaseNotes(ctx context.Context, p *plan.Plan, client *github.Client, repo
 	if err != nil {
 		return "", err
 	}
-	return changelog.Build(previous, p.Tag, commits).WithAPIChanges(p.APIChanges).Markdown(), nil
+	notes := changelog.Build(previous, p.Tag, commits).WithAPIChanges(p.APIChanges).Markdown()
+	return notes + whatShipped(ctx, client, repo, previous, current), nil
+}
+
+// whatShipped renders the manifest-diff section against the same previous
+// release the changelog above just used. A release must not fail merely
+// because this supplementary section couldn't be built — a first release has
+// no previous tag, and a release published before letsgo recorded a manifest
+// has nothing to fetch — so any failure here is reported and the section is
+// left out, rather than propagated.
+func whatShipped(ctx context.Context, client *github.Client, repo github.Repo, previous string, current *manifest.Manifest) string {
+	if previous == "" {
+		return ""
+	}
+	before, err := diff.Fetch(ctx, client, repo, previous)
+	if err != nil {
+		fmt.Printf("  ! skipped the \"what shipped\" section: %v\n", err)
+		return ""
+	}
+	return diff.Compare(before, current).Notes(previous)
 }
 
 func sumsFrom(r *release.Result) map[string]string {

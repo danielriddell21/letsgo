@@ -238,6 +238,62 @@ func TestMarkdownIsEmptyWhenIdentical(t *testing.T) {
 	}
 }
 
+func TestNotesWrapsTheTableInACollapsedDetailsBlock(t *testing.T) {
+	out := diffFixture().Notes("v1.2.0")
+
+	want := "<details><summary>What shipped (vs v1.2.0)</summary>\n\n" +
+		"| | |\n" +
+		"|---|---|\n" +
+		"| toolchain | go1.26.1 → go1.26.2 |\n" +
+		"| deps | + example.com/arrived v0.9.0 · − example.com/gone v1.0.0 · ↑ example.com/moved v0.25.0 → v0.26.0 |\n" +
+		"| size | linux/amd64 7.7 MB → 8.0 MB (+3.7%) |\n" +
+		"</details>\n"
+	if out != want {
+		t.Errorf("notes =\n%s\nwant\n%s", out, want)
+	}
+	if strings.Contains(out, "example.com/p") {
+		t.Error("notes must not show API changes; the changelog already does")
+	}
+}
+
+func TestNotesIsEmptyWhenNothingSurvivesTheFilter(t *testing.T) {
+	from := manifestWith("v1.0.0", nil, nil, "go1.26.8")
+	to := manifestWith("v1.0.1", nil, nil, "go1.26.8")
+
+	if out := Compare(from, to).Notes("v1.0.0"); out != "" {
+		t.Errorf("notes = %q, want empty", out)
+	}
+}
+
+func TestNotableSizesFiltersCapsAndSortsLargestFirst(t *testing.T) {
+	sizes := []SizeChange{
+		{Target: "a", From: 1000, To: 1005}, // +0.5%, below the threshold
+		{Target: "b", From: 1000, To: 1300}, // +30%
+		{Target: "c", From: 1000, To: 1120}, // +12%
+		{Target: "d", From: 1000, To: 1200}, // +20%
+		{Target: "e", From: 1000, To: 1150}, // +15%
+		{Target: "f", From: 1000, To: 1050}, // +5%, bumped by the cap
+		{Target: "g", From: 1000, To: 920},  // -8%
+	}
+
+	got := notableSizes(sizes)
+
+	var order []string
+	for _, s := range got {
+		order = append(order, s.Target)
+	}
+	want := []string{"b", "d", "e", "c", "g"}
+	if len(order) != len(want) {
+		t.Fatalf("order = %v, want %v", order, want)
+	}
+	for i, target := range want {
+		if order[i] != target {
+			t.Errorf("order = %v, want %v", order, want)
+			break
+		}
+	}
+}
+
 func TestJSONCarriesSchemaAndEveryField(t *testing.T) {
 	data, err := diffFixture().JSON()
 	if err != nil {
