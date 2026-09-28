@@ -43,6 +43,7 @@ func runUpdate(args []string) error {
 	check := fs.Bool("check", false, "report whether a newer release exists, and change nothing")
 	yes := fs.Bool("yes", false, "install without asking")
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
+	channel := fs.String("channel", "", `release channel to follow: "beta", "rc", or "next" for any prerelease (default: stable)`)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -55,6 +56,7 @@ func runUpdate(args []string) error {
 			Current:   version,
 			Token:     tokenValue,
 			UserAgent: "letsgo/" + version,
+			Channel:   *channel,
 		},
 		Current: version,
 		Check:   *check,
