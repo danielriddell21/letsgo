@@ -20,8 +20,10 @@ import (
 	"io"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
 // Status is the outcome of one check.
@@ -61,6 +63,12 @@ type Options struct {
 
 	// Tag is the release to verify. Empty means the most recent release.
 	Tag string
+
+	// Prefix is the module's scope prefix (see discover.Scope), empty for a
+	// root module. It is only consulted when Tag is empty: it keeps "the
+	// most recent release" from picking another module's release in a
+	// monorepo.
+	Prefix string
 
 	// Dir is a local checkout to rebuild from. When it does not contain the
 	// released commit, the release's own source archive is used instead.
@@ -171,7 +179,7 @@ func findRelease(ctx context.Context, o Options) (*github.Release, error) {
 		return release, nil
 	}
 
-	release, err := o.Client.LatestRelease(ctx, o.Repo)
+	release, err := latestRelease(ctx, o)
 	if err != nil {
 		return nil, err
 	}
@@ -179,6 +187,39 @@ func findRelease(ctx context.Context, o Options) (*github.Release, error) {
 		return nil, fmt.Errorf("verify: %s has no releases", o.Repo)
 	}
 	return release, nil
+}
+
+// latestRelease finds the most recent release, scoped to o.Prefix when it
+// is set. The forge's own "latest release" has no concept of a monorepo's
+// scopes, so a scoped module instead lists tags and picks the highest
+// version within its own prefix, the same way yank.PreviousOf does.
+func latestRelease(ctx context.Context, o Options) (*github.Release, error) {
+	if o.Prefix == "" {
+		return o.Client.LatestRelease(ctx, o.Repo)
+	}
+
+	tags, err := o.Client.Tags(ctx, o.Repo, 100)
+	if err != nil {
+		return nil, err
+	}
+
+	scope := discover.Scope{Prefix: o.Prefix}
+	fullTag := make(map[string]string, len(tags))
+	versions := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		rest, ok := scope.MatchesTag(tag)
+		if !ok {
+			continue
+		}
+		versions = append(versions, rest)
+		fullTag[rest] = tag
+	}
+
+	tag := fullTag[semver.Latest(versions)]
+	if tag == "" {
+		return nil, nil
+	}
+	return o.Client.ReleaseByTag(ctx, o.Repo, tag)
 }
 
 func fetchManifest(ctx context.Context, o Options, release *github.Release) (*manifest.Manifest, error) {

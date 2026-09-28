@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -299,6 +300,115 @@ func TestVerifyNeedsAManifest(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), manifest.FileName) {
 		t.Errorf("error does not explain what is missing: %v", err)
+	}
+}
+
+// With no tag given, a scoped module resolves the newest release within its
+// own prefix, not the repository's overall latest — the same distinction
+// runYank draws before picking a previous release.
+func TestVerifyWithNoTagIsScopedToThePrefix(t *testing.T) {
+	const prefix = "services/api/"
+	manifestData := []byte(fmt.Sprintf(`{"schema":%d}`, manifest.Schema))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/tags"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]github.Tag{
+				{Name: "v9.9.9"},       // a higher, unscoped decoy
+				{Name: "other/v8.0.0"}, // a different module's scope
+				{Name: "services/api/v1.0.0"},
+				{Name: "services/api/v1.2.3"}, // the scoped winner
+			})
+
+		case strings.Contains(r.URL.Path, "/releases/tags/"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(github.Release{
+				ID: 1, TagName: "services/api/v1.2.3",
+				Assets: []github.Asset{{ID: 1, Name: manifest.FileName, Size: int64(len(manifestData))}},
+			})
+
+		case strings.Contains(r.URL.Path, "/releases/assets/"):
+			_, _ = w.Write(manifestData)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+
+	result, err := verify.Run(context.Background(), verify.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Prefix: prefix, WorkDir: t.TempDir(), SkipRebuild: true,
+	})
+	if err != nil {
+		t.Fatalf("verify.Run: %v", err)
+	}
+	if result.Tag != "services/api/v1.2.3" {
+		t.Errorf("Tag = %q, want the scoped module's own latest release, not the repository's overall latest", result.Tag)
+	}
+}
+
+// With no tag and no prefix, the most recent release comes from the forge's
+// own "latest release" endpoint rather than a tag listing: a root module has
+// no scope to filter tags by, so there is nothing for the tag-listing path to
+// add.
+func TestVerifyWithNoTagAndNoPrefixUsesLatestRelease(t *testing.T) {
+	p := buildRelease(t)
+	result := run(t, p, verify.Options{Dir: p.dir, SkipRebuild: true})
+
+	if result.Tag != "v1.2.3" {
+		t.Errorf("Tag = %q, want v1.2.3 from the latest-release endpoint", result.Tag)
+	}
+}
+
+// A prefix that matches no tag means the module has no release yet, and that
+// has to surface as "no releases" rather than a nil pointer.
+func TestVerifyScopedToAPrefixWithNoMatchingTagHasNoReleases(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/tags") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]github.Tag{{Name: "other/v1.0.0"}})
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+
+	_, err := verify.Run(context.Background(), verify.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Prefix: "services/api/", WorkDir: t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "has no releases") {
+		t.Errorf("err = %v, want \"has no releases\" for a prefix with no matching tag", err)
+	}
+}
+
+// A forge error listing tags must surface, not be swallowed as "no releases".
+func TestVerifyScopedToAPrefixSurfacesATagsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+
+	_, err := verify.Run(context.Background(), verify.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Prefix: "services/api/", WorkDir: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("a failed tag listing verified")
+	}
+	if strings.Contains(err.Error(), "has no releases") {
+		t.Errorf("err = %v, want the underlying tags error, not \"has no releases\"", err)
 	}
 }
 
