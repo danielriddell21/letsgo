@@ -50,7 +50,7 @@ func rebuild(ctx context.Context, o Options, result *Result, release *github.Rel
 		return
 	}
 
-	compareRebuilt(ctx, o, result, m, source, moduleDir, commands)
+	compareRebuilt(ctx, o, result, m, moduleDir, commands)
 }
 
 // obtainSource produces a tree to rebuild from.
@@ -137,7 +137,7 @@ func compareRebuilt(
 	o Options,
 	result *Result,
 	m *manifest.Manifest,
-	source, moduleDir string,
+	moduleDir string,
 	commands []discover.MainPackage,
 ) {
 	groups, err := rebuildGroups(m, commands)
@@ -152,13 +152,13 @@ func compareRebuilt(
 	for _, group := range groups {
 		produced, err := build.Run(ctx, build.Options{
 			ModuleDir:    moduleDir,
-			FilesDir:     source,
+			FilesDir:     moduleDir,
 			Commands:     group.commands,
 			Name:         group.name,
 			Version:      m.Version,
 			ModTime:      sourceDate(m),
 			Targets:      group.targets,
-			ExtraFiles:   build.FindDocumentation(source),
+			ExtraFiles:   build.FindDocumentation(moduleDir),
 			ExactLDFlags: exactFlags(group.artifacts),
 			Tags:         recordedTags(group.artifacts),
 			Toolchain:    m.Builder.Go,
