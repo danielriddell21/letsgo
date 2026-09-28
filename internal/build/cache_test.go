@@ -111,7 +111,7 @@ func TestEmptyKeyDisablesCaching(t *testing.T) {
 // The global config's `cache off` disables the cache when no explicit
 // directory is given.
 func TestOpenCacheWithHonoursGlobalCacheOff(t *testing.T) {
-	if c := openCacheWith("", &config.Global{CacheOff: true}); c != nil {
+	if openCacheWith("", &config.Global{CacheOff: true}) != nil {
 		t.Error("cache off did not disable the cache")
 	}
 }
