@@ -261,13 +261,21 @@ func TestScopeLatestTag(t *testing.T) {
 		wantTag string
 		wantOK  bool
 	}{
-		{"root scope picks the highest version", "",
-			[]string{"v1.0.0", "v2.0.0", "v1.5.0"}, "v2.0.0", true},
-		{"nested scope ignores other scopes and the root", "services/api/",
+		{
+			"root scope picks the highest version", "",
+			[]string{"v1.0.0", "v2.0.0", "v1.5.0"},
+			"v2.0.0", true,
+		},
+		{
+			"nested scope ignores other scopes and the root", "services/api/",
 			[]string{"v9.9.9", "services/web/v8.0.0", "services/api/v1.0.0", "services/api/v1.2.3"},
-			"services/api/v1.2.3", true},
-		{"no matching tag has no releases", "services/api/",
-			[]string{"v1.0.0", "services/web/v1.0.0"}, "", false},
+			"services/api/v1.2.3", true,
+		},
+		{
+			"no matching tag has no releases", "services/api/",
+			[]string{"v1.0.0", "services/web/v1.0.0"},
+			"", false,
+		},
 		{"no tags at all has no releases", "", nil, "", false},
 	}
 
