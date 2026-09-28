@@ -700,7 +700,12 @@ func TestFindGitPopulatesATopLevelThatAgreesWithItself(t *testing.T) {
 // without a restriction to plain version tags a root release could pick a
 // nested module's tag as its previous release and build its changelog, API
 // gate and version bump against the wrong history entirely.
-func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
+// repoWithNestedModuleTag builds a repo through a root v1.0.0 release plus a
+// nested "web" module carrying its own web/v1.0.0 tag, the shared starting
+// point every test proving a nested module's tags stay out of the root's own
+// answer builds on.
+func repoWithNestedModuleTag(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	run := func(args ...string) { gitRun(t, dir, args...) }
 
@@ -714,6 +719,13 @@ func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
 	run("add", ".")
 	run("commit", "-q", "-m", "second")
 	run("tag", "web/v1.0.0")
+
+	return dir
+}
+
+func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
+	dir := repoWithNestedModuleTag(t)
+	run := func(args ...string) { gitRun(t, dir, args...) }
 
 	write(t, dir, "README.md", "changed\n")
 	run("add", ".")
@@ -728,19 +740,8 @@ func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
 // Unlike PreviousTag, Tags returns every matching tag reachable from HEAD,
 // not just the nearest one, so a version-order rule can be applied on top.
 func TestTagsReturnsEveryMatchingTagInScope(t *testing.T) {
-	dir := t.TempDir()
+	dir := repoWithNestedModuleTag(t)
 	run := func(args ...string) { gitRun(t, dir, args...) }
-
-	run("init", "-q", "-b", "main")
-	write(t, dir, "README.md", "hi\n")
-	run("add", ".")
-	run("commit", "-q", "-m", "first")
-	run("tag", "v1.0.0")
-
-	write(t, dir, "web/go.mod", "module example.com/foo/web\n")
-	run("add", ".")
-	run("commit", "-q", "-m", "second")
-	run("tag", "web/v1.0.0")
 	run("tag", "v1.1.0-rc.1")
 
 	write(t, dir, "README.md", "changed\n")
