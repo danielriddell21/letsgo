@@ -135,6 +135,40 @@ func sign(n int) int {
 	return 0
 }
 
+// Previous returns the release, among tags, that current follows.
+//
+// A pre-release's previous is the highest release of any kind below it, so a
+// tester sees what changed in this build specifically. A stable release's
+// previous is the highest stable release below it — a backport included,
+// since the same rule already picks the highest stable below the backport's
+// own version — so upgraders see everything since the release they are
+// actually running, and a pre-release in between never hides it.
+//
+// current itself is never returned, since it never parses as strictly below
+// its own version. It returns "" when current does not parse, or nothing in
+// tags qualifies.
+func Previous(tags []string, current string) string {
+	target, ok := Parse(current)
+	if !ok {
+		return ""
+	}
+
+	best, bestTag := Version{}, ""
+	for _, tag := range tags {
+		v, ok := Parse(tag)
+		if !ok || Compare(v, target) >= 0 {
+			continue
+		}
+		if !target.IsPrerelease() && v.IsPrerelease() {
+			continue
+		}
+		if bestTag == "" || Compare(v, best) > 0 {
+			best, bestTag = v, tag
+		}
+	}
+	return bestTag
+}
+
 // Latest returns the highest version among tags, ignoring any that do not
 // parse and any listed in exclude. It returns "" when there is none.
 func Latest(tags []string, exclude ...string) string {

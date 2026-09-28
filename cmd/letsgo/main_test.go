@@ -217,6 +217,55 @@ func TestRunTagCreatesAScopedTag(t *testing.T) {
 	}
 }
 
+// A proposal must skip an intervening prerelease and bump from the last
+// stable: runTag has no flag for proposing a prerelease itself, so "previous"
+// for its purposes is always "the highest stable release, full stop," not
+// whatever tag git describe happens to be nearest to.
+func TestRunTagSkipsAnInterveningPrereleaseTag(t *testing.T) {
+	repoDir, moduleDir := scopedModuleFixture(t)
+
+	write := func(name, content string) {
+		path := filepath.Join(repoDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(args ...string) {
+		t.Helper()
+		full := append([]string{"-C", repoDir}, args...)
+		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", full, err, out)
+		}
+	}
+
+	// The fixture already tagged HEAD as the stable services/api/v1.2.3; move
+	// past it with a higher prerelease, then an untagged commit for runTag to
+	// propose from.
+	write("services/api/a.txt", "a\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "second")
+	run("tag", "services/api/v1.3.0-rc.1")
+	write("services/api/b.txt", "b\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "third")
+
+	t.Chdir(moduleDir)
+	if err := runTag([]string{"--yes", "--patch"}); err != nil {
+		t.Fatalf("runTag: %v", err)
+	}
+
+	out, err := exec.Command("git", "-C", repoDir, "tag", "--points-at", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git tag --points-at HEAD: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "services/api/v1.2.4") {
+		t.Errorf("tags at HEAD = %q, want services/api/v1.2.4 (a patch of the last stable, not the rc)", out)
+	}
+}
+
 // A worktree always checks out the whole repository, so a nested module has
 // to be compared at <worktree>/relDir, never at the worktree's own root: the
 // same bug `plan.checkoutTag` had, in the command that proposes a tag rather

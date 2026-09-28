@@ -290,6 +290,92 @@ func TestScopeLatestTag(t *testing.T) {
 	}
 }
 
+func TestScopePreviousTag(t *testing.T) {
+	cases := []struct {
+		name    string
+		prefix  string
+		tags    []string
+		tag     string
+		wantTag string
+		wantOK  bool
+	}{
+		{
+			"a stable release's previous is the highest stable below it, skipping an rc", "services/api/",
+			[]string{"services/api/v1.0.0", "services/api/v1.1.0-rc.1", "services/web/v1.0.5", "services/api/v1.1.0"},
+			"services/api/v1.1.0",
+			"services/api/v1.0.0", true,
+		},
+		{
+			"a prerelease's previous is the highest release of any kind below it", "",
+			[]string{"v1.0.0", "v1.1.0-rc.1"},
+			"v1.1.0-rc.2",
+			"v1.1.0-rc.1", true,
+		},
+		{
+			"a first release has no previous", "",
+			[]string{},
+			"v1.0.0",
+			"", false,
+		},
+		{
+			"a tag outside the scope has no previous", "services/api/",
+			[]string{"services/api/v1.0.0"},
+			"v2.0.0",
+			"", false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			scope := Scope{Prefix: c.prefix}
+			tag, ok := scope.PreviousTag(c.tags, c.tag)
+			if ok != c.wantOK || tag != c.wantTag {
+				t.Errorf("PreviousTag(%v, %q) = %q, %v, want %q, %v", c.tags, c.tag, tag, ok, c.wantTag, c.wantOK)
+			}
+		})
+	}
+}
+
+func TestScopeLatestStableTag(t *testing.T) {
+	cases := []struct {
+		name    string
+		prefix  string
+		tags    []string
+		exclude []string
+		wantTag string
+		wantOK  bool
+	}{
+		{
+			"picks the highest stable, skipping a newer rc", "services/api/",
+			[]string{"services/api/v1.0.0", "services/api/v1.1.0-rc.1", "services/web/v9.0.0"},
+			nil,
+			"services/api/v1.0.0", true,
+		},
+		{
+			"excludes tags pointing at HEAD", "",
+			[]string{"v1.0.0", "v1.1.0"},
+			[]string{"v1.1.0"},
+			"v1.0.0", true,
+		},
+		{
+			"no stable release has no answer", "",
+			[]string{"v1.0.0-rc.1"},
+			nil,
+			"", false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			scope := Scope{Prefix: c.prefix}
+			tag, ok := scope.LatestStableTag(c.tags, c.exclude...)
+			if ok != c.wantOK || tag != c.wantTag {
+				t.Errorf("LatestStableTag(%v, %v) = %q, %v, want %q, %v", c.tags, c.exclude, tag, ok, c.wantTag, c.wantOK)
+			}
+		})
+	}
+}
+
 // The major-version gate. Getting this wrong publishes a release that `go get`
 // silently refuses to resolve, with no warning from any Go tool.
 func TestModuleCheckTag(t *testing.T) {
@@ -614,7 +700,12 @@ func TestFindGitPopulatesATopLevelThatAgreesWithItself(t *testing.T) {
 // without a restriction to plain version tags a root release could pick a
 // nested module's tag as its previous release and build its changelog, API
 // gate and version bump against the wrong history entirely.
-func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
+// repoWithNestedModuleTag builds a repo through a root v1.0.0 release plus a
+// nested "web" module carrying its own web/v1.0.0 tag, the shared starting
+// point every test proving a nested module's tags stay out of the root's own
+// answer builds on.
+func repoWithNestedModuleTag(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	run := func(args ...string) { gitRun(t, dir, args...) }
 
@@ -629,6 +720,13 @@ func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
 	run("commit", "-q", "-m", "second")
 	run("tag", "web/v1.0.0")
 
+	return dir
+}
+
+func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
+	dir := repoWithNestedModuleTag(t)
+	run := func(args ...string) { gitRun(t, dir, args...) }
+
 	write(t, dir, "README.md", "changed\n")
 	run("add", ".")
 	run("commit", "-q", "-m", "third")
@@ -636,6 +734,47 @@ func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
 	ctx := context.Background()
 	if prev, err := PreviousTag(ctx, dir, ""); err != nil || prev != "v1.0.0" {
 		t.Errorf("PreviousTag = %q, %v; want v1.0.0, not the nested module's tag", prev, err)
+	}
+}
+
+// Unlike PreviousTag, Tags returns every matching tag reachable from HEAD,
+// not just the nearest one, so a version-order rule can be applied on top.
+func TestTagsReturnsEveryMatchingTagInScope(t *testing.T) {
+	dir := repoWithNestedModuleTag(t)
+	run := func(args ...string) { gitRun(t, dir, args...) }
+	run("tag", "v1.1.0-rc.1")
+
+	write(t, dir, "README.md", "changed\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "third")
+	run("tag", "v1.1.0")
+
+	ctx := context.Background()
+	got, err := Tags(ctx, dir, "")
+	if err != nil {
+		t.Fatalf("Tags: %v", err)
+	}
+	want := map[string]bool{"v1.0.0": true, "v1.1.0-rc.1": true, "v1.1.0": true}
+	if len(got) != len(want) {
+		t.Fatalf("Tags = %v, want %v", got, want)
+	}
+	for _, tag := range got {
+		if !want[tag] {
+			t.Errorf("Tags returned unexpected tag %q (web's tag should have been excluded)", tag)
+		}
+	}
+}
+
+func TestTagsIsEmptyNotAnErrorForAFirstRelease(t *testing.T) {
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-q", "-b", "main")
+	write(t, dir, "README.md", "hi\n")
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-q", "-m", "first")
+
+	got, err := Tags(context.Background(), dir, "")
+	if err != nil || got != nil {
+		t.Errorf("Tags = %v, %v; want nil, nil", got, err)
 	}
 }
 

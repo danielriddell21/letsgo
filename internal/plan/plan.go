@@ -841,8 +841,13 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 		return
 	}
 
-	previous, err := discover.PreviousTag(ctx, p.RootDir, p.Scope.Prefix)
-	if err != nil || previous == "" {
+	tags, err := discover.Tags(ctx, p.RootDir, p.Scope.Prefix)
+	if err != nil {
+		p.skip(apiCompatibility, apiGate, "no earlier release to compare against")
+		return
+	}
+	previous, ok := p.Scope.PreviousTag(tags, p.Tag)
+	if !ok {
 		p.skip(apiCompatibility, apiGate, "no earlier release to compare against")
 		return
 	}

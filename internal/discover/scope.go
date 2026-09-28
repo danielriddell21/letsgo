@@ -75,19 +75,59 @@ func (s Scope) MatchesTag(tag string) (rest string, ok bool) {
 // are: an unscoped repository with no releases yet, or a monorepo module
 // whose own prefix matches nothing.
 func (s Scope) LatestTag(tags []string) (tag string, ok bool) {
-	fullTag := make(map[string]string, len(tags))
-	versions := make([]string, 0, len(tags))
+	versions, fullTag := s.scopedVersions(tags, nil)
+	tag, ok = fullTag[semver.Latest(versions)]
+	return tag, ok
+}
+
+// PreviousTag returns the release, among tags in this scope, that tag
+// follows, using semver.Previous's release-kind rule. ok is false when tag
+// itself is not in scope, or nothing in tags qualifies.
+func (s Scope) PreviousTag(tags []string, tag string) (previous string, ok bool) {
+	current, matched := s.MatchesTag(tag)
+	if !matched {
+		return "", false
+	}
+
+	versions, fullTag := s.scopedVersions(tags, nil)
+	previous, ok = fullTag[semver.Previous(versions, current)]
+	return previous, ok
+}
+
+// LatestStableTag picks the highest non-prerelease version among tags that
+// are in this scope and not listed in exclude, and returns its full tag name
+// (Prefix included). ok is false when none qualify.
+func (s Scope) LatestStableTag(tags []string, exclude ...string) (tag string, ok bool) {
+	versions, fullTag := s.scopedVersions(tags, func(rest string) bool {
+		v, ok := semver.Parse(rest)
+		return ok && !v.IsPrerelease()
+	})
+
+	skipRest := make([]string, 0, len(exclude))
+	for _, e := range exclude {
+		if rest, matched := s.MatchesTag(e); matched {
+			skipRest = append(skipRest, rest)
+		}
+	}
+
+	tag, ok = fullTag[semver.Latest(versions, skipRest...)]
+	return tag, ok
+}
+
+// scopedVersions strips Prefix from every tag in scope, keeping those where
+// keep is nil or reports true for the stripped version, and returns the
+// stripped versions alongside a map back to each one's full tag name.
+func (s Scope) scopedVersions(tags []string, keep func(rest string) bool) (versions []string, fullTag map[string]string) {
+	fullTag = make(map[string]string, len(tags))
 	for _, t := range tags {
 		rest, matched := s.MatchesTag(t)
-		if !matched {
+		if !matched || (keep != nil && !keep(rest)) {
 			continue
 		}
 		versions = append(versions, rest)
 		fullTag[rest] = t
 	}
-
-	tag, ok = fullTag[semver.Latest(versions)]
-	return tag, ok
+	return versions, fullTag
 }
 
 // resolveSymlinks returns dir with its symlinks resolved, or dir itself if

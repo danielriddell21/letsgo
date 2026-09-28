@@ -672,10 +672,11 @@ func runTag(args []string) error {
 		return err
 	}
 
-	previous, err := discover.PreviousTag(ctx, module.Dir, scope.Prefix)
+	tags, err := discover.Tags(ctx, module.Dir, scope.Prefix)
 	if err != nil {
 		return err
 	}
+	previous, _ := scope.LatestStableTag(tags, git.Tags...)
 
 	proposal, err := proposeVersion(ctx, module, scope, previous, forced(*major, *minor, *patch))
 	if err != nil {
