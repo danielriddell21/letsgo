@@ -112,6 +112,11 @@ type ReleaseInput struct {
 	Draft      bool   `json:"draft"`
 	Prerelease bool   `json:"prerelease"`
 
+	// MakeLatest is "true", "false" or "legacy" (GitHub's pre-field default:
+	// pick by created_at rather than semver). Empty omits the field, which
+	// on update leaves an existing release's current value alone.
+	MakeLatest string `json:"make_latest,omitempty"`
+
 	// TargetCommitish pins the release to a commit when the tag does not yet
 	// exist on the remote.
 	TargetCommitish string `json:"target_commitish,omitempty"`

@@ -90,6 +90,27 @@ func TestRecorderStillReadsEveryFile(t *testing.T) {
 	}
 }
 
+// The recorded line must call out flags that aren't the default, or a
+// rehearsal reads the same whether latest was forced or left to GitHub.
+func TestRecorderReportsNonDefaultFlags(t *testing.T) {
+	var out bytes.Buffer
+	recorder := publish.NewRecorder(&out)
+
+	_, err := recorder.CreateRelease(context.Background(), github.Repo{Owner: "o", Name: "r"}, github.ReleaseInput{
+		TagName: "v1.0.0", Draft: true, Prerelease: true, MakeLatest: "false",
+	})
+	if err != nil {
+		t.Fatalf("CreateRelease: %v", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{"draft", "prerelease", "latest=false"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("record does not mention %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRecorderReportsSizesReadably(t *testing.T) {
 	f := setup(t, true)
 	var out bytes.Buffer

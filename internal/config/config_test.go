@@ -25,7 +25,7 @@ archive (
 
 budget linux/amd64 15MB
 
-release prerelease=auto draft=false
+release prerelease=auto draft=false latest=auto
 
 brew danielriddell21/homebrew-tap
 `
@@ -67,8 +67,8 @@ func TestDecodeSample(t *testing.T) {
 	if cfg.Budgets["linux/amd64"] != "15MB" {
 		t.Errorf("Budgets = %v", cfg.Budgets)
 	}
-	if cfg.Prerelease != "auto" || cfg.Draft {
-		t.Errorf("Prerelease = %q, Draft = %v", cfg.Prerelease, cfg.Draft)
+	if cfg.Prerelease != "auto" || cfg.Draft || cfg.Latest != "auto" {
+		t.Errorf("Prerelease = %q, Draft = %v, Latest = %q", cfg.Prerelease, cfg.Draft, cfg.Latest)
 	}
 	if cfg.BrewTap != "danielriddell21/homebrew-tap" {
 		t.Errorf("BrewTap = %q", cfg.BrewTap)
@@ -199,6 +199,7 @@ func TestRejectsBadValues(t *testing.T) {
 		"release option":   "release nosuchoption=true\n",
 		"prerelease value": "release prerelease=maybe\n",
 		"draft value":      "release draft=yes\n",
+		"latest value":     "release latest=maybe\n",
 	}
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {

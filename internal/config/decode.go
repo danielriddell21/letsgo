@@ -82,6 +82,12 @@ type Config struct {
 	// Draft creates the release without publishing it.
 	Draft bool
 
+	// Latest is "auto", "true" or "false". GitHub has one "latest" release
+	// per repository; auto claims it for a root module and defers for a
+	// scoped one (see discover.Scope), rather than fight whichever module
+	// released last for the badge.
+	Latest string
+
 	// Disabled are the features this repository turned off, by name from the
 	// feature catalogue (internal/feature).
 	Disabled []string
@@ -719,9 +725,18 @@ func applyRelease(cfg *Config, file string, line *Line) error {
 				return errAt(file, line.P, "release draft must be true or false, not %q", value)
 			}
 
+		case "latest":
+			switch value {
+			case "auto", "true", "false":
+				cfg.Latest = value
+			default:
+				return errAt(file, line.P,
+					"release latest must be auto, true or false, not %q", value)
+			}
+
 		default:
 			return errAt(file, line.P,
-				"unknown release option %q; valid options are draft, prerelease", key)
+				"unknown release option %q; valid options are draft, latest, prerelease", key)
 		}
 	}
 	return nil
