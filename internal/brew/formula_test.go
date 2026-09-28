@@ -30,6 +30,7 @@ func TestClassNameFollowsHomebrewConvention(t *testing.T) {
 		"my_tool":    "MyTool",
 		"foo.bar":    "FooBar",
 		"go-version": "GoVersion",
+		"foo@next":   "FooATNext",
 	} {
 		if got := (brew.Formula{Name: binary}).ClassName(); got != want {
 			t.Errorf("ClassName(%q) = %q, want %q", binary, got, want)

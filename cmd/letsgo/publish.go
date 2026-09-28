@@ -48,7 +48,8 @@ func releaseClientFor(client *github.Client, releaseToken, token string) *github
 }
 
 // publishTap writes a formula to the configured Homebrew tap, one per command
-// the module builds.
+// the module builds, plus that formula's @next: a stable release writes both,
+// a prerelease writes @next only.
 //
 // A module with several commands gets several formulas rather than a refusal:
 // a formula installs one archive per platform, so `alpha` and `beta` cannot
@@ -72,26 +73,41 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 		return nil
 	}
 
-	// A prerelease's formula would overwrite the stable tap entry that
-	// `brew install foo` still relies on. Until foo@next exists (a later
-	// phase), a prerelease publishes nothing to the tap rather than clobber
-	// it.
-	if isPrerelease(p) {
-		fmt.Println("  ! skipped the Homebrew tap: a prerelease must not overwrite the stable formula")
-		return nil
-	}
-
 	if names := variantNames(p); len(names) > 0 {
 		fmt.Printf("  ! no formula for variant %s: a variant's package is the repository's to choose\n",
 			strings.Join(names, ", "))
 	}
 
+	// A prerelease's formula would overwrite the stable tap entry that
+	// `brew install foo` relies on, so it writes @next only — pointing at
+	// whichever of the newest prerelease and the newest stable is newer.
+	// TapFiles are release output the same way the formula is, so they follow
+	// the same rule: skipped for a prerelease, written for a stable release.
+	prerelease := isPrerelease(p)
+	if prerelease {
+		fmt.Println("  ! a prerelease must not overwrite the stable formula: writing @next only")
+	}
+
 	for _, formula := range formulas(p, result, repo, info) {
-		published, err := brew.Publish(ctx, api, p.Tap, formula)
+		if !prerelease {
+			published, err := brew.Publish(ctx, api, p.Tap, formula)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("  %s %s in %s\n", published.Status, published.Path, p.Tap)
+		}
+
+		next := formula
+		next.Name = brew.NextName(formula.Name)
+		published, err := brew.PublishNext(ctx, api, p.Tap, next)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("  %s %s in %s\n", published.Status, published.Path, p.Tap)
+	}
+
+	if prerelease {
+		return nil
 	}
 
 	// Written in the same tap update as the formula: whatever a tap-files

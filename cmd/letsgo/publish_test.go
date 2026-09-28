@@ -54,8 +54,7 @@ func artifact(archive, goos, goarch, sum string, binaries ...string) build.Artif
 }
 
 // A prerelease's formula would overwrite the stable formula that `brew
-// install foo` relies on, so publishTap must skip the tap entirely rather
-// than write it.
+// install foo` relies on, so publishTap must write @next only.
 func TestPublishTapSkipsAPrerelease(t *testing.T) {
 	p := releasePlan()
 	p.Version, p.Tag = "1.3.0-rc.1", "v1.3.0-rc.1"
@@ -67,13 +66,13 @@ func TestPublishTapSkipsAPrerelease(t *testing.T) {
 	if err := publishTap(context.Background(), p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(tap.writes) != 0 {
-		t.Errorf("a prerelease wrote %v to the tap, want nothing", tap.writes)
+	if len(tap.writes) != 1 || tap.writes[0] != "Formula/foo@next.rb" {
+		t.Errorf("writes = %v, want [Formula/foo@next.rb]", tap.writes)
 	}
 }
 
-// A stable release must still write its formula normally: the prerelease
-// guard must not over-suppress the tap.
+// A stable release must still write its formula normally, plus @next: the
+// prerelease guard must not over-suppress the tap.
 func TestPublishTapWritesAFormulaForAStableRelease(t *testing.T) {
 	p := releasePlan()
 	p.Tap = github.Repo{Owner: "you", Name: "homebrew-tap"}
@@ -84,8 +83,8 @@ func TestPublishTapWritesAFormulaForAStableRelease(t *testing.T) {
 	if err := publishTap(context.Background(), p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if len(tap.writes) != 1 || tap.writes[0] != "Formula/foo.rb" {
-		t.Errorf("writes = %v, want [Formula/foo.rb]", tap.writes)
+	if len(tap.writes) != 2 || tap.writes[0] != "Formula/foo.rb" || tap.writes[1] != "Formula/foo@next.rb" {
+		t.Errorf("writes = %v, want [Formula/foo.rb Formula/foo@next.rb]", tap.writes)
 	}
 }
 
