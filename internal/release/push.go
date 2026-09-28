@@ -2,10 +2,14 @@ package release
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 
 	"github.com/danielriddell21/letsgo/internal/oci"
+	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
 // registryEnv names the variables consulted for registry credentials on a
@@ -29,10 +33,15 @@ func PushImages(ctx context.Context, builds []ImageBuild, token string, logf fun
 	for _, built := range builds {
 		registry := registryFor(built.APIHost, token)
 
+		tags, err := resolveFloatingTags(ctx, registry, built, logf)
+		if err != nil {
+			return err
+		}
+
 		result, err := oci.Push(ctx, oci.PushOptions{
 			Registry:   registry,
 			Repository: built.Repository,
-			Tags:       built.Tags,
+			Tags:       tags,
 			Images:     built.Images,
 			Index:      built.Index,
 			Base:       baseSource(built, registry),
@@ -46,6 +55,70 @@ func PushImages(ctx context.Context, builds []ImageBuild, token string, logf fun
 			result.Uploaded, result.Skipped)
 	}
 	return nil
+}
+
+// resolveFloatingTags starts from the tags a build always pushes, and adds
+// each floating tag that's newer than what it currently points at, or that
+// has never been pushed. Floating tags only move forward: a backport moves
+// its major.minor, but never a major or latest that's already ahead of it.
+func resolveFloatingTags(ctx context.Context, registry *oci.Registry, built ImageBuild, logf func(string, ...any)) ([]string, error) {
+	tags := append([]string{}, built.Tags...)
+	if len(built.Floating) == 0 {
+		return tags, nil
+	}
+
+	releasing, ok := semver.Parse(built.Version)
+	if !ok {
+		return nil, fmt.Errorf("release: %q is not a version floating tags can be compared against", built.Version)
+	}
+
+	for _, tag := range built.Floating {
+		newer, err := newerThanCurrent(ctx, registry, built.Repository, tag, releasing, logf)
+		if err != nil {
+			return nil, err
+		}
+		if newer {
+			tags = append(tags, tag)
+		} else {
+			logf("kept %s at its current target: %s is not newer", tag, built.Version)
+		}
+	}
+	return tags, nil
+}
+
+// newerThanCurrent reports whether releasing is newer than whatever tag
+// currently points at. A tag that has never been pushed always counts as
+// newer, since there is nothing yet for releasing to be older than.
+func newerThanCurrent(
+	ctx context.Context, registry *oci.Registry, repo, tag string, releasing semver.Version, logf func(string, ...any),
+) (bool, error) {
+	fetched, err := registry.Manifest(ctx, repo, tag)
+	if err != nil {
+		var apiErr *oci.Error
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+			return true, nil
+		}
+		return false, err
+	}
+
+	current, ok := currentVersion(fetched.Content)
+	if !ok {
+		logf("%s/%s:%s has no readable version annotation, leaving it alone", registry.Host, repo, tag)
+		return false, nil
+	}
+	return semver.Compare(releasing, current) > 0, nil
+}
+
+// currentVersion reads the version a manifest or index was built for, from
+// the same annotation oci.Annotations sets on every one letsgo pushes.
+func currentVersion(content []byte) (semver.Version, bool) {
+	var doc struct {
+		Annotations map[string]string `json:"annotations"`
+	}
+	if err := json.Unmarshal(content, &doc); err != nil {
+		return semver.Version{}, false
+	}
+	return semver.Parse(doc.Annotations["org.opencontainers.image.version"])
 }
 
 // registryFor builds an authenticated client for a host.

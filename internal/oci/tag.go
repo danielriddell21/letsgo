@@ -3,6 +3,8 @@ package oci
 import (
 	"fmt"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
 // maxTag is the length limit the distribution specification puts on a tag.
@@ -20,6 +22,19 @@ func Tag(version string) (string, error) {
 		return "", fmt.Errorf("oci: %q cannot be an image tag: %w", version, err)
 	}
 	return tag, nil
+}
+
+// Channel is the image tag a prerelease's floating channel moves under: the
+// first dot-separated identifier of its prerelease segment
+// (1.3.0-rc.1 -> "rc"). ok is false for a version with no prerelease
+// segment, or one that doesn't parse.
+func Channel(version string) (name string, ok bool) {
+	v, parsed := semver.Parse(version)
+	if !parsed || !v.IsPrerelease() {
+		return "", false
+	}
+	name, _, _ = strings.Cut(v.Prerelease, ".")
+	return name, true
 }
 
 func validTag(tag string) error {

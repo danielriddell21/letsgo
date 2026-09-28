@@ -69,3 +69,28 @@ func TestImageRecordsLeaveTheBaseEmptyWhenThereIsNone(t *testing.T) {
 		t.Errorf("Base = %q, want empty", records[0].Base)
 	}
 }
+
+// The manifest records the full target set: what always gets pushed and
+// what only moves if it's newer, since the "is it newer" answer depends on
+// the registry and can't be known at build time.
+func TestImageRecordsIncludeFloatingTags(t *testing.T) {
+	records := imageRecords([]ImageBuild{{
+		Registry: "ghcr.io", Repository: "you/tool",
+		Tags:     []string{"1.2.3"},
+		Floating: []string{"1.2", "1", "latest"},
+	}})
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+
+	want := []string{"1.2.3", "1.2", "1", "latest"}
+	got := records[0].Tags
+	if len(got) != len(want) {
+		t.Fatalf("Tags = %v, want %v", got, want)
+	}
+	for i, tag := range want {
+		if got[i] != tag {
+			t.Errorf("Tags[%d] = %q, want %q", i, got[i], tag)
+		}
+	}
+}
