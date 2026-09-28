@@ -3,6 +3,7 @@ package selfupdate_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -508,5 +509,185 @@ func TestCheckScopedToAPrefixSurfacesATagsError(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "has no releases") {
 		t.Errorf("err = %v, want the underlying tags error, not \"has no releases\"", err)
+	}
+}
+
+// releaseFixture is one release a channelForge serves.
+type releaseFixture struct {
+	tag   string
+	body  string
+	draft bool
+}
+
+// channelForge serves GET /repos/{repo}/releases as the list of releases, each
+// carrying a manifest for its own linux/amd64 build, so a test can drive
+// selfupdate.Options.Channel without a real forge.
+func channelForge(t *testing.T, repo string, releases []releaseFixture) string {
+	t.Helper()
+
+	manifests := map[string][]byte{}
+	for _, r := range releases {
+		version := strings.TrimPrefix(r.tag, "v")
+		m := &manifest.Manifest{
+			Schema: manifest.Schema, Project: "tool", Version: version, Tag: r.tag,
+			Artifacts: []manifest.Artifact{{
+				Name: fmt.Sprintf("tool_%s_linux_amd64.tar.gz", version), OS: "linux", Arch: "amd64", Binary: "tool",
+				SHA256: "a", BinarySHA256: "b",
+			}},
+		}
+		data, err := m.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifests[r.tag] = data
+	}
+
+	var server *httptest.Server
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/repos/"+repo+"/releases", func(w http.ResponseWriter, _ *http.Request) {
+		list := make([]map[string]any, 0, len(releases))
+		for _, r := range releases {
+			version := strings.TrimPrefix(r.tag, "v")
+			list = append(list, map[string]any{
+				"tag_name": r.tag,
+				"body":     r.body,
+				"draft":    r.draft,
+				"html_url": "https://example.test/" + r.tag,
+				"assets": []map[string]string{
+					{"name": manifest.FileName, "browser_download_url": server.URL + "/download/" + r.tag},
+					{
+						"name":                 fmt.Sprintf("tool_%s_linux_amd64.tar.gz", version),
+						"browser_download_url": server.URL + "/download/" + r.tag + "-archive",
+					},
+				},
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(list)
+	})
+
+	mux.HandleFunc("/download/", func(w http.ResponseWriter, r *http.Request) {
+		tag := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/download/"), "-archive")
+		data, ok := manifests[tag]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write(data)
+	})
+
+	server = httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// A channel always includes stable: with no release on it yet, it follows the
+// newest stable release.
+func TestCheckWithChannelFallsBackToStableWhenNoChannelReleaseExists(t *testing.T) {
+	url := channelForge(t, "you/tool", []releaseFixture{
+		{tag: "v1.0.0"},
+		{tag: "v1.1.0-beta.1"},
+	})
+
+	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
+		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
+		Channel: "rc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if update == nil || update.Tag != "v1.0.0" {
+		t.Fatalf("update = %+v, want the stable release v1.0.0", update)
+	}
+}
+
+// PR-17: the highest of stable plus the channel wins, whichever that is.
+func TestCheckWithChannelPicksTheHigherOfStableAndTheChannel(t *testing.T) {
+	url := channelForge(t, "you/tool", []releaseFixture{
+		{tag: "v1.0.0"},
+		{tag: "v1.1.0-beta.1"},
+	})
+
+	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
+		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
+		Channel: "beta",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if update == nil || update.Tag != "v1.1.0-beta.1" {
+		t.Fatalf("update = %+v, want the beta release v1.1.0-beta.1", update)
+	}
+}
+
+// "next" follows any prerelease, not only ones under its own channel name.
+func TestCheckWithChannelNextFollowsAnyPrerelease(t *testing.T) {
+	url := channelForge(t, "you/tool", []releaseFixture{
+		{tag: "v1.0.0"},
+		{tag: "v1.1.0-beta.1"},
+		{tag: "v1.1.0-rc.1"},
+	})
+
+	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
+		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
+		Channel: "next",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if update == nil || update.Tag != "v1.1.0-rc.1" {
+		t.Fatalf("update = %+v, want v1.1.0-rc.1, the higher of the two prereleases", update)
+	}
+}
+
+func TestCheckWithChannelExcludesADraftRelease(t *testing.T) {
+	url := channelForge(t, "you/tool", []releaseFixture{
+		{tag: "v1.1.0-beta.2", draft: true},
+		{tag: "v1.1.0-beta.1"},
+	})
+
+	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
+		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
+		Channel: "beta",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if update == nil || update.Tag != "v1.1.0-beta.1" {
+		t.Fatalf("update = %+v, want the published beta.1, not the draft beta.2", update)
+	}
+}
+
+// A yanked stable release must not be what a channel falls back to.
+func TestCheckWithChannelExcludesAYankedRelease(t *testing.T) {
+	url := channelForge(t, "you/tool", []releaseFixture{
+		{tag: "v1.1.0", body: "> [!CAUTION]\n> **This release is retracted.** bad.\n"},
+		{tag: "v1.0.0"},
+	})
+
+	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
+		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
+		Channel: "rc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if update == nil || update.Tag != "v1.0.0" {
+		t.Fatalf("update = %+v, want the last un-yanked stable v1.0.0", update)
+	}
+}
+
+func TestCheckWithChannelReportsNoQualifyingRelease(t *testing.T) {
+	url := channelForge(t, "you/tool", []releaseFixture{
+		{tag: "v1.0.0", draft: true},
+	})
+
+	_, err := selfupdate.Check(context.Background(), selfupdate.Options{
+		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
+		Channel: "beta",
+	})
+	if err == nil || !strings.Contains(err.Error(), "no releases on the beta channel") {
+		t.Fatalf("err = %v", err)
 	}
 }

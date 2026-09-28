@@ -85,6 +85,14 @@ type Options struct {
 	// most recent release" from picking another module's release in a
 	// monorepo.
 	Prefix string
+
+	// Channel selects a release channel instead of the newest stable release.
+	// "" means stable, today's behaviour. A prerelease identifier such as
+	// "beta" or "rc" follows that channel; "next" follows any prerelease.
+	// Whichever of the channel's own newest release and the newest stable
+	// release is newer wins, excluding drafts and yanked releases. Only
+	// consulted when Tag is empty.
+	Channel string
 }
 
 // Update is a release newer than the running binary.
@@ -282,6 +290,7 @@ type release struct {
 	TagName string  `json:"tag_name"`
 	Body    string  `json:"body"`
 	HTMLURL string  `json:"html_url"`
+	Draft   bool    `json:"draft"`
 	Assets  []asset `json:"assets"`
 }
 
@@ -299,10 +308,14 @@ func (r *release) asset(name string) (asset, bool) {
 	return asset{}, false
 }
 
-// resolveRelease fetches the release asked for: one exact tag, or the newest.
+// resolveRelease fetches the release asked for: one exact tag, a channel, or
+// the newest stable release.
 func resolveRelease(ctx context.Context, o Options) (*release, error) {
 	if o.Tag != "" {
 		return releaseByTag(ctx, o)
+	}
+	if o.Channel != "" {
+		return channelRelease(ctx, o)
 	}
 	return latestRelease(ctx, o)
 }
@@ -370,6 +383,90 @@ func unscopedLatestRelease(ctx context.Context, o Options) (*release, error) {
 		return nil, fmt.Errorf("selfupdate: %s has no releases", o.Repo)
 	}
 	return &out, nil
+}
+
+// retractionMarker is the prefix yank.Run writes at the top of a retracted
+// release's body (internal/yank's own "notice" constant); it is duplicated
+// here rather than imported so that this package does not pull the whole
+// publishing toolchain into every program that self-updates.
+const retractionMarker = "> [!CAUTION]"
+
+func isRetracted(body string) bool {
+	return strings.HasPrefix(body, retractionMarker)
+}
+
+// channelRelease finds the release a channel should follow: the highest of
+// the newest stable release and the newest release on the channel itself
+// (PR-17), excluding drafts and yanked releases. Unlike latestRelease, this
+// always lists releases rather than tags — a tag carries no draft or
+// retraction state, and both matter here.
+func channelRelease(ctx context.Context, o Options) (*release, error) {
+	releases, err := listReleases(ctx, o)
+	if err != nil {
+		return nil, err
+	}
+
+	scope := discover.Scope{Prefix: o.Prefix}
+	var best *release
+	var bestVersion semver.Version
+
+	for i := range releases {
+		r := &releases[i]
+		if r.Draft || isRetracted(r.Body) {
+			continue
+		}
+		rest, ok := scope.MatchesTag(r.TagName)
+		if !ok {
+			continue
+		}
+		v, ok := semver.Parse(rest)
+		if !ok || !channelMatch(v, o.Channel) {
+			continue
+		}
+		if best == nil || semver.Compare(v, bestVersion) > 0 {
+			best, bestVersion = r, v
+		}
+	}
+
+	if best == nil {
+		return nil, fmt.Errorf("selfupdate: %s has no releases on the %s channel", o.Repo, o.Channel)
+	}
+	return best, nil
+}
+
+// channelMatch reports whether v is a candidate for channel: any stable
+// release is, since a channel always includes stable; a prerelease is only
+// when channel is "next" (any prerelease) or names its own identifier.
+func channelMatch(v semver.Version, channel string) bool {
+	if !v.IsPrerelease() {
+		return true
+	}
+	if channel == "next" {
+		return true
+	}
+	name, _, _ := strings.Cut(v.Prerelease, ".")
+	return name == channel
+}
+
+// listReleases fetches up to 100 releases, each already carrying what
+// channelRelease needs to judge it (tag, body, draft) and, for the one that
+// wins, what Check needs to offer it (assets) — so the winner needs no
+// second round trip.
+func listReleases(ctx context.Context, o Options) ([]release, error) {
+	resp, err := o.get(ctx, fmt.Sprintf("%s/repos/%s/releases?per_page=100", o.api(), o.Repo))
+	if err != nil {
+		return nil, err
+	}
+	data, err := read(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []release
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("selfupdate: parsing releases: %w", err)
+	}
+	return out, nil
 }
 
 type tagInfo struct {
