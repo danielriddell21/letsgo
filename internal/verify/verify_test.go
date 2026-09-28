@@ -104,13 +104,21 @@ func gitInit(t *testing.T, dir string, tags ...string) {
 
 func buildRelease(t *testing.T) *published {
 	t.Helper()
+	return buildReleaseWithConfig(t, "build "+gobuild.Host().String()+"\n")
+}
+
+// buildReleaseWithConfig is buildRelease with letsgo.mod's contents as a
+// parameter, so a test can exercise a directive (like `disable`) without
+// duplicating the fixture around it.
+func buildReleaseWithConfig(t *testing.T, letsgoMod string) *published {
+	t.Helper()
 	dir := t.TempDir()
 
 	writeFiles(t, dir, map[string]string{
 		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
 		"main.go":    mainGo,
 		"README.md":  "# demo\n",
-		"letsgo.mod": "build " + gobuild.Host().String() + "\n",
+		"letsgo.mod": letsgoMod,
 	})
 	gitInit(t, dir, "v1.2.3")
 
@@ -599,6 +607,31 @@ func TestMonorepoRootAndNestedModuleReleaseAndVerifyIndependently(t *testing.T) 
 	}
 	if noTagRoot.Tag != "v1.0.0" {
 		t.Errorf("root Tag = %q, want the root's own release", noTagRoot.Tag)
+	}
+}
+
+// A release built with a feature disabled must report it, in the same
+// vocabulary plan itself used to decide it.
+func TestVerifyReportsDisabledFeatures(t *testing.T) {
+	p := buildReleaseWithConfig(t, "build "+gobuild.Host().String()+"\ndisable sbom\n")
+	result := run(t, p, verify.Options{Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true})
+
+	c := find(t, result, "features")
+	if c.Status != verify.Pass || !strings.Contains(c.Detail, "disabled: sbom") {
+		t.Errorf("features = %+v, want a pass naming sbom disabled", c)
+	}
+}
+
+// A release with every feature at its default carries no Features record,
+// and verify must not invent a line to report.
+func TestVerifyOmitsFeaturesWhenNoneAreSet(t *testing.T) {
+	p := buildRelease(t)
+	result := run(t, p, verify.Options{Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true})
+
+	for _, c := range result.Checks {
+		if c.Name == "features" {
+			t.Errorf("features = %+v, want no features check when none are set", c)
+		}
 	}
 }
 

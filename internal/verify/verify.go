@@ -153,6 +153,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	result.Manifest = m
 	result.add("manifest", Pass, "letsgo.json describes %d artifacts, built by %s with %s",
 		len(m.Artifacts), m.Builder.Tool, m.Builder.Go)
+	reportFeatures(result, m)
 
 	comparePublished(result, release, m)
 	checkProvenance(ctx, o, result, m)
@@ -265,6 +266,24 @@ func comparePublished(result *Result, release *github.Release, m *manifest.Manif
 	default:
 		result.add("published assets", Pass, "%d attached files match the manifest", checked)
 	}
+}
+
+// reportFeatures surfaces the toggles the release was built with, the same
+// way the plan that produced it did: informational, not a gate, and silent
+// when nothing was disabled or required.
+func reportFeatures(result *Result, m *manifest.Manifest) {
+	if m.Features == nil {
+		return
+	}
+
+	var parts []string
+	if len(m.Features.Disabled) > 0 {
+		parts = append(parts, "disabled: "+strings.Join(m.Features.Disabled, ", "))
+	}
+	if len(m.Features.Required) > 0 {
+		parts = append(parts, "required: "+strings.Join(m.Features.Required, ", "))
+	}
+	result.add("features", Pass, "%s", strings.Join(parts, "; "))
 }
 
 func short(digest string) string {
