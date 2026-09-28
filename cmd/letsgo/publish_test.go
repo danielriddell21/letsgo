@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -12,6 +13,21 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 )
+
+// fakeTap is a tap that remembers which paths were written to it, without
+// caring what was sent.
+type fakeTap struct {
+	writes []string
+}
+
+func (f *fakeTap) ReadFile(_ context.Context, _ github.Repo, _ string) (*github.File, error) {
+	return nil, nil
+}
+
+func (f *fakeTap) WriteFile(_ context.Context, _ github.Repo, in github.FileInput) error {
+	f.writes = append(f.writes, in.Path)
+	return nil
+}
 
 func releasePlan() *plan.Plan {
 	return &plan.Plan{
@@ -34,6 +50,42 @@ func artifact(archive, goos, goarch, sum string, binaries ...string) build.Artif
 	}
 	return build.Artifact{
 		Archive: archive, OS: goos, Arch: goarch, ArchiveSHA256: sum, Binaries: built,
+	}
+}
+
+// A prerelease's formula would overwrite the stable formula that `brew
+// install foo` relies on, so publishTap must skip the tap entirely rather
+// than write it.
+func TestPublishTapSkipsAPrerelease(t *testing.T) {
+	p := releasePlan()
+	p.Version, p.Tag = "1.3.0-rc.1", "v1.3.0-rc.1"
+	p.Tap = github.Repo{Owner: "you", Name: "homebrew-tap"}
+
+	result := built(artifact("foo_1.3.0-rc.1_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"))
+	tap := &fakeTap{}
+
+	if err := publishTap(context.Background(), p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(tap.writes) != 0 {
+		t.Errorf("a prerelease wrote %v to the tap, want nothing", tap.writes)
+	}
+}
+
+// A stable release must still write its formula normally: the prerelease
+// guard must not over-suppress the tap.
+func TestPublishTapWritesAFormulaForAStableRelease(t *testing.T) {
+	p := releasePlan()
+	p.Tap = github.Repo{Owner: "you", Name: "homebrew-tap"}
+
+	result := built(artifact("foo_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"))
+	tap := &fakeTap{}
+
+	if err := publishTap(context.Background(), p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(tap.writes) != 1 || tap.writes[0] != "Formula/foo.rb" {
+		t.Errorf("writes = %v, want [Formula/foo.rb]", tap.writes)
 	}
 }
 
