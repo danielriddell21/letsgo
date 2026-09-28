@@ -301,3 +301,32 @@ func TagExists(ctx context.Context, dir, tag string) bool {
 	_, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", "refs/tags/"+tag)
 	return err == nil
 }
+
+// CreateTagAt writes an annotated tag at commit, which need not be HEAD.
+//
+// `promote` needs this and CreateTag does not: a stable release is tagged on
+// the RC's own commit, which by the time promote runs is almost always an
+// ancestor of HEAD rather than HEAD itself.
+func CreateTagAt(ctx context.Context, dir, tag, commit, message string) error {
+	if _, err := git(ctx, dir, "tag", "-a", tag, commit, "-m", message); err != nil {
+		return err
+	}
+	return nil
+}
+
+// TagCommit resolves the commit a tag points at.
+func TagCommit(ctx context.Context, dir, tag string) (string, error) {
+	return git(ctx, dir, "rev-list", "-n", "1", tag)
+}
+
+// PushTag pushes a single tag to remote.
+//
+// Best effort by design in every caller so far: the tag this pushes is not
+// the authoritative record of a release, the GitHub release itself is, and
+// creating that release with a target commit makes GitHub create the same
+// tag on its own. Pushing here keeps a local clone in sync with what GitHub
+// will have; it is not what makes the release valid.
+func PushTag(ctx context.Context, dir, remote, tag string) error {
+	_, err := git(ctx, dir, "push", remote, "refs/tags/"+tag)
+	return err
+}

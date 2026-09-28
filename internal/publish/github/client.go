@@ -166,6 +166,31 @@ func (c *Client) ReleaseByTag(ctx context.Context, repo Repo, tag string) (*Rele
 	return &release, nil
 }
 
+// ListReleases lists every release, drafts included.
+//
+// Unlike ReleaseByTag and LatestRelease, which both exclude drafts, this is
+// the one endpoint that returns them — the API's documented behaviour for a
+// token with push access. `promote` needs it to tell a draft RC apart from
+// one that was never released at all, which the other two cannot do.
+func (c *Client) ListReleases(ctx context.Context, repo Repo) ([]Release, error) {
+	var releases []Release
+	page := 1
+
+	for {
+		var batch []Release
+		url := fmt.Sprintf("%s/repos/%s/releases?per_page=100&page=%d", c.api, repo, page)
+		if err := c.do(ctx, http.MethodGet, url, nil, "", &batch); err != nil {
+			return nil, err
+		}
+		releases = append(releases, batch...)
+
+		if len(batch) < 100 {
+			return releases, nil
+		}
+		page++
+	}
+}
+
 // CreateRelease creates a release.
 func (c *Client) CreateRelease(ctx context.Context, repo Repo, in ReleaseInput) (*Release, error) {
 	body, err := json.Marshal(in)

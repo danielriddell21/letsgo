@@ -88,6 +88,17 @@ type Result struct {
 	Next string
 }
 
+// IsRetracted reports whether a release's description already carries the
+// retraction notice, by checking for its marker.
+//
+// Exported so that `promote` can refuse to promote a yanked RC using the
+// same test yank itself uses to avoid stacking a second notice: the two
+// tools must agree on what "retracted" means, and a second copy of this
+// check would be a second chance for them to disagree.
+func IsRetracted(body string) bool {
+	return strings.HasPrefix(body, "> [!CAUTION]")
+}
+
 // notice is prepended to the retracted release's description.
 const notice = "> [!CAUTION]\n" +
 	"> **This release is retracted.** %s\n" +
@@ -141,7 +152,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 // someone who lands on the release page is told.
 func (o Options) markRelease(ctx context.Context, result *Result, release *github.Release, logf func(string, ...any)) error {
 	body := release.Body
-	if !strings.HasPrefix(body, "> [!CAUTION]") {
+	if !IsRetracted(body) {
 		reason := strings.TrimSpace(o.Reason)
 		if reason == "" {
 			reason = "It should not be used."

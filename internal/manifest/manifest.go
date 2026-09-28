@@ -35,6 +35,7 @@ type (
 	Binary        = pub.Binary
 	Build         = pub.Build
 	TapFile       = pub.TapFile
+	PromotedFrom  = pub.PromotedFrom
 )
 
 // Decode parses a manifest, rejecting schema versions it does not understand.
