@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -48,30 +49,46 @@ type Global struct {
 
 	// Proxy overrides the module proxy warmed after a release.
 	Proxy string
+
+	// TokenCommand, when set, is run to obtain a forge token once a flag and
+	// the environment have both come up empty. Its output is never written
+	// anywhere.
+	TokenCommand []string
+
+	// Color and UpdateCheck are presentation-only: how output is colored, and
+	// how often letsgo checks for a newer release of itself.
+	Color       string
+	UpdateCheck string
 }
 
 // globalKnown lists every global directive, with its arity described for
 // error messages. See known, in decode.go, for why this is kept separate
 // from globalHandlers.
 var globalKnown = map[string]string{
-	"go":          "go <path>",
-	"git":         "git <path>",
-	"tool":        "tool <name> <path>",
-	"cache":       "cache <dir>, or cache off",
-	"plugins":     "plugins <dir>",
-	"plugin-repo": "plugin-repo <owner/repo>",
-	"proxy":       "proxy <url>",
+	"go":            "go <path>",
+	"git":           "git <path>",
+	"tool":          "tool <name> <path>",
+	"cache":         "cache <dir>, or cache off",
+	"plugins":       "plugins <dir>",
+	"plugin-repo":   "plugin-repo <owner/repo>",
+	"proxy":         "proxy <url>",
+	"token-command": "token-command <argv...>",
+	"color":         "color auto|always|never",
+	"update-check":  "update-check off|daily|weekly",
 }
 
 // globalHandlers folds each global directive into a Global.
 var globalHandlers = map[string]func(g *Global, file string, line *Line) error{
-	"go":          applyGlobalGo,
-	"git":         applyGlobalGit,
-	"tool":        applyGlobalTool,
-	"cache":       applyGlobalCache,
-	"plugins":     applyGlobalPlugins,
-	"plugin-repo": applyGlobalPluginRepo,
-	"proxy":       applyGlobalProxy,
+	"go":            applyGlobalGo,
+	"git":           applyGlobalGit,
+	"tool":          applyGlobalTool,
+	"cache":         applyGlobalCache,
+	"plugins":       applyGlobalPlugins,
+	"plugin-repo":   applyGlobalPluginRepo,
+	"proxy":         applyGlobalProxy,
+	"token-command": applyGlobalTokenCommand,
+	"color":         applyGlobalColor,
+	"update-check":  applyGlobalUpdateCheck,
 }
 
 // DecodeGlobal interprets a parsed global config file.
@@ -202,6 +219,40 @@ func applyGlobalProxy(g *Global, file string, line *Line) error {
 		return globalArity(file, line)
 	}
 	g.Proxy = line.Args[0]
+	return nil
+}
+
+func applyGlobalTokenCommand(g *Global, file string, line *Line) error {
+	if len(line.Args) == 0 {
+		return globalArity(file, line)
+	}
+	g.TokenCommand = line.Args
+	return nil
+}
+
+var globalColors = []string{"auto", "always", "never"}
+
+func applyGlobalColor(g *Global, file string, line *Line) error {
+	if len(line.Args) != 1 {
+		return globalArity(file, line)
+	}
+	if !slices.Contains(globalColors, line.Args[0]) {
+		return errAt(file, line.P, "color %q must be one of %s", line.Args[0], strings.Join(globalColors, ", "))
+	}
+	g.Color = line.Args[0]
+	return nil
+}
+
+var globalUpdateChecks = []string{"off", "daily", "weekly"}
+
+func applyGlobalUpdateCheck(g *Global, file string, line *Line) error {
+	if len(line.Args) != 1 {
+		return globalArity(file, line)
+	}
+	if !slices.Contains(globalUpdateChecks, line.Args[0]) {
+		return errAt(file, line.P, "update-check %q must be one of %s", line.Args[0], strings.Join(globalUpdateChecks, ", "))
+	}
+	g.UpdateCheck = line.Args[0]
 	return nil
 }
 

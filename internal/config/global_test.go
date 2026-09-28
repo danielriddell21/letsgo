@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -26,6 +27,9 @@ func TestDecodeGlobalParsesEveryDirective(t *testing.T) {
 		"plugins /var/lib/letsgo/plugins",
 		"plugin-repo acme/letsgo-plugins",
 		"proxy https://goproxy.acme.internal",
+		"token-command gh auth token",
+		"color auto",
+		"update-check weekly",
 	}, "\n")+"\n")
 	if err != nil {
 		t.Fatalf("DecodeGlobal: %v", err)
@@ -48,6 +52,36 @@ func TestDecodeGlobalParsesEveryDirective(t *testing.T) {
 		t.Errorf("PluginRepo = %q", g.PluginRepo)
 	case g.Proxy != "https://goproxy.acme.internal":
 		t.Errorf("Proxy = %q", g.Proxy)
+	case !reflect.DeepEqual(g.TokenCommand, []string{"gh", "auth", "token"}):
+		t.Errorf("TokenCommand = %q", g.TokenCommand)
+	case g.Color != "auto":
+		t.Errorf("Color = %q", g.Color)
+	case g.UpdateCheck != "weekly":
+		t.Errorf("UpdateCheck = %q", g.UpdateCheck)
+	}
+}
+
+// token-command takes a whole argv, unlike every other directive's fixed
+// arity, so a single word must still parse.
+func TestDecodeGlobalTokenCommandAcceptsASingleWord(t *testing.T) {
+	g, err := decodeGlobalString(t, "token-command my-helper\n")
+	if err != nil {
+		t.Fatalf("DecodeGlobal: %v", err)
+	}
+	if !reflect.DeepEqual(g.TokenCommand, []string{"my-helper"}) {
+		t.Errorf("TokenCommand = %q", g.TokenCommand)
+	}
+}
+
+func TestDecodeGlobalRejectsAnInvalidColor(t *testing.T) {
+	if _, err := decodeGlobalString(t, "color purple\n"); err == nil {
+		t.Fatal("expected an error for an invalid color")
+	}
+}
+
+func TestDecodeGlobalRejectsAnInvalidUpdateCheck(t *testing.T) {
+	if _, err := decodeGlobalString(t, "update-check hourly\n"); err == nil {
+		t.Fatal("expected an error for an invalid update-check value")
 	}
 }
 
