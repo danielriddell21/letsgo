@@ -527,6 +527,53 @@ func runVerify(args []string) error {
 	return nil
 }
 
+// moduleRepo bundles what a command needs to act on this module's own
+// release: the checkout, its scope within a monorepo, and an authenticated
+// forge client.
+type moduleRepo struct {
+	Module discover.Module
+	Git    discover.Git
+	Repo   github.Repo
+	Scope  discover.Scope
+	Token  string
+	Client *github.Client
+}
+
+// resolveModuleRepo runs the bootstrapping every command that acts on "the
+// current repository's release" (not an arbitrary --repo) needs before it
+// can do anything else: find the module, its repository, its git checkout,
+// its scope, and a forge client authenticated with token (or the default
+// env vars, when token is empty).
+func resolveModuleRepo(ctx context.Context, token string) (moduleRepo, error) {
+	module, err := discover.FindModule(".")
+	if err != nil {
+		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
+	}
+	found, err := discover.FindRepo(ctx, module.Dir)
+	if err != nil {
+		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
+	}
+	repo := github.Repo{Owner: found.Owner, Name: found.Name}
+
+	git, err := discover.FindGit(ctx, module.Dir)
+	if err != nil {
+		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
+	}
+	scope, err := discover.NewScope(git.TopLevel, module.Dir)
+	if err != nil {
+		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
+	}
+
+	tokenValue, _ := plan.Token(token)
+	if tokenValue == "" {
+		return moduleRepo{}, fmt.Errorf("letsgo: no token; set %s", envList())
+	}
+	client := github.New(tokenValue)
+	client.UserAgent = "letsgo/" + version
+
+	return moduleRepo{Module: module, Git: git, Repo: repo, Scope: scope, Token: tokenValue, Client: client}, nil
+}
+
 // targetRepo resolves which repository a command is asking about and, where
 // possible, a local checkout of it.
 //

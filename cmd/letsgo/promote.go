@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/promote"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -35,31 +34,11 @@ func runPromote(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	module, err := discover.FindModule(".")
+	m, err := resolveModuleRepo(ctx, *token)
 	if err != nil {
-		return fmt.Errorf("letsgo: %w", err)
+		return err
 	}
-	found, err := discover.FindRepo(ctx, module.Dir)
-	if err != nil {
-		return fmt.Errorf("letsgo: %w", err)
-	}
-	repo := github.Repo{Owner: found.Owner, Name: found.Name}
-
-	git, err := discover.FindGit(ctx, module.Dir)
-	if err != nil {
-		return fmt.Errorf("letsgo: %w", err)
-	}
-	scope, err := discover.NewScope(git.TopLevel, module.Dir)
-	if err != nil {
-		return fmt.Errorf("letsgo: %w", err)
-	}
-
-	tokenValue, _ := plan.Token(*token)
-	if tokenValue == "" {
-		return fmt.Errorf("letsgo: no token; set %s", envList())
-	}
-	client := github.New(tokenValue)
-	client.UserAgent = "letsgo/" + version
+	repo, git, scope, client, tokenValue := m.Repo, m.Git, m.Scope, m.Client, m.Token
 
 	// The release itself, and the tap, each get their own client exactly as
 	// `letsgo release` splits them: the RC and the stable release are the
@@ -90,14 +69,14 @@ func runPromote(args []string) error {
 	}
 	fmt.Println()
 
-	info := tapRepoInfo(ctx, module.Dir, client)
+	info := tapRepoInfo(ctx, m.Module.Dir, client)
 
 	result, err := promote.Run(ctx, promote.Options{
 		Client:      releaseClient,
 		Repo:        repo,
 		RCTag:       rcTag,
 		Dir:         git.TopLevel,
-		ModuleDir:   module.Dir,
+		ModuleDir:   m.Module.Dir,
 		Prefix:      scope.Prefix,
 		Shallow:     git.Shallow,
 		ToolVersion: version,

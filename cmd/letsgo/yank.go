@@ -11,7 +11,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/diff"
-	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
@@ -36,31 +35,11 @@ func runYank(args []string) error {
 
 	ctx := context.Background()
 
-	module, err := discover.FindModule(".")
+	m, err := resolveModuleRepo(ctx, *token)
 	if err != nil {
-		return fmt.Errorf("letsgo: %w", err)
+		return err
 	}
-	found, err := discover.FindRepo(ctx, module.Dir)
-	if err != nil {
-		return fmt.Errorf("letsgo: %w", err)
-	}
-	repo := github.Repo{Owner: found.Owner, Name: found.Name}
-
-	git, err := discover.FindGit(ctx, module.Dir)
-	if err != nil {
-		return fmt.Errorf("letsgo: %w", err)
-	}
-	scope, err := discover.NewScope(git.TopLevel, module.Dir)
-	if err != nil {
-		return fmt.Errorf("letsgo: %w", err)
-	}
-
-	tokenValue, _ := plan.Token(*token)
-	if tokenValue == "" {
-		return fmt.Errorf("letsgo: no token; set %s", envList())
-	}
-	client := github.New(tokenValue)
-	client.UserAgent = "letsgo/" + version
+	module, repo, scope, client := m.Module, m.Repo, m.Scope, m.Client
 
 	previous, err := previousRelease(ctx, client, repo, tag, scope.Prefix)
 	if err != nil {
