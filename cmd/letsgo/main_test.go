@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -270,6 +272,59 @@ func TestRunTagSkipsAnInterveningPrereleaseTag(t *testing.T) {
 // to be compared at <worktree>/relDir, never at the worktree's own root: the
 // same bug `plan.checkoutTag` had, in the command that proposes a tag rather
 // than the one that resolves one.
+// An unknown --format is rejected before the two sides are even resolved,
+// so a typo doesn't cost a network round trip.
+func TestRunDiffRejectsAnUnknownFormat(t *testing.T) {
+	err := runDiff([]string{"--format", "yaml", "a.json", "b.json"})
+	if err == nil || !strings.Contains(err.Error(), `unknown --format "yaml"`) {
+		t.Fatalf("err = %v, want an unknown --format error", err)
+	}
+}
+
+func writeManifest(t *testing.T, dir, name, version, goVersion string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	data, err := json.Marshal(manifest.Manifest{
+		Schema:  manifest.Schema,
+		Version: version,
+		Builder: manifest.Builder{Tool: "letsgo", Go: goVersion},
+	})
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	return path
+}
+
+func TestRunDiffFormatJSONWritesTheDiffPackagesJSON(t *testing.T) {
+	dir := t.TempDir()
+	from := writeManifest(t, dir, "from.json", "v1.0.0", "go1.26.1")
+	to := writeManifest(t, dir, "to.json", "v1.1.0", "go1.26.2")
+
+	stdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	os.Stdout = w
+	runErr := runDiff([]string{"--format", "json", from, to})
+	w.Close()
+	os.Stdout = stdout
+	if runErr != nil {
+		t.Fatalf("runDiff: %v", runErr)
+	}
+
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read captured stdout: %v", err)
+	}
+	if !strings.Contains(string(out), `"schema": 1`) || !strings.Contains(string(out), `"go1.26.2"`) {
+		t.Errorf("stdout = %s, want the diff package's JSON rendering", out)
+	}
+}
+
 func TestCheckoutForDiffReturnsTheModulesOwnDirectory(t *testing.T) {
 	repoDir, _ := scopedModuleFixture(t)
 
