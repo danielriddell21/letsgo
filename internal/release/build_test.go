@@ -42,30 +42,22 @@ func main() {
 }
 `
 
-// fixture builds a plan for a minimal releasable module. Extra letsgo.mod
-// lines — a `disable`, say — can be given beyond the target it always needs.
-func fixture(t *testing.T, extraConfig ...string) *plan.Plan {
+// writeFile writes a fixture file, creating its parent directory as needed.
+func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
-	dir := t.TempDir()
-
-	write := func(name, content string) {
-		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	write("go.mod", "module example.com/demo\n\ngo 1.24\n")
-	write("main.go", mainGo)
-	write("README.md", "# demo\n")
-	config := "build " + gobuild.Host().String() + "\n"
-	for _, line := range extraConfig {
-		config += line + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	write("letsgo.mod", config)
+}
 
+// gitFixture commits everything written into dir and tags it, with a fixed
+// identity and timestamp so the fixture is reproducible.
+func gitFixture(t *testing.T, dir, remote, tag string) {
+	t.Helper()
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
@@ -80,10 +72,28 @@ func fixture(t *testing.T, extraConfig ...string) *plan.Plan {
 		}
 	}
 	run("init", "-q", "-b", "main")
-	run("remote", "add", "origin", "https://github.com/you/demo.git")
+	run("remote", "add", "origin", remote)
 	run("add", ".")
 	run("commit", "-q", "-m", "feat: first release")
-	run("tag", "v1.2.3")
+	run("tag", tag)
+}
+
+// fixture builds a plan for a minimal releasable module. Extra letsgo.mod
+// lines — a `disable`, say — can be given beyond the target it always needs.
+func fixture(t *testing.T, extraConfig ...string) *plan.Plan {
+	t.Helper()
+	dir := t.TempDir()
+
+	writeFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, dir, "main.go", mainGo)
+	writeFile(t, dir, "README.md", "# demo\n")
+	config := "build " + gobuild.Host().String() + "\n"
+	for _, line := range extraConfig {
+		config += line + "\n"
+	}
+	writeFile(t, dir, "letsgo.mod", config)
+
+	gitFixture(t, dir, "https://github.com/you/demo.git", "v1.2.3")
 
 	p, err := plan.Resolve(context.Background(), plan.Options{Dir: dir})
 	if err != nil {
@@ -93,6 +103,51 @@ func fixture(t *testing.T, extraConfig ...string) *plan.Plan {
 		t.Fatalf("plan did not pass: %+v", p.Checks)
 	}
 	return p
+}
+
+// scopedFixture builds a plan for a module nested in a monorepo, tagged with
+// its own prefixed tag, the same layout internal/plan's TestScopedRelease
+// uses.
+func scopedFixture(t *testing.T) *plan.Plan {
+	t.Helper()
+	dir := t.TempDir()
+
+	writeFile(t, dir, "go.mod", "module example.com/monorepo\n\ngo 1.24\n")
+	writeFile(t, dir, "main.go", mainGo)
+	writeFile(t, dir, "services/api/go.mod", "module example.com/monorepo/services/api\n\ngo 1.24\n")
+	writeFile(t, dir, "services/api/main.go", mainGo)
+	writeFile(t, dir, "services/api/README.md", "# api\n")
+	writeFile(t, dir, "services/api/letsgo.mod", "build "+gobuild.Host().String()+"\n")
+
+	gitFixture(t, dir, "https://github.com/you/monorepo.git", "services/api/v1.2.0")
+
+	p, err := plan.Resolve(context.Background(), plan.Options{Dir: filepath.Join(dir, "services/api")})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !p.OK() {
+		t.Fatalf("plan did not pass: %+v", p.Checks)
+	}
+	return p
+}
+
+// A scoped release's manifest has to carry the prefix separately from Tag,
+// so a reader can recover the plain version without assuming Tag's shape.
+func TestBuildRecordsTheTagPrefixForAScopedRelease(t *testing.T) {
+	p := scopedFixture(t)
+
+	result, err := release.Build(context.Background(), p, t.TempDir(), "0.1.0", nil, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	m := result.Manifest
+	if m.Tag != "services/api/v1.2.0" || m.Version != "1.2.0" {
+		t.Fatalf("manifest header = %+v", m)
+	}
+	if m.TagPrefix != "services/api/" {
+		t.Errorf("TagPrefix = %q, want %q", m.TagPrefix, "services/api/")
+	}
 }
 
 func TestBuildProducesACompleteRelease(t *testing.T) {
@@ -122,6 +177,9 @@ func TestBuildProducesACompleteRelease(t *testing.T) {
 	m := result.Manifest
 	if m.Schema != manifest.Schema || m.Version != "1.2.3" || m.Tag != "v1.2.3" {
 		t.Errorf("manifest header = %+v", m)
+	}
+	if m.TagPrefix != "" {
+		t.Errorf("TagPrefix = %q, want empty for a root module", m.TagPrefix)
 	}
 	if m.SourceDateEpoch != p.Git.CommitTime.Unix() {
 		t.Errorf("SourceDateEpoch = %d, want the commit time", m.SourceDateEpoch)
