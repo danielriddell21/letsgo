@@ -632,8 +632,12 @@ func runDiff(args []string) error {
 	fs := flag.NewFlagSet("diff", flag.ExitOnError)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	repoFlag := fs.String("repo", "", "repository to compare in as owner/name (default: this repository's origin)")
+	format := fs.String("format", "text", "output format: text, md, or json")
 	if err := parseFlags(fs, args); err != nil {
 		return err
+	}
+	if *format != "text" && *format != "md" && *format != "json" {
+		return errUsage(fmt.Sprintf("letsgo diff: unknown --format %q; want text, md, or json", *format))
 	}
 	if fs.NArg() == 0 || fs.NArg() > 2 {
 		return errUsage("letsgo diff <from> [to]\n" +
@@ -668,7 +672,24 @@ func runDiff(args []string) error {
 		return err
 	}
 
-	fmt.Print(diff.Compare(before, after))
+	return printDiff(diff.Compare(before, after), *format)
+}
+
+// printDiff renders a comparison in the requested format. format is already
+// validated by the time this runs.
+func printDiff(result *diff.Result, format string) error {
+	switch format {
+	case "md":
+		fmt.Print(result.Markdown())
+	case "json":
+		data, err := result.JSON()
+		if err != nil {
+			return fmt.Errorf("letsgo diff: %w", err)
+		}
+		fmt.Println(string(data))
+	default:
+		fmt.Print(result)
+	}
 	return nil
 }
 

@@ -10,12 +10,14 @@
 package diff
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
 // Result is the difference between two releases.
@@ -35,9 +37,9 @@ type Result struct {
 
 // SizeChange is one artifact's change in size.
 type SizeChange struct {
-	Target string
-	From   int64
-	To     int64
+	Target string `json:"target"`
+	From   int64  `json:"from"`
+	To     int64  `json:"to"`
 }
 
 // Delta is the change in bytes, negative when the artifact shrank.
@@ -62,14 +64,18 @@ const (
 
 // DepChange is one dependency's arrival, departure or version change.
 type DepChange struct {
-	Kind     DepKind
-	Path     string
-	From, To string
+	Kind DepKind `json:"kind"`
+	Path string  `json:"path"`
+	From string  `json:"from,omitempty"`
+	To   string  `json:"to,omitempty"`
 }
 
 // ToolchainChange records a compiler change, which explains size differences
 // that no dependency accounts for.
-type ToolchainChange struct{ From, To string }
+type ToolchainChange struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
 
 // Compare produces the difference between two releases.
 func Compare(from, to *manifest.Manifest) *Result {
@@ -252,4 +258,114 @@ func (r *Result) writeToolchain(b *strings.Builder) {
 		return
 	}
 	fmt.Fprintf(b, "toolchain\n  %s -> %s\n\n", r.Toolchain.From, r.Toolchain.To)
+}
+
+// Markdown renders the same collapsed table release notes use, plus API
+// changes — the one difference from the notes section, which leaves those
+// out because the changelog already shows them.
+func (r *Result) Markdown() string {
+	var rows []string
+	if r.Toolchain != nil {
+		rows = append(rows, fmt.Sprintf("| toolchain | %s → %s |", r.Toolchain.From, r.Toolchain.To))
+	}
+	if len(r.Dependencies) > 0 {
+		rows = append(rows, fmt.Sprintf("| deps | %s |", markdownDeps(r.Dependencies)))
+	}
+	if len(r.Sizes) > 0 {
+		rows = append(rows, fmt.Sprintf("| size | %s |", markdownSizes(r.Sizes)))
+	}
+	if len(r.API) > 0 {
+		rows = append(rows, fmt.Sprintf("| api | %s |", markdownAPI(r.API)))
+	}
+	if len(rows) == 0 {
+		return ""
+	}
+	return "| | |\n|---|---|\n" + strings.Join(rows, "\n") + "\n"
+}
+
+func markdownDeps(deps []DepChange) string {
+	parts := make([]string, len(deps))
+	for i, d := range deps {
+		switch d.Kind {
+		case DepAdded:
+			parts[i] = fmt.Sprintf("+ %s %s", d.Path, d.To)
+		case DepRemoved:
+			parts[i] = fmt.Sprintf("− %s %s", d.Path, d.From)
+		default:
+			parts[i] = fmt.Sprintf("%s %s %s → %s", depArrow(d.From, d.To), d.Path, d.From, d.To)
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+// depArrow says whether a changed dependency moved up or down, when both
+// sides parse as semver. A version this package can't parse — a pseudo-version
+// or some other tagging scheme — falls back to a neutral marker rather than
+// guessing a direction.
+func depArrow(from, to string) string {
+	f, fok := semver.Parse(from)
+	t, tok := semver.Parse(to)
+	if !fok || !tok {
+		return "~"
+	}
+	if semver.Compare(t, f) < 0 {
+		return "↓"
+	}
+	return "↑"
+}
+
+func markdownSizes(sizes []SizeChange) string {
+	parts := make([]string, len(sizes))
+	for i, s := range sizes {
+		parts[i] = fmt.Sprintf("%s %s → %s (%+.1f%%)", s.Target, bytesize.Size(s.From), bytesize.Size(s.To), s.Percent())
+	}
+	return strings.Join(parts, " · ")
+}
+
+func markdownAPI(changes []manifest.APIChange) string {
+	parts := make([]string, len(changes))
+	for i, c := range changes {
+		marker := "+"
+		if c.Kind == "incompatible" {
+			marker = "!"
+		}
+		if c.Package != "" {
+			parts[i] = fmt.Sprintf("%s %s: %s", marker, c.Package, c.Text)
+			continue
+		}
+		parts[i] = fmt.Sprintf("%s %s", marker, c.Text)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// jsonResult is Result's wire form: schema-versioned, so a consumer can tell
+// which shape it's reading before the fields under it ever change.
+type jsonResult struct {
+	Schema       int                  `json:"schema"`
+	From         string               `json:"from"`
+	To           string               `json:"to"`
+	Toolchain    *ToolchainChange     `json:"toolchain,omitempty"`
+	Dependencies []DepChange          `json:"dependencies,omitempty"`
+	Sizes        []SizeChange         `json:"sizes,omitempty"`
+	SizeKind     string               `json:"size_kind,omitempty"`
+	API          []manifest.APIChange `json:"api,omitempty"`
+}
+
+// JSON renders the comparison for machine consumers, such as a PR bot
+// parsing `letsgo diff --format json`.
+func (r *Result) JSON() ([]byte, error) {
+	data, err := json.MarshalIndent(jsonResult{
+		Schema:       1,
+		From:         r.From,
+		To:           r.To,
+		Toolchain:    r.Toolchain,
+		Dependencies: r.Dependencies,
+		Sizes:        r.Sizes,
+		SizeKind:     r.SizeKind,
+		API:          r.API,
+	}, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("diff: %w", err)
+	}
+	return data, nil
 }

@@ -7,6 +7,23 @@ import (
 	"github.com/danielriddell21/letsgo/internal/manifest"
 )
 
+func diffFixture() *Result {
+	from := manifestWith("v1.2.0", []manifest.Artifact{
+		{OS: "linux", Arch: "amd64", Size: 8_100_000, BinarySize: 8_100_000},
+	}, []manifest.Module{
+		{Path: "example.com/gone", Version: "v1.0.0"},
+		{Path: "example.com/moved", Version: "v0.25.0"},
+	}, "go1.26.1")
+	to := manifestWith("v1.3.0", []manifest.Artifact{
+		{OS: "linux", Arch: "amd64", Size: 8_400_000, BinarySize: 8_400_000},
+	}, []manifest.Module{
+		{Path: "example.com/arrived", Version: "v0.9.0"},
+		{Path: "example.com/moved", Version: "v0.26.0"},
+	}, "go1.26.2")
+	to.APIChanges = []manifest.APIChange{{Kind: "compatible", Package: "example.com/p", Text: "New: added"}}
+	return Compare(from, to)
+}
+
 func manifestWith(version string, artifacts []manifest.Artifact, modules []manifest.Module, goVersion string) *manifest.Manifest {
 	return &manifest.Manifest{
 		Schema:    manifest.Schema,
@@ -176,6 +193,71 @@ func TestEmptyWhenIdentical(t *testing.T) {
 	}
 	if !strings.Contains(r.String(), "no difference") {
 		t.Errorf("rendering = %q", r.String())
+	}
+}
+
+func TestMarkdownRendersOneCollapsedTable(t *testing.T) {
+	out := diffFixture().Markdown()
+
+	want := "| | |\n" +
+		"|---|---|\n" +
+		"| toolchain | go1.26.1 → go1.26.2 |\n" +
+		"| deps | + example.com/arrived v0.9.0 · − example.com/gone v1.0.0 · ↑ example.com/moved v0.25.0 → v0.26.0 |\n" +
+		"| size | linux/amd64 7.7 MB → 8.0 MB (+3.7%) |\n" +
+		"| api | + example.com/p: New: added |\n"
+	if out != want {
+		t.Errorf("markdown =\n%s\nwant\n%s", out, want)
+	}
+}
+
+func TestDepArrow(t *testing.T) {
+	for _, tt := range []struct{ from, to, want string }{
+		{"v1.1.0", "v1.0.0", "↓"},
+		{"v1.0.0", "v1.1.0", "↑"},
+		{"v1.0.0", "not-a-version", "~"},
+	} {
+		if got := depArrow(tt.from, tt.to); got != tt.want {
+			t.Errorf("depArrow(%q, %q) = %q, want %q", tt.from, tt.to, got, tt.want)
+		}
+	}
+}
+
+func TestMarkdownAPIMarksIncompatibleChanges(t *testing.T) {
+	out := markdownAPI([]manifest.APIChange{{Kind: "incompatible", Text: "Old: removed"}})
+	if want := "! Old: removed"; out != want {
+		t.Errorf("markdownAPI = %q, want %q", out, want)
+	}
+}
+
+func TestMarkdownIsEmptyWhenIdentical(t *testing.T) {
+	from := manifestWith("v1.0.0", nil, nil, "go1.26.8")
+	to := manifestWith("v1.0.1", nil, nil, "go1.26.8")
+
+	if out := Compare(from, to).Markdown(); out != "" {
+		t.Errorf("markdown = %q, want empty", out)
+	}
+}
+
+func TestJSONCarriesSchemaAndEveryField(t *testing.T) {
+	data, err := diffFixture().JSON()
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+
+	out := string(data)
+	for _, want := range []string{
+		`"schema": 1`,
+		`"from": "v1.2.0"`,
+		`"to": "v1.3.0"`,
+		`"toolchain"`, `"go1.26.1"`, `"go1.26.2"`,
+		`"dependencies"`, `"kind": "added"`, `"example.com/arrived"`,
+		`"sizes"`, `"target": "linux/amd64"`,
+		`"size_kind": "binary size"`,
+		`"api"`, `"example.com/p"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("json is missing %q:\n%s", want, out)
+		}
 	}
 }
 
