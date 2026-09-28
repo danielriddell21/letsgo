@@ -798,6 +798,34 @@ func TestReleaseNotesAppendsWhatShippedUsingTheChangelogsPreviousRelease(t *test
 	}
 }
 
+// disable diff-notes must remove the section, and must do so before the
+// forge is ever asked for the previous manifest — same no-network-call
+// guarantee TestReleaseNotesSkippedWhenChangelogDisabled proves for
+// disable changelog. (WS-9)
+func TestReleaseNotesOmitsWhatShippedWhenDisabled(t *testing.T) {
+	dir := historyFixture(t)
+
+	p := &plan.Plan{
+		Features: feature.Resolve([]string{"diff-notes"}),
+		Module:   discover.Module{Dir: dir},
+		Tag:      "v1.1.0",
+	}
+	current := &manifest.Manifest{
+		Schema: manifest.Schema, Version: "v1.1.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.2"},
+	}
+
+	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, current)
+	if err != nil {
+		t.Fatalf("releaseNotes: %v", err)
+	}
+	if !strings.Contains(notes, "second release") {
+		t.Errorf("notes = %q, want the changelog entry", notes)
+	}
+	if strings.Contains(notes, "What shipped") {
+		t.Errorf("notes = %q, want no what-shipped section", notes)
+	}
+}
+
 func TestNotesMode(t *testing.T) {
 	if notesMode(true) != publish.NotesAppend {
 		t.Error("--append-notes should append")
