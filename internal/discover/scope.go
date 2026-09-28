@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
 // Scope identifies which part of a repository a release covers.
@@ -66,6 +68,26 @@ func (s Scope) MatchesTag(tag string) (rest string, ok bool) {
 		return "", false
 	}
 	return rest, true
+}
+
+// LatestTag picks the highest version among tags that are in this scope, and
+// returns its full tag name (Prefix included). ok is false when none of them
+// are: an unscoped repository with no releases yet, or a monorepo module
+// whose own prefix matches nothing.
+func (s Scope) LatestTag(tags []string) (tag string, ok bool) {
+	fullTag := make(map[string]string, len(tags))
+	versions := make([]string, 0, len(tags))
+	for _, t := range tags {
+		rest, matched := s.MatchesTag(t)
+		if !matched {
+			continue
+		}
+		versions = append(versions, rest)
+		fullTag[rest] = t
+	}
+
+	tag, ok = fullTag[semver.Latest(versions)]
+	return tag, ok
 }
 
 // resolveSymlinks returns dir with its symlinks resolved, or dir itself if

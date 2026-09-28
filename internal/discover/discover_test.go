@@ -253,6 +253,43 @@ func TestScopeMatchesTag(t *testing.T) {
 	}
 }
 
+func TestScopeLatestTag(t *testing.T) {
+	cases := []struct {
+		name    string
+		prefix  string
+		tags    []string
+		wantTag string
+		wantOK  bool
+	}{
+		{
+			"root scope picks the highest version", "",
+			[]string{"v1.0.0", "v2.0.0", "v1.5.0"},
+			"v2.0.0", true,
+		},
+		{
+			"nested scope ignores other scopes and the root", "services/api/",
+			[]string{"v9.9.9", "services/web/v8.0.0", "services/api/v1.0.0", "services/api/v1.2.3"},
+			"services/api/v1.2.3", true,
+		},
+		{
+			"no matching tag has no releases", "services/api/",
+			[]string{"v1.0.0", "services/web/v1.0.0"},
+			"", false,
+		},
+		{"no tags at all has no releases", "", nil, "", false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			scope := Scope{Prefix: c.prefix}
+			tag, ok := scope.LatestTag(c.tags)
+			if ok != c.wantOK || tag != c.wantTag {
+				t.Errorf("LatestTag(%v) = %q, %v, want %q, %v", c.tags, tag, ok, c.wantTag, c.wantOK)
+			}
+		})
+	}
+}
+
 // The major-version gate. Getting this wrong publishes a release that `go get`
 // silently refuses to resolve, with no warning from any Go tool.
 func TestModuleCheckTag(t *testing.T) {
