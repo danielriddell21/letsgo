@@ -959,6 +959,9 @@ func releaseNotes(
 		return "", err
 	}
 	notes := changelog.Build(previous, p.Tag, commits).WithAPIChanges(p.APIChanges).Markdown()
+	if !p.Features.On("diff-notes") {
+		return notes, nil
+	}
 	return notes + whatShipped(ctx, client, repo, previous, current), nil
 }
 

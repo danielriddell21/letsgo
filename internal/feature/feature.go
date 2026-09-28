@@ -119,6 +119,10 @@ var All = []Feature{
 		Name: "changelog", Kind: Output, Default: true, Disable: true,
 		Summary: "commits since the previous tag become the release body",
 	},
+	{
+		Name: "diff-notes", Kind: Output, Default: true, Disable: true,
+		Summary: "a collapsed \"what shipped\" section compares this release's manifest against the previous one",
+	},
 
 	{
 		Name: "proxy-warm", Kind: Publish, Default: true, Disable: true,
