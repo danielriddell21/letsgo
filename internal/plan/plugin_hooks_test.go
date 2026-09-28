@@ -2,8 +2,6 @@ package plan
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,7 +14,9 @@ import (
 )
 
 // fakeHookPlugin writes a shell script that answers whatever body prints, and
-// puts it on PATH under command, off the real machine's plugin store.
+// puts it on PATH under command, off the real machine's plugin store. The
+// digest is computed the same way plugin.Run itself checks a pin, rather than
+// reimplementing that hash by hand.
 func fakeHookPlugin(t *testing.T, command, body string) (digest string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -31,12 +31,11 @@ func fakeHookPlugin(t *testing.T, command, body string) (digest string) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	data, err := os.ReadFile(path)
+	digest, err := plugin.DigestOf(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:])
+	return digest
 }
 
 // A plugin never has to guess where its own config lives: config_dir is in
