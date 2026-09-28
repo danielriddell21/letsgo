@@ -210,6 +210,25 @@ func TestMarkdownRendersOneCollapsedTable(t *testing.T) {
 	}
 }
 
+func TestDepArrow(t *testing.T) {
+	for _, tt := range []struct{ from, to, want string }{
+		{"v1.1.0", "v1.0.0", "↓"},
+		{"v1.0.0", "v1.1.0", "↑"},
+		{"v1.0.0", "not-a-version", "~"},
+	} {
+		if got := depArrow(tt.from, tt.to); got != tt.want {
+			t.Errorf("depArrow(%q, %q) = %q, want %q", tt.from, tt.to, got, tt.want)
+		}
+	}
+}
+
+func TestMarkdownAPIMarksIncompatibleChanges(t *testing.T) {
+	out := markdownAPI([]manifest.APIChange{{Kind: "incompatible", Text: "Old: removed"}})
+	if want := "! Old: removed"; out != want {
+		t.Errorf("markdownAPI = %q, want %q", out, want)
+	}
+}
+
 func TestMarkdownIsEmptyWhenIdentical(t *testing.T) {
 	from := manifestWith("v1.0.0", nil, nil, "go1.26.8")
 	to := manifestWith("v1.0.1", nil, nil, "go1.26.8")

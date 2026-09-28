@@ -298,30 +298,49 @@ func writeManifest(t *testing.T, dir, name, version, goVersion string) string {
 	return path
 }
 
-func TestRunDiffFormatJSONWritesTheDiffPackagesJSON(t *testing.T) {
-	dir := t.TempDir()
-	from := writeManifest(t, dir, "from.json", "v1.0.0", "go1.26.1")
-	to := writeManifest(t, dir, "to.json", "v1.1.0", "go1.26.2")
-
+// captureStdout runs fn with os.Stdout redirected, and returns what it wrote.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
 	stdout := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	os.Stdout = w
-	runErr := runDiff([]string{"--format", "json", from, to})
+	fn()
 	w.Close()
 	os.Stdout = stdout
-	if runErr != nil {
-		t.Fatalf("runDiff: %v", runErr)
-	}
 
 	out, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatalf("read captured stdout: %v", err)
 	}
-	if !strings.Contains(string(out), `"schema": 1`) || !strings.Contains(string(out), `"go1.26.2"`) {
-		t.Errorf("stdout = %s, want the diff package's JSON rendering", out)
+	return string(out)
+}
+
+func TestRunDiffPrintsEachFormat(t *testing.T) {
+	dir := t.TempDir()
+	from := writeManifest(t, dir, "from.json", "v1.0.0", "go1.26.1")
+	to := writeManifest(t, dir, "to.json", "v1.1.0", "go1.26.2")
+
+	for _, tt := range []struct {
+		format string
+		want   string
+	}{
+		{"text", "v1.0.0 -> v1.1.0"},
+		{"md", "go1.26.1 → go1.26.2"},
+		{"json", `"schema": 1`},
+	} {
+		var runErr error
+		out := captureStdout(t, func() {
+			runErr = runDiff([]string{"--format", tt.format, from, to})
+		})
+		if runErr != nil {
+			t.Fatalf("runDiff --format %s: %v", tt.format, runErr)
+		}
+		if !strings.Contains(out, tt.want) {
+			t.Errorf("--format %s stdout = %q, want it to contain %q", tt.format, out, tt.want)
+		}
 	}
 }
 
