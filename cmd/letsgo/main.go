@@ -460,17 +460,18 @@ func reportPublished(published *publish.Result) {
 	fmt.Println()
 }
 
-// warmProxy primes proxy.golang.org so `go install` works immediately.
+// warmProxy primes the resolved module proxy so `go install` works
+// immediately.
 //
 // Best effort, and deliberately after publication: a proxy that is slow has
 // not broken a release that is already live.
 func warmProxy(ctx context.Context, p *plan.Plan) {
-	if err := publish.WarmProxy(ctx, "", p.Module.Path, p.Version); err != nil {
+	if err := publish.WarmProxy(ctx, p.Proxy, p.Module.Path, p.Version); err != nil {
 		fmt.Printf("  ! could not prime the module proxy: %v\n", err)
 		fmt.Printf("    `go install` may fail briefly until the proxy fetches %s\n", p.Tag)
 		return
 	}
-	fmt.Println("  primed proxy.golang.org")
+	fmt.Printf("  primed %s\n", p.Proxy)
 }
 
 func runVerify(args []string) error {

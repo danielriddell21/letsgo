@@ -5,12 +5,39 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/danielriddell21/letsgo/internal/config"
 )
 
 // DefaultProxy is the public Go module proxy.
 const DefaultProxy = "https://proxy.golang.org"
+
+// ResolveProxy decides which module proxy to warm, and reports where the
+// choice came from — GOPROXY, the global config file, or the fixed default —
+// so plan --explain can say why.
+func ResolveProxy() (proxy, source string) {
+	global, err := config.LoadGlobal()
+	if err != nil {
+		global = &config.Global{}
+	}
+	return resolveProxyWith(os.Getenv("GOPROXY"), global)
+}
+
+// resolveProxyWith is ResolveProxy's core logic, taking the environment and
+// global config directly rather than loading them, so tests can exercise the
+// precedence without relying on config.LoadGlobal's process-wide memoization.
+func resolveProxyWith(env string, global *config.Global) (proxy, source string) {
+	if env != "" {
+		return env, "GOPROXY"
+	}
+	if global.Proxy != "" {
+		return global.Proxy, global.Path
+	}
+	return DefaultProxy, "the default"
+}
 
 // WarmProxy asks the module proxy to fetch a freshly tagged version.
 //

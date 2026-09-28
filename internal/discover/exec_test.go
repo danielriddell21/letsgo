@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/danielriddell21/letsgo/internal/config"
 )
 
 func TestGitResolvesInsideASystemDirectory(t *testing.T) {
@@ -134,33 +136,86 @@ func TestGitOverrideMustBeAbsoluteAndExecutable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got, err := resolveGit(good, nil); err != nil || got != good {
+	if got, _, err := resolveGit(good, &config.Global{}, nil); err != nil || got != good {
 		t.Errorf("resolveGit(absolute executable) = %q, %v", got, err)
 	}
 
 	// A bare name would be resolved through PATH by the operating system,
 	// reintroducing the exact problem this code exists to prevent.
-	if _, err := resolveGit("git", nil); err == nil {
+	if _, _, err := resolveGit("git", &config.Global{}, nil); err == nil {
 		t.Error("resolveGit accepted a bare name, want an error")
 	}
-	if _, err := resolveGit("./git", nil); err == nil {
+	if _, _, err := resolveGit("./git", &config.Global{}, nil); err == nil {
 		t.Error("resolveGit accepted a relative path, want an error")
 	}
 	if runtime.GOOS != "windows" {
-		if _, err := resolveGit(notExecutable, nil); err == nil {
+		if _, _, err := resolveGit(notExecutable, &config.Global{}, nil); err == nil {
 			t.Error("resolveGit accepted a non-executable file, want an error")
 		}
 	}
 }
 
 func TestResolveGitReportsAbsenceUsefully(t *testing.T) {
-	_, err := resolveGit("", []string{filepath.Join(t.TempDir(), "nowhere")})
+	_, _, err := resolveGit("", &config.Global{}, []string{filepath.Join(t.TempDir(), "nowhere")})
 	if err == nil {
 		t.Fatal("resolveGit succeeded with an empty search path")
 	}
 	// An error that does not say how to proceed just moves the problem.
 	if !strings.Contains(err.Error(), gitEnvOverride) {
 		t.Errorf("error does not mention the escape hatch: %v", err)
+	}
+}
+
+// LETSGO_GIT outranks the global config: an override set for one invocation
+// must not be silently second-guessed by a machine-wide default.
+func TestGitEnvOverrideOutranksGlobalConfig(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "git")
+	if err := os.WriteFile(good, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, source, err := resolveGit(good, &config.Global{Path: "config.mod", Git: "/other/git"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != good || source != gitEnvOverride {
+		t.Errorf("got %q from %q, want %q from %q", got, source, good, gitEnvOverride)
+	}
+}
+
+// The global config's `git` directive outranks the system directory search,
+// between the env override and it.
+func TestGitGlobalConfigOutranksSystemDirs(t *testing.T) {
+	dir := t.TempDir()
+	pinned := filepath.Join(dir, "git")
+	if err := os.WriteFile(pinned, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, source, err := resolveGit("", &config.Global{Path: "/etc/letsgo/config.mod", Git: pinned}, systemDirs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != pinned || source != "/etc/letsgo/config.mod" {
+		t.Errorf("got %q from %q, want %q from the global config path", got, source, pinned)
+	}
+}
+
+func TestGitGlobalConfigMustBeAbsoluteAndExecutable(t *testing.T) {
+	if _, _, err := resolveGit("", &config.Global{Path: "config.mod", Git: "git"}, nil); err == nil {
+		t.Error("a relative path was accepted from the global config")
+	}
+
+	dir := t.TempDir()
+	notExecutable := filepath.Join(dir, "git")
+	if err := os.WriteFile(notExecutable, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		if _, _, err := resolveGit("", &config.Global{Path: "config.mod", Git: notExecutable}, nil); err == nil {
+			t.Error("a non-executable path was accepted from the global config")
+		}
 	}
 }
 

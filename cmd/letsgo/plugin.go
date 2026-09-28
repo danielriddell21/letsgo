@@ -24,6 +24,27 @@ import (
 // a URL somebody has to get right.
 const pluginRepo = "danielriddell21/letsgo-plugins"
 
+// defaultPluginRepo is pluginRepo, unless the global config's `plugin-repo`
+// directive names another one for this machine.
+func defaultPluginRepo() string {
+	global, err := config.LoadGlobal()
+	if err != nil {
+		global = &config.Global{}
+	}
+	return defaultPluginRepoWith(global)
+}
+
+// defaultPluginRepoWith is defaultPluginRepo's core logic, taking the global
+// config directly rather than loading it, so tests can exercise the
+// `plugin-repo` directive without relying on config.LoadGlobal's
+// process-wide memoization.
+func defaultPluginRepoWith(global *config.Global) string {
+	if global.PluginRepo == "" {
+		return pluginRepo
+	}
+	return global.PluginRepo
+}
+
 const pluginUsage = `letsgo plugin installs the external programs a release can call.
 
 usage:
@@ -71,7 +92,7 @@ func runPluginInstall(args []string) error {
 	fs := flag.NewFlagSet("plugin install", flag.ExitOnError)
 	dir := fs.String("o", "", "with --link, directory to link into (default: $GOBIN, or $GOPATH/bin)")
 	link := fs.Bool("link", false, "also put the plugin on PATH, for running it by hand")
-	repo := fs.String("repo", pluginRepo, "repository to install from, as owner/name")
+	repo := fs.String("repo", defaultPluginRepo(), "repository to install from, as owner/name")
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	if err := parseFlags(fs, args); err != nil {
 		return err

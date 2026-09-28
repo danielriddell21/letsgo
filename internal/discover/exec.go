@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/safeexec"
 )
 
@@ -36,44 +37,65 @@ func systemDirs() []string { return safeexec.SystemDirs() }
 func fixedPath() string { return safeexec.FixedPath() }
 
 var (
-	gitOnce sync.Once
-	gitPath string
-	gitErr  error
+	gitOnce   sync.Once
+	gitPath   string
+	gitSource string
+	gitErr    error
 )
 
 // gitBinary resolves git to an absolute path within a system directory. The
 // result is cached because it cannot change during a run.
 func gitBinary() (string, error) {
+	path, _, err := GitSource()
+	return path, err
+}
+
+// GitSource resolves git, like gitBinary, and also reports where the choice
+// came from — the env override, the global config file, or the system
+// directory search — so plan --explain can say why.
+func GitSource() (path, source string, err error) {
 	gitOnce.Do(func() {
-		gitPath, gitErr = resolveGit(os.Getenv(gitEnvOverride), systemDirs())
+		global, globalErr := config.LoadGlobal()
+		if globalErr != nil {
+			global = &config.Global{}
+		}
+		gitPath, gitSource, gitErr = resolveGit(os.Getenv(gitEnvOverride), global, systemDirs())
 	})
-	return gitPath, gitErr
+	return gitPath, gitSource, gitErr
 }
 
 // resolveGit is the lookup itself, kept separate from the caching so that it
-// can be tested with an arbitrary override and search path.
-func resolveGit(override string, dirs []string) (string, error) {
-	{
-		if override != "" {
-			if !filepath.IsAbs(override) {
-				return "", fmt.Errorf("discover: %s must be an absolute path, got %q",
-					gitEnvOverride, override)
-			}
-			if !isExecutable(override) {
-				return "", fmt.Errorf("discover: %s=%q is not an executable file",
-					gitEnvOverride, override)
-			}
-			return override, nil
+// can be tested with an arbitrary override, global config and search path.
+func resolveGit(override string, global *config.Global, dirs []string) (path, source string, err error) {
+	if override != "" {
+		if !filepath.IsAbs(override) {
+			return "", "", fmt.Errorf("discover: %s must be an absolute path, got %q",
+				gitEnvOverride, override)
 		}
+		if !isExecutable(override) {
+			return "", "", fmt.Errorf("discover: %s=%q is not an executable file",
+				gitEnvOverride, override)
+		}
+		return override, gitEnvOverride, nil
 	}
 
-	if found, err := safeexec.LookIn(dirs, safeexec.Exe("git")); err == nil {
-		return found, nil
+	if global.Git != "" {
+		if !filepath.IsAbs(global.Git) {
+			return "", "", fmt.Errorf("discover: git %q in %s must be an absolute path", global.Git, global.Path)
+		}
+		if !isExecutable(global.Git) {
+			return "", "", fmt.Errorf("discover: git %q in %s is not an executable file", global.Git, global.Path)
+		}
+		return global.Git, global.Path, nil
+	}
+
+	if found, lookErr := safeexec.LookIn(dirs, safeexec.Exe("git")); lookErr == nil {
+		return found, "a system directory", nil
 	}
 
 	// Deliberately no PATH fallback: git is invoked on every run, and a
 	// writable directory on PATH would decide which program that is.
-	return "", fmt.Errorf(
+	return "", "", fmt.Errorf(
 		"discover: git was not found in any system directory (%s)\n"+
 			"  letsgo does not search PATH for git, because a writable directory on PATH\n"+
 			"  would let someone else choose which program runs\n"+

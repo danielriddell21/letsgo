@@ -19,6 +19,19 @@ import (
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
 
+func TestDefaultPluginRepoWithFallsBackWithoutAGlobalOverride(t *testing.T) {
+	if got := defaultPluginRepoWith(&config.Global{}); got != pluginRepo {
+		t.Errorf("got %q, want %q", got, pluginRepo)
+	}
+}
+
+func TestDefaultPluginRepoWithHonoursTheGlobalOverride(t *testing.T) {
+	got := defaultPluginRepoWith(&config.Global{PluginRepo: "acme/letsgo-plugins-mirror"})
+	if got != "acme/letsgo-plugins-mirror" {
+		t.Errorf("got %q, want the global override", got)
+	}
+}
+
 // noStore points plugin installation at a scratch store for the duration of
 // a test, so nothing it writes or reads touches the real machine's store.
 func noStore(t *testing.T) string {
