@@ -171,6 +171,7 @@ echo '{"files":[{"path":"Casks/gambit-gui.rb","content":"cask \"gambit-gui\""}]}
 		`"sha256":"` + strings.Repeat("a", 64) + `"`,
 		`"url":"https://github.com/you/gambit/releases/download/v1.2.0/gambit-gui_1.2.0_darwin_arm64.tar.gz"`,
 		`"binaries":["gambit"]`,
+		`"config_dir":"` + filepath.Join(p.RootDir, ".letsgo") + `"`,
 	} {
 		if !strings.Contains(string(input), want) {
 			t.Errorf("input %s does not contain %q", input, want)

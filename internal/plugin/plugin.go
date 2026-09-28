@@ -72,9 +72,12 @@ const timeout = time.Minute
 // The executable is hashed and compared against the pin before it runs.
 // Checking afterwards would be checking what we already executed.
 //
-// dir is the repository root, so a plugin needing configuration of its own can
-// keep it in a file beside letsgo.mod. That is deliberate: it is how letsgo's
-// own config stays a closed set while a plugin still takes settings.
+// dir is the repository root, and input's ConfigDir field (present on every
+// hook) names where a plugin's own config lives: dir + "/.letsgo". A plugin
+// needing settings of its own reads a file there rather than guessing, which
+// is how letsgo's own config stays a closed set while a plugin still takes
+// settings. A legacy root-relative file beside letsgo.mod is still read by
+// plugins that have not moved yet, with a plan Warn suggesting they do.
 func Run(ctx context.Context, p Plugin, dir string, input, output any) error {
 	path, err := resolve(p)
 	if err != nil {

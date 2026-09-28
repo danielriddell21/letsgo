@@ -63,6 +63,10 @@ type LDFlagsInput struct {
 
 	// Targets are the "goos/goarch" pairs the release builds.
 	Targets []string `json:"targets"`
+
+	// ConfigDir is where this plugin's own config lives, ".letsgo" beside
+	// letsgo.mod, so a plugin never has to guess where it runs from.
+	ConfigDir string `json:"config_dir"`
 }
 
 // LDFlagsOutput is what it answers: extra linker arguments, appended after the
@@ -84,6 +88,10 @@ type ArchiveLayoutInput struct {
 	Commands []InputCommand `json:"commands"`
 
 	Targets []string `json:"targets"`
+
+	// ConfigDir is where this plugin's own config lives, ".letsgo" beside
+	// letsgo.mod, so a plugin never has to guess where it runs from.
+	ConfigDir string `json:"config_dir"`
 }
 
 // InputCommand is one main package offered to the layout hook.
@@ -128,6 +136,10 @@ type TapFilesInput struct {
 	Caveats     string `json:"caveats,omitempty"`
 
 	Artifacts []TapArtifact `json:"artifacts"`
+
+	// ConfigDir is where this plugin's own config lives, ".letsgo" beside
+	// letsgo.mod, so a plugin never has to guess where it runs from.
+	ConfigDir string `json:"config_dir"`
 }
 
 // TapArtifact is one archive the plugin can point a file at.

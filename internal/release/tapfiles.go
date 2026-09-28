@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/build"
@@ -52,6 +53,8 @@ func applyTapFilesPlugin(ctx context.Context, p *plan.Plan, artifacts []build.Ar
 // the same input from a previous release's manifest: both need the same
 // execution and the same path checks.
 func RunTapFiles(ctx context.Context, configured plugin.Plugin, rootDir string, in plugin.TapFilesInput) ([]plugin.TapFile, error) {
+	in.ConfigDir = filepath.Join(rootDir, ".letsgo")
+
 	var out plugin.TapFilesOutput
 	if err := plugin.Run(ctx, configured, rootDir, in, &out); err != nil {
 		return nil, err

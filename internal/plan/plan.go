@@ -41,6 +41,9 @@ import (
 // ConfigFile is the optional configuration file letsgo reads.
 const ConfigFile = "letsgo.mod"
 
+// pluginConfigDir is where a plugin's own config lives, beside ConfigFile.
+const pluginConfigDir = ".letsgo"
+
 // Options control how a plan is resolved.
 type Options struct {
 	// Dir is any directory inside the module.
@@ -222,6 +225,32 @@ func (p *Plan) resolvePlugins() {
 	p.note("plugins", strings.Join(named, ", "), ConfigFile)
 }
 
+// checkPluginConfigFiles looks for a configured plugin's own config at the
+// legacy root path and the current .letsgo/ path. Finding only the legacy
+// one is a Warn suggesting the move; finding both is a Fail, since core has
+// no way to tell which one the plugin would actually read.
+func (p *Plan) checkPluginConfigFiles() {
+	for _, configured := range p.Config.Plugins {
+		legacy := filepath.Join(p.RootDir, configured.Command+".mod")
+		modern := filepath.Join(p.RootDir, pluginConfigDir, plugin.ShortName(configured.Command)+".mod")
+
+		_, legacyErr := os.Stat(legacy)
+		_, modernErr := os.Stat(modern)
+		hasLegacy, hasModern := legacyErr == nil, modernErr == nil
+
+		switch {
+		case hasLegacy && hasModern:
+			p.add("plugins", Fail,
+				"%s has config at both %s and %s; remove the legacy file",
+				configured.Command, legacy, modern)
+		case hasLegacy:
+			p.add("plugins", Warn,
+				"%s reads its config from %s; move it to %s",
+				configured.Command, legacy, modern)
+		}
+	}
+}
+
 // hintPlugins nudges toward a first-party plugin whose job matches this
 // release's shape, without failing anything: building eleven commands
 // without letsgo-multi, or shipping a darwin variant beside a Homebrew tap
@@ -289,6 +318,7 @@ func (p *Plan) applyLayoutPlugin(ctx context.Context) {
 		in.Commands = append(in.Commands,
 			plugin.InputCommand{Binary: cmd.BinaryName, Package: cmd.RelPath})
 	}
+	in.ConfigDir = filepath.Join(p.RootDir, pluginConfigDir)
 
 	var out plugin.ArchiveLayoutOutput
 	if err := plugin.Run(ctx, configured, p.RootDir, in, &out); err != nil {
@@ -339,6 +369,7 @@ func (p *Plan) applyLDFlagsPlugin(ctx context.Context) {
 	for i, t := range p.Targets {
 		in.Targets[i] = t.String()
 	}
+	in.ConfigDir = filepath.Join(p.RootDir, pluginConfigDir)
 
 	var out plugin.LDFlagsOutput
 	if err := plugin.Run(ctx, configured, p.RootDir, in, &out); err != nil {
@@ -682,6 +713,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.loadConfig(root.Dir)
 	p.resolveFeatures(opts)
 	p.resolvePlugins()
+	p.checkPluginConfigFiles()
 	p.resolveModule()
 	p.checkReplace()
 	p.resolveProject()
