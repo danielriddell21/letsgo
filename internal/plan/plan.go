@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"slices"
@@ -699,6 +700,20 @@ func (p *Plan) note(field, value, from string) {
 	p.Sources = append(p.Sources, Source{Field: field, Value: value, From: from})
 }
 
+// tokenNoteFrom describes where a resolved token's source string itself came
+// from, for plan --explain: a flag, token-command, or (everything else) an
+// environment variable.
+func tokenNoteFrom(source string) string {
+	switch {
+	case strings.HasPrefix(source, "--"):
+		return "flag"
+	case source == tokenCommandSource:
+		return tokenCommandSource
+	default:
+		return "environment"
+	}
+}
+
 // Resolve builds a plan. It returns an error only when the repository cannot
 // be inspected at all; ordinary problems become failed checks, so that one run
 // reports every issue rather than only the first.
@@ -794,6 +809,10 @@ var TapTokenEnvVars = []string{"LETSGO_TAP_TOKEN"}
 // name.
 var ReleaseTokenEnvVars = []string{"LETSGO_RELEASE_TOKEN"}
 
+// tokenCommandSource is the source Token reports when the value came from
+// the global config's token-command, rather than a flag or the environment.
+const tokenCommandSource = "token-command"
+
 // Token returns the resolved token, and where it came from.
 func Token(override string) (token, source string) {
 	if override != "" {
@@ -804,7 +823,48 @@ func Token(override string) (token, source string) {
 			return v, name
 		}
 	}
+	global, err := config.LoadGlobal()
+	if err != nil {
+		global = &config.Global{}
+	}
+	return tokenWith(global)
+}
+
+// tokenWith is Token's last fallback tier, taking the global config directly
+// rather than loading it, so tests can exercise token-command without
+// relying on config.LoadGlobal's process-wide memoization.
+func tokenWith(global *config.Global) (token, source string) {
+	if token := runTokenCommand(global.TokenCommand); token != "" {
+		return token, tokenCommandSource
+	}
 	return "", ""
+}
+
+// runTokenCommand runs the global config's token-command and returns its
+// output as the token. A missing command, or one that exits non-zero, yields
+// no token, with its stderr shown — a broken credential helper must not stop
+// the flag/environment fallback chain from reaching "no token" (the PBS edge
+// case for token-command).
+//
+// The token is returned and nothing else: it is never logged, and only the
+// argv that produced it is ever recorded, as tokenCommandSource.
+func runTokenCommand(argv []string) string {
+	if len(argv) == 0 {
+		return ""
+	}
+	cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if detail := strings.TrimSpace(stderr.String()); detail != "" {
+			fmt.Fprintf(os.Stderr, "token-command: %v: %s\n", err, detail)
+		} else {
+			fmt.Fprintf(os.Stderr, "token-command: %v\n", err)
+		}
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // TapToken returns the token the Homebrew tap is written with, and where it
@@ -1089,7 +1149,7 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 		p.add("token", Fail, "%s is archived and cannot receive a release", p.Repo)
 		return
 	}
-	p.note("token", source, "environment")
+	p.note("token", source, tokenNoteFrom(source))
 
 	if !p.checkRelease(ctx, opts, repo, token, client, access) {
 		return
@@ -1106,7 +1166,7 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 		if opts.APIEndpoint != "" {
 			tapClient.SetEndpoints(opts.APIEndpoint, opts.APIEndpoint)
 		}
-		p.note("tap token", tapSource, "environment")
+		p.note("tap token", tapSource, tokenNoteFrom(tapSource))
 	}
 
 	p.checkTap(ctx, tapClient, tapSource)
@@ -1142,7 +1202,7 @@ func (p *Plan) checkRelease(
 			p.add("token", Fail, "%s is archived and cannot receive a release", p.Repo)
 			return false
 		}
-		p.note("release token", releaseSource, "environment")
+		p.note("release token", releaseSource, tokenNoteFrom(releaseSource))
 	}
 
 	switch {
