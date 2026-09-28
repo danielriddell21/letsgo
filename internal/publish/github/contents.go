@@ -14,9 +14,14 @@ import (
 // DownloadURL is the public address of a release asset. Release assets are
 // served from a predictable path, so a URL for something just uploaded needs
 // no second round trip to discover.
+//
+// tag is escaped with escapePath, not url.PathEscape: a scoped release's tag
+// (see discover.Scope) carries a literal "/", and GitHub's own route treats
+// that as directory segments, the same way it treats the repository path
+// itself. Encoding it to %2F would ask for a tag that does not exist.
 func DownloadURL(repo Repo, tag, name string) string {
 	return fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s",
-		repo.Owner, repo.Name, url.PathEscape(tag), url.PathEscape(name))
+		repo.Owner, repo.Name, escapePath(tag), url.PathEscape(name))
 }
 
 // RepoInfo is what a repository says about itself. A generated Homebrew

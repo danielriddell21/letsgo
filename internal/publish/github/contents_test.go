@@ -122,6 +122,18 @@ func TestDownloadURL(t *testing.T) {
 	}
 }
 
+// A scoped release's tag carries a literal "/" (see discover.Scope), which
+// GitHub's own route treats as directory segments. Escaping it with
+// url.PathEscape would turn it into %2F and address a tag that does not
+// exist.
+func TestDownloadURLKeepsAScopedTagsSlashesLiteral(t *testing.T) {
+	got := DownloadURL(Repo{"you", "tool"}, "services/api/v1.2.3", "tool_1.2.3_linux_amd64.tar.gz")
+	want := "https://github.com/you/tool/releases/download/services/api/v1.2.3/tool_1.2.3_linux_amd64.tar.gz"
+	if got != want {
+		t.Errorf("DownloadURL = %q, want %q", got, want)
+	}
+}
+
 // The author is sent and the committer is not. GitHub records itself as the
 // committer of a contents-API commit and signs it, which is what makes these
 // commits Verified; supplying one replaces that field and forfeits the
