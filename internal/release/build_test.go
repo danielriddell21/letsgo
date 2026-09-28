@@ -42,30 +42,22 @@ func main() {
 }
 `
 
-// fixture builds a plan for a minimal releasable module. Extra letsgo.mod
-// lines — a `disable`, say — can be given beyond the target it always needs.
-func fixture(t *testing.T, extraConfig ...string) *plan.Plan {
+// writeFile writes a fixture file, creating its parent directory as needed.
+func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
-	dir := t.TempDir()
-
-	write := func(name, content string) {
-		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	path := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	write("go.mod", "module example.com/demo\n\ngo 1.24\n")
-	write("main.go", mainGo)
-	write("README.md", "# demo\n")
-	config := "build " + gobuild.Host().String() + "\n"
-	for _, line := range extraConfig {
-		config += line + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	write("letsgo.mod", config)
+}
 
+// gitFixture commits everything written into dir and tags it, with a fixed
+// identity and timestamp so the fixture is reproducible.
+func gitFixture(t *testing.T, dir, remote, tag string) {
+	t.Helper()
 	run := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
@@ -80,10 +72,28 @@ func fixture(t *testing.T, extraConfig ...string) *plan.Plan {
 		}
 	}
 	run("init", "-q", "-b", "main")
-	run("remote", "add", "origin", "https://github.com/you/demo.git")
+	run("remote", "add", "origin", remote)
 	run("add", ".")
 	run("commit", "-q", "-m", "feat: first release")
-	run("tag", "v1.2.3")
+	run("tag", tag)
+}
+
+// fixture builds a plan for a minimal releasable module. Extra letsgo.mod
+// lines — a `disable`, say — can be given beyond the target it always needs.
+func fixture(t *testing.T, extraConfig ...string) *plan.Plan {
+	t.Helper()
+	dir := t.TempDir()
+
+	writeFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.24\n")
+	writeFile(t, dir, "main.go", mainGo)
+	writeFile(t, dir, "README.md", "# demo\n")
+	config := "build " + gobuild.Host().String() + "\n"
+	for _, line := range extraConfig {
+		config += line + "\n"
+	}
+	writeFile(t, dir, "letsgo.mod", config)
+
+	gitFixture(t, dir, "https://github.com/you/demo.git", "v1.2.3")
 
 	p, err := plan.Resolve(context.Background(), plan.Options{Dir: dir})
 	if err != nil {
@@ -102,40 +112,14 @@ func scopedFixture(t *testing.T) *plan.Plan {
 	t.Helper()
 	dir := t.TempDir()
 
-	write := func(name, content string) {
-		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("go.mod", "module example.com/monorepo\n\ngo 1.24\n")
-	write("main.go", mainGo)
-	write("services/api/go.mod", "module example.com/monorepo/services/api\n\ngo 1.24\n")
-	write("services/api/main.go", mainGo)
-	write("services/api/README.md", "# api\n")
-	write("services/api/letsgo.mod", "build "+gobuild.Host().String()+"\n")
+	writeFile(t, dir, "go.mod", "module example.com/monorepo\n\ngo 1.24\n")
+	writeFile(t, dir, "main.go", mainGo)
+	writeFile(t, dir, "services/api/go.mod", "module example.com/monorepo/services/api\n\ngo 1.24\n")
+	writeFile(t, dir, "services/api/main.go", mainGo)
+	writeFile(t, dir, "services/api/README.md", "# api\n")
+	writeFile(t, dir, "services/api/letsgo.mod", "build "+gobuild.Host().String()+"\n")
 
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
-			"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	run("init", "-q", "-b", "main")
-	run("remote", "add", "origin", "https://github.com/you/monorepo.git")
-	run("add", ".")
-	run("commit", "-q", "-m", "feat: first release")
-	run("tag", "services/api/v1.2.0")
+	gitFixture(t, dir, "https://github.com/you/monorepo.git", "services/api/v1.2.0")
 
 	p, err := plan.Resolve(context.Background(), plan.Options{Dir: filepath.Join(dir, "services/api")})
 	if err != nil {
