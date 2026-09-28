@@ -45,6 +45,7 @@ letsgo release --snapshot              rehearse a release without publishing
 letsgo verify [tag]                    rebuild a published release and compare it
 letsgo diff <from> [to]                compare two releases: size, dependencies, API
 letsgo tag [--major|--minor|--patch]   work out the next version and tag it
+letsgo promote <rc-tag>                rebuild a prerelease as a stable release
 letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
 letsgo update [--check]                update letsgo itself, verified against its manifest
 letsgo plugin install [<name>]         install a plugin, verified against its manifest (or every pin, with none)
@@ -86,6 +87,42 @@ which one the project releases with. The action installs the latest letsgo by
 default; pin `version:` to a tag when the release has to be reproducible.
 
 [action]: https://github.com/danielriddell21/letsgo-action
+
+## Promoting a prerelease
+
+`letsgo promote v1.3.0-rc.1` rebuilds an RC at its own commit and publishes it
+as `v1.3.0`: the RC release stays, restored to a prerelease, and the new
+release records which RC it was promoted from. Nothing about the RC's tag,
+assets or notes changes.
+
+Flipping an RC from pre-release to release in the GitHub UI fires
+`release: released`, which a workflow can turn into a promotion:
+
+```yaml
+on:
+  release:
+    types: [released]
+
+jobs:
+  promote:
+    # released also fires for ordinary stable releases; only a prerelease tag promotes.
+    if: contains(github.event.release.tag_name, '-')
+    runs-on: ubuntu-latest
+    permissions: { contents: write, id-token: write, attestations: write }
+    steps:
+      - uses: actions/checkout@v7
+        with: { ref: '${{ github.event.release.tag_name }}', fetch-tags: true }
+      - uses: actions/setup-go@v7
+        with: { go-version-file: go.mod }
+      - uses: danielriddell21/letsgo-action@v1
+        with:
+          command: promote
+          args: ${{ github.event.release.tag_name }}
+```
+
+Editing the release with the default `GITHUB_TOKEN` doesn't start workflows;
+use an App token if the flip should trigger this one automatically. Either
+way a re-trigger is a no-op: promote refuses once `v1.3.0` already exists.
 
 ## Self-update
 
