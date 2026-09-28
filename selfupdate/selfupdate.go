@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
@@ -78,6 +79,12 @@ type Options struct {
 	// several from one module. Empty takes the only one built for the
 	// platform, which is what a single-command repository publishes.
 	Binary string
+
+	// Prefix is the module's scope prefix (see discover.Scope), empty for a
+	// root module. It is only consulted when Tag is empty: it keeps "the
+	// most recent release" from picking another module's release in a
+	// monorepo.
+	Prefix string
 }
 
 // Update is a release newer than the running binary.
@@ -128,7 +135,7 @@ func Check(ctx context.Context, o Options) (*Update, error) {
 	if err != nil {
 		return nil, err
 	}
-	if o.Tag == "" && !newer(o.Current, release.TagName) {
+	if o.Tag == "" && !newer(o.Current, release.TagName, o.Prefix) {
 		return nil, nil
 	}
 
@@ -166,13 +173,19 @@ func Check(ctx context.Context, o Options) (*Update, error) {
 	}, nil
 }
 
-// newer reports whether tag is a later version than current.
+// newer reports whether tag is a later version than current, within prefix's
+// scope (see discover.Scope). A scoped tag carries that prefix ahead of its
+// "vX.Y.Z", which is not itself part of the version to compare.
 //
 // An unparseable current version — "dev", or a bare commit — is treated as
 // older than everything, because a development build asking about updates has
 // no claim to being ahead of a release.
-func newer(current, tag string) bool {
-	next, ok := semver.Parse(tag)
+func newer(current, tag, prefix string) bool {
+	rest, ok := (discover.Scope{Prefix: prefix}).MatchesTag(tag)
+	if !ok {
+		return false
+	}
+	next, ok := semver.Parse(rest)
 	if !ok {
 		return false
 	}
@@ -295,7 +308,11 @@ func resolveRelease(ctx context.Context, o Options) (*release, error) {
 }
 
 func releaseByTag(ctx context.Context, o Options) (*release, error) {
-	resp, err := o.get(ctx, fmt.Sprintf("%s/repos/%s/releases/tags/%s", o.api(), o.Repo, url.PathEscape(o.Tag)))
+	return releaseForTag(ctx, o, o.Tag)
+}
+
+func releaseForTag(ctx context.Context, o Options, tag string) (*release, error) {
+	resp, err := o.get(ctx, fmt.Sprintf("%s/repos/%s/releases/tags/%s", o.api(), o.Repo, url.PathEscape(tag)))
 	if err != nil {
 		return nil, err
 	}
@@ -306,15 +323,48 @@ func releaseByTag(ctx context.Context, o Options) (*release, error) {
 
 	var out release
 	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("selfupdate: parsing release %s: %w", o.Tag, err)
+		return nil, fmt.Errorf("selfupdate: parsing release %s: %w", tag, err)
 	}
 	if out.TagName == "" {
-		return nil, fmt.Errorf("selfupdate: %s has no release %s", o.Repo, o.Tag)
+		return nil, fmt.Errorf("selfupdate: %s has no release %s", o.Repo, tag)
 	}
 	return &out, nil
 }
 
+// latestRelease finds the most recent release, scoped to o.Prefix when it is
+// set. The forge's own "latest release" has no concept of a monorepo's
+// scopes, so a scoped module instead lists tags and picks the highest version
+// within its own prefix, the same way verify.latestRelease does.
 func latestRelease(ctx context.Context, o Options) (*release, error) {
+	if o.Prefix == "" {
+		return unscopedLatestRelease(ctx, o)
+	}
+
+	tags, err := listTags(ctx, o)
+	if err != nil {
+		return nil, err
+	}
+
+	scope := discover.Scope{Prefix: o.Prefix}
+	fullTag := make(map[string]string, len(tags))
+	versions := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		rest, ok := scope.MatchesTag(tag)
+		if !ok {
+			continue
+		}
+		versions = append(versions, rest)
+		fullTag[rest] = tag
+	}
+
+	tag := fullTag[semver.Latest(versions)]
+	if tag == "" {
+		return nil, fmt.Errorf("selfupdate: %s has no releases", o.Repo)
+	}
+	return releaseForTag(ctx, o, tag)
+}
+
+func unscopedLatestRelease(ctx context.Context, o Options) (*release, error) {
 	resp, err := o.get(ctx, fmt.Sprintf("%s/repos/%s/releases/latest", o.api(), o.Repo))
 	if err != nil {
 		return nil, err
@@ -332,6 +382,35 @@ func latestRelease(ctx context.Context, o Options) (*release, error) {
 		return nil, fmt.Errorf("selfupdate: %s has no releases", o.Repo)
 	}
 	return &out, nil
+}
+
+type tagInfo struct {
+	Name string `json:"name"`
+}
+
+// listTags fetches up to 100 tags, which is enough to find a monorepo
+// module's latest release without paging: a module far enough behind that
+// its newest tag falls off the first page has bigger problems than this
+// lookup.
+func listTags(ctx context.Context, o Options) ([]string, error) {
+	resp, err := o.get(ctx, fmt.Sprintf("%s/repos/%s/tags?per_page=100", o.api(), o.Repo))
+	if err != nil {
+		return nil, err
+	}
+	data, err := read(resp)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []tagInfo
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("selfupdate: parsing tags: %w", err)
+	}
+	names := make([]string, len(out))
+	for i, t := range out {
+		names[i] = t.Name
+	}
+	return names, nil
 }
 
 func fetchManifest(ctx context.Context, o Options, r *release) (*manifest.Manifest, error) {
