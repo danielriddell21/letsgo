@@ -183,8 +183,8 @@ jobs:
             exit 0
           fi
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "letsgo-champ[bot]"
+          git config user.email "293666020+letsgo-champ[bot]@users.noreply.github.com"
 
           # --warranted: no feat, fix or API change means no release. Without
           # it letsgo falls back to a patch, which is the right answer when a
