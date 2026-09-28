@@ -41,6 +41,9 @@ import (
 // ConfigFile is the optional configuration file letsgo reads.
 const ConfigFile = "letsgo.mod"
 
+// pluginConfigDir is where a plugin's own config lives, beside ConfigFile.
+const pluginConfigDir = ".letsgo"
+
 // Options control how a plan is resolved.
 type Options struct {
 	// Dir is any directory inside the module.
@@ -229,7 +232,7 @@ func (p *Plan) resolvePlugins() {
 func (p *Plan) checkPluginConfigFiles() {
 	for _, configured := range p.Config.Plugins {
 		legacy := filepath.Join(p.RootDir, configured.Command+".mod")
-		modern := filepath.Join(p.RootDir, ".letsgo", plugin.ShortName(configured.Command)+".mod")
+		modern := filepath.Join(p.RootDir, pluginConfigDir, plugin.ShortName(configured.Command)+".mod")
 
 		_, legacyErr := os.Stat(legacy)
 		_, modernErr := os.Stat(modern)
@@ -315,7 +318,7 @@ func (p *Plan) applyLayoutPlugin(ctx context.Context) {
 		in.Commands = append(in.Commands,
 			plugin.InputCommand{Binary: cmd.BinaryName, Package: cmd.RelPath})
 	}
-	in.ConfigDir = filepath.Join(p.RootDir, ".letsgo")
+	in.ConfigDir = filepath.Join(p.RootDir, pluginConfigDir)
 
 	var out plugin.ArchiveLayoutOutput
 	if err := plugin.Run(ctx, configured, p.RootDir, in, &out); err != nil {
@@ -366,7 +369,7 @@ func (p *Plan) applyLDFlagsPlugin(ctx context.Context) {
 	for i, t := range p.Targets {
 		in.Targets[i] = t.String()
 	}
-	in.ConfigDir = filepath.Join(p.RootDir, ".letsgo")
+	in.ConfigDir = filepath.Join(p.RootDir, pluginConfigDir)
 
 	var out plugin.LDFlagsOutput
 	if err := plugin.Run(ctx, configured, p.RootDir, in, &out); err != nil {
