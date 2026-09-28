@@ -95,6 +95,24 @@ type Manifest struct {
 	// release published, so verification has nothing to replay; this is here
 	// for a reader, and for yank to know which files it owns.
 	TapFiles []TapFile `json:"tap_files,omitempty"`
+
+	// PromotedFrom records the prerelease a stable release was promoted from,
+	// nil for a release that was never promoted and for the prerelease
+	// itself. A reader can walk from a stable release back to the RC it
+	// rebuilt, and `verify` can check the chain by re-downloading that
+	// manifest and hashing it.
+	PromotedFrom *PromotedFrom `json:"promoted_from,omitempty"`
+}
+
+// PromotedFrom names the prerelease a stable release was rebuilt from.
+type PromotedFrom struct {
+	// Tag is the prerelease's own tag, e.g. "v1.3.0-rc.1".
+	Tag string `json:"tag"`
+
+	// ManifestSHA256 is the digest of the prerelease's own published
+	// letsgo.json, pinning exactly which manifest this release was compared
+	// against rather than merely which tag.
+	ManifestSHA256 string `json:"manifest_sha256"`
 }
 
 // TapFile is one file the tap-files hook wrote into the Homebrew tap.

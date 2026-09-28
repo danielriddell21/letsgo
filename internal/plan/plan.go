@@ -17,6 +17,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -92,6 +93,14 @@ type Options struct {
 	// recorded in the plan and the manifest the same way, so `--no-proxy-warm`
 	// is indistinguishable from a repository that always disables it.
 	DisableProxyWarm bool
+
+	// Tag pins the version tag to resolve, overriding the "several tags on
+	// HEAD" failure. Empty means the ordinary rule: whichever one tag is on
+	// HEAD. `letsgo promote` is the one caller that needs this — it tags an
+	// RC's commit with the stable version to rebuild there, and that commit
+	// already carries the RC's own tag, so two qualifying tags on HEAD is
+	// expected rather than a mistake.
+	Tag string
 }
 
 // Status is the outcome of one check.
@@ -676,7 +685,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveModule()
 	p.checkReplace()
 	p.resolveProject()
-	p.resolveVersion(ctx)
+	p.resolveVersion(ctx, opts)
 	p.checkWorktree(opts)
 	p.resolveTargets(ctx)
 	p.resolveBudgets()
@@ -1438,7 +1447,7 @@ func (p *Plan) resolveProject() {
 	p.note("project", p.Project, "last element of the module path")
 }
 
-func (p *Plan) resolveVersion(ctx context.Context) {
+func (p *Plan) resolveVersion(ctx context.Context, opts Options) {
 	if p.Snapshot {
 		base := "0.0.0"
 		if prev, err := discover.PreviousTag(ctx, p.RootDir, p.Scope.Prefix); err == nil && prev != "" {
@@ -1451,6 +1460,19 @@ func (p *Plan) resolveVersion(ctx context.Context) {
 
 	prefix := p.Scope.Prefix
 	versions := scopedVersionTags(p.Git.Tags, prefix)
+
+	// opts.Tag pins which of several qualifying tags on HEAD is being
+	// released. Ordinarily HEAD carries at most one, but `letsgo promote`
+	// tags an RC's own commit with its stable version, and that commit
+	// already carries the RC's own tag — so for that one caller, and only
+	// when it says so explicitly, more than one tag on HEAD is not an error.
+	if opts.Tag != "" {
+		if !slices.Contains(versions, opts.Tag) {
+			p.add("tag", Fail, "%s does not carry the requested tag %s", p.Git.Commit, opts.Tag)
+			return
+		}
+		versions = []string{opts.Tag}
+	}
 
 	switch len(versions) {
 	case 0:
