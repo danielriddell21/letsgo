@@ -262,7 +262,12 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
-func TestListPluginsReportsEveryPin(t *testing.T) {
+// writeTwoPinFixture sets up a repository pinning one satisfied plugin
+// (archive-layout, on PATH with a matching digest) and one unsatisfied one
+// (ldflags, not installed), for tests of both listPlugins' text and JSON
+// forms.
+func writeTwoPinFixture(t *testing.T) {
+	t.Helper()
 	dir := t.TempDir()
 	writeProgram(t, dir, "letsgo-multi", "the multi plugin")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -276,6 +281,10 @@ func TestListPluginsReportsEveryPin(t *testing.T) {
 	write(t, "letsgo.mod", "build linux/amd64\n"+
 		"plugin archive-layout letsgo-multi v0.2.0 "+digest+"\n"+
 		"plugin ldflags letsgo-env v0.2.0 sha256:"+strings.Repeat("f", 64)+"\n")
+}
+
+func TestListPluginsReportsEveryPin(t *testing.T) {
+	writeTwoPinFixture(t)
 
 	var out bytes.Buffer
 	if err := listPlugins(&out, false); err != nil {
@@ -299,19 +308,7 @@ func TestListPluginsReportsEveryPin(t *testing.T) {
 // letsgo plugin list --json reports the same resolution as the text table,
 // in its own schema-versioned wire form.
 func TestListPluginsJSON(t *testing.T) {
-	dir := t.TempDir()
-	writeProgram(t, dir, "letsgo-multi", "the multi plugin")
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	digest, err := plugin.DigestOf(filepath.Join(dir, executableName("letsgo-multi")))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Chdir(t.TempDir())
-	write(t, "letsgo.mod", "build linux/amd64\n"+
-		"plugin archive-layout letsgo-multi v0.2.0 "+digest+"\n"+
-		"plugin ldflags letsgo-env v0.2.0 sha256:"+strings.Repeat("f", 64)+"\n")
+	writeTwoPinFixture(t)
 
 	var out bytes.Buffer
 	if err := listPlugins(&out, true); err != nil {
