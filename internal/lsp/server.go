@@ -17,6 +17,11 @@ type Options struct {
 	// GoBin overrides the go binary used for build-target completion.
 	// Empty uses "go" on PATH.
 	GoBin string
+
+	// ResolvePin backs the "update pin" code action. Nil, like Restricted,
+	// leaves the action out: a server with nothing to look a release up with
+	// has nothing honest to offer.
+	ResolvePin PinResolver
 }
 
 type document struct {
@@ -120,6 +125,8 @@ func (s *Server) handle(ctx context.Context, req request) (any, error) {
 		return s.handleFormatting(req.Params)
 	case "textDocument/documentSymbol":
 		return s.handleDocumentSymbol(req.Params)
+	case "textDocument/codeAction", "codeAction/resolve":
+		return s.handleCodeActionMethod(ctx, req)
 	default:
 		if len(req.ID) == 0 {
 			return nil, nil // an unknown notification is ignored, not an error
@@ -129,13 +136,20 @@ func (s *Server) handle(ctx context.Context, req request) (any, error) {
 }
 
 func (s *Server) handleInitialize() (any, error) {
-	return initializeResult{Capabilities: serverCapabilities{
+	caps := serverCapabilities{
 		TextDocumentSync:           textDocumentSyncKindFull,
 		CompletionProvider:         &struct{}{},
 		HoverProvider:              true,
 		DocumentFormattingProvider: true,
 		DocumentSymbolProvider:     true,
-	}}, nil
+	}
+	if !s.opts.Restricted && s.opts.ResolvePin != nil {
+		caps.CodeActionProvider = &codeActionOptions{
+			CodeActionKinds: []string{codeActionQuickFix},
+			ResolveProvider: true,
+		}
+	}
+	return initializeResult{Capabilities: caps}, nil
 }
 
 func (s *Server) handleDidOpen(raw json.RawMessage) error {

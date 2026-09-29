@@ -172,26 +172,9 @@ func installAllPins(ctx context.Context, w io.Writer, repo, token, linkDir strin
 // pin printed afterwards names its digest — can be tested against a forge
 // rather than against the network.
 func installPlugin(ctx context.Context, w io.Writer, name string, options selfupdate.Options, linkDir string, link bool) error {
-	release, err := selfupdate.Check(ctx, options)
+	release, binary, path, err := fetchIntoStore(ctx, options)
 	if err != nil {
 		return err
-	}
-	if release == nil {
-		return fmt.Errorf("letsgo plugin install: %s has no releases", options.Repo)
-	}
-
-	binary, err := release.Download(ctx)
-	if err != nil {
-		return err
-	}
-
-	store, err := pluginstore.Open("")
-	if err != nil {
-		return fmt.Errorf("letsgo plugin install: %w", err)
-	}
-	path, err := store.Put("sha256:"+release.BinarySHA256, release.Binary, binary)
-	if err != nil {
-		return fmt.Errorf("letsgo plugin install: %w", err)
 	}
 
 	fmt.Fprintf(w, "installed %s %s\n", name, release.Tag)
@@ -212,6 +195,34 @@ func installPlugin(ctx context.Context, w io.Writer, name string, options selfup
 
 	describePin(w, name, release)
 	return nil
+}
+
+// fetchIntoStore resolves the release options names, downloads and checks
+// it, and writes the executable into the plugin store at its own digest. It is
+// the part of an install that the language server's "update pin" shares.
+func fetchIntoStore(ctx context.Context, options selfupdate.Options) (release *selfupdate.Update, binary []byte, path string, err error) {
+	release, err = selfupdate.Check(ctx, options)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if release == nil {
+		return nil, nil, "", fmt.Errorf("letsgo plugin install: %s has no releases", options.Repo)
+	}
+
+	binary, err = release.Download(ctx)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	store, err := pluginstore.Open("")
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("letsgo plugin install: %w", err)
+	}
+	path, err = store.Put("sha256:"+release.BinarySHA256, release.Binary, binary)
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("letsgo plugin install: %w", err)
+	}
+	return release, binary, path, nil
 }
 
 // describePin prints the line letsgo.mod wants, filled in as far as it can be
