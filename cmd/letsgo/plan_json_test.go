@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -23,6 +26,29 @@ func TestRunPlanPrintsJSONWhenRequested(t *testing.T) {
 	}
 	if strings.Contains(out, "plan ok in") {
 		t.Errorf("runPlan --json output carries the text summary line:\n%s", out)
+	}
+}
+
+// A failing plan still prints JSON (the caller can parse the checks to see
+// why), and reports the failure through the exit code rather than a text
+// line, the same as a passing one.
+func TestRunPlanJSONReturnsErrorOnAFailingPlan(t *testing.T) {
+	dir := moduleFixture(t)
+	if err := os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	var err error
+	out := captureStdout(t, func() {
+		err = runPlan([]string{"--json"})
+	})
+
+	if !errors.Is(err, errPlanFailed) {
+		t.Errorf("runPlan --json error = %v, want errPlanFailed", err)
+	}
+	if !strings.Contains(out, `"schema": 1`) {
+		t.Errorf("runPlan --json output on failure = %q, want it to still contain the JSON report", out)
 	}
 }
 
