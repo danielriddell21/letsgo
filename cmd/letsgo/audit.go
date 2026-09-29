@@ -14,8 +14,8 @@ import (
 
 // runAudit re-checks a shipped release against today's vulnerability
 // database and records the result on the release: see docs/hld/audit.md.
-// Scanning every supported major with no tag given, and scheduling, are
-// later phases.
+// With a tag, it audits that one release; with none, it audits the newest
+// stable release of every major version in this module's scope.
 func runAudit(args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ExitOnError)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
@@ -24,14 +24,18 @@ func runAudit(args []string) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
-		return errUsage("letsgo audit <tag>")
+	if fs.NArg() > 1 {
+		return errUsage("letsgo audit [<tag>]")
 	}
 
 	ctx := context.Background()
 	started := time.Now()
 
-	repo, _, err := targetRepo(ctx, *repoFlag)
+	repo, dir, err := targetRepo(ctx, *repoFlag)
+	if err != nil {
+		return err
+	}
+	prefix, err := scopePrefix(ctx, *repoFlag, dir)
 	if err != nil {
 		return err
 	}
@@ -49,19 +53,36 @@ func runAudit(args []string) error {
 	client := github.New(tokenValue)
 	client.UserAgent = "letsgo/" + version
 
-	result, err := audit.Run(ctx, audit.Options{
-		Client: client, Repo: repo, Tag: fs.Arg(0), WorkDir: workDir,
-	})
+	opts := audit.Options{Client: client, Repo: repo, Prefix: prefix, WorkDir: workDir}
+
+	if fs.NArg() == 1 {
+		result, err := audit.Run(ctx, audit.Options{
+			Client: client, Repo: repo, Tag: fs.Arg(0), WorkDir: workDir,
+		})
+		if err != nil {
+			return err
+		}
+		reportAuditResult(result)
+		fmt.Printf("  audited in %s\n", took(started))
+		return nil
+	}
+
+	results, err := audit.RunAll(ctx, opts)
 	if err != nil {
 		return err
 	}
+	for _, result := range results {
+		reportAuditResult(result)
+	}
+	fmt.Printf("  audited %d release(s) in %s\n", len(results), took(started))
+	return nil
+}
 
+func reportAuditResult(result *audit.Result) {
 	result.Report(os.Stdout)
 	if result.Recorded {
-		fmt.Println("\n  recorded in audit.json")
+		fmt.Println("  recorded in audit.json")
 	} else {
-		fmt.Println("\n  no change since the last audit; not recorded")
+		fmt.Println("  no change since the last audit; not recorded")
 	}
-	fmt.Printf("  audited in %s\n", took(started))
-	return nil
 }
