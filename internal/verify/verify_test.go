@@ -722,3 +722,48 @@ func sha256Of(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
+
+// JSON is Result's wire form for `letsgo verify --json`: schema-versioned,
+// carrying the same checks Report writes as text.
+func TestResultJSON(t *testing.T) {
+	r := &verify.Result{
+		Tag:        "v1.2.3",
+		SourceFrom: "local checkout",
+		Checks: []verify.Check{
+			{Name: "manifest", Status: verify.Pass, Detail: "ok"},
+			{Name: "sbom", Status: verify.Fail, Detail: "missing"},
+		},
+	}
+
+	data, err := r.JSON()
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+
+	for _, want := range []string{
+		`"schema": 1`,
+		`"tag": "v1.2.3"`,
+		`"sourceFrom": "local checkout"`,
+		`"name": "manifest"`,
+		`"status": "pass"`,
+		`"detail": "ok"`,
+		`"name": "sbom"`,
+		`"status": "fail"`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("JSON() = %s, want it to contain %q", data, want)
+		}
+	}
+}
+
+func TestResultJSONOmitsAnEmptySourceFrom(t *testing.T) {
+	r := &verify.Result{Tag: "v1.2.3"}
+
+	data, err := r.JSON()
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	if strings.Contains(string(data), `"sourceFrom"`) {
+		t.Errorf("JSON() = %s, want no sourceFrom field when empty", data)
+	}
+}

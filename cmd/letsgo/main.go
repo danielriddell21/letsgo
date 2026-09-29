@@ -40,7 +40,7 @@ usage:
   letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
   letsgo release [--draft] [-o dir]      build and publish, resumably
   letsgo release --snapshot              rehearse a release without publishing
-  letsgo verify [tag]                    rebuild a published release and compare it
+  letsgo verify [tag] [--json]           rebuild a published release and compare it
   letsgo doctor [--json]                 diagnose tools and repository state, read-only
   letsgo audit <tag>                     re-check a published release against today's vulndb
   letsgo diff <from> [to]                compare two releases: size, dependencies, API
@@ -516,6 +516,7 @@ func runVerify(args []string) error {
 	repoFlag := fs.String("repo", "", "repository to verify as owner/name (default: this repository's origin)")
 	noRebuild := fs.Bool("no-rebuild", false, "compare published assets against the manifest without rebuilding")
 	work := fs.String("work", "", "scratch directory (default: a temporary one)")
+	jsonOutput := fs.Bool("json", false, "print the report as JSON")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -538,13 +539,25 @@ func runVerify(args []string) error {
 		return err
 	}
 
-	result.Report(os.Stdout)
+	if *jsonOutput {
+		data, err := result.JSON()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+	} else {
+		result.Report(os.Stdout)
+	}
 
 	if !result.OK() {
-		fmt.Printf("\n  %s does not verify (%s)\n", result.Tag, took(started))
+		if !*jsonOutput {
+			fmt.Printf("\n  %s does not verify (%s)\n", result.Tag, took(started))
+		}
 		return errVerifyFailed
 	}
-	fmt.Printf("\n  %s verified in %s\n", result.Tag, took(started))
+	if !*jsonOutput {
+		fmt.Printf("\n  %s verified in %s\n", result.Tag, took(started))
+	}
 	return nil
 }
 
