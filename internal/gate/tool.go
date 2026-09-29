@@ -47,6 +47,13 @@ func (e *MissingToolError) Error() string {
 
 func (e *MissingToolError) Unwrap() error { return ErrToolMissing }
 
+// Find locates a Go tool the same way the gate that runs it does, so a
+// caller that only wants to report whether the tool is present — `letsgo
+// doctor`, notably — never disagrees with the gate about where it looked.
+func Find(tool, install string) (string, error) {
+	return find(tool, install)
+}
+
 // find locates a Go tool.
 //
 // Unlike git, which letsgo resolves only within system directories, these live

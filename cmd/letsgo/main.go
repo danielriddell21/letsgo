@@ -41,6 +41,7 @@ usage:
   letsgo release [--draft] [-o dir]      build and publish, resumably
   letsgo release --snapshot              rehearse a release without publishing
   letsgo verify [tag]                    rebuild a published release and compare it
+  letsgo doctor                          diagnose tools and repository state, read-only
   letsgo audit <tag>                     re-check a published release against today's vulndb
   letsgo diff <from> [to]                compare two releases: size, dependencies, API
   letsgo promote <rc-tag>                rebuild a prerelease as a stable release
@@ -67,6 +68,7 @@ var commands = map[string]func([]string) error{
 	"build":    runBuild,
 	"release":  runRelease,
 	"verify":   runVerify,
+	"doctor":   runDoctor,
 	"audit":    runAudit,
 	"diff":     runDiff,
 	"promote":  runPromote,
@@ -180,6 +182,9 @@ var errPlanFailed = errors.New("plan failed")
 
 // errVerifyFailed likewise: the report already names every mismatch.
 var errVerifyFailed = errors.New("verification failed")
+
+// errDoctorFailed likewise: the report already names every failing check.
+var errDoctorFailed = errors.New("doctor found a problem")
 
 func runPlan(args []string) error {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)
