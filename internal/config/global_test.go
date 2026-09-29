@@ -229,3 +229,18 @@ func TestLoadGlobalRejectsAMissingOverride(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+// TestEveryGlobalDirectiveHasADoc holds globalDocs in step with globalKnown,
+// the same way TestEveryDirectiveHasADoc holds decode.go's docs in step.
+func TestEveryGlobalDirectiveHasADoc(t *testing.T) {
+	for name := range globalKnown {
+		if globalDocs[name] == "" {
+			t.Errorf("global directive %q has no hover doc", name)
+		}
+	}
+	for name := range globalDocs {
+		if globalKnown[name] == "" {
+			t.Errorf("global doc %q has no matching directive", name)
+		}
+	}
+}

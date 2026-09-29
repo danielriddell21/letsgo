@@ -177,6 +177,22 @@ func TestEveryDirectiveIsHandled(t *testing.T) {
 	}
 }
 
+// TestEveryDirectiveHasADoc holds docs in step with known the same way
+// TestEveryDirectiveIsHandled holds handlers in step with it: a directive an
+// editor can hover over with nothing to show is a gap, not a variant.
+func TestEveryDirectiveHasADoc(t *testing.T) {
+	for name := range known {
+		if docs[name] == "" {
+			t.Errorf("directive %q has no hover doc", name)
+		}
+	}
+	for name := range docs {
+		if known[name] == "" {
+			t.Errorf("doc %q has no matching directive", name)
+		}
+	}
+}
+
 func TestPluginDirective(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("a", 64)
 	cfg := decode(t, "plugin archive-layout letsgo-multi v0.1.0 "+digest+"\n")

@@ -54,6 +54,7 @@ usage:
   letsgo plugin list [--json]            the plugins this repository pins, and what is installed
   letsgo features [--json]               the feature catalogue: what can be disabled or required
   letsgo fmt [file|-]                    format letsgo.mod; - reads stdin, writes to stdout
+  letsgo lsp [--restricted]              serve letsgo.mod over stdio JSON-RPC, for an editor
   letsgo version                         print the version (also --version)
 
 run a command with -h for its options.
@@ -80,6 +81,7 @@ var commands = map[string]func([]string) error{
 	"tag":      runTag,
 	"fmt":      runFmt,
 	"features": runFeatures,
+	"lsp":      runLSP,
 
 	"version":   runVersion,
 	"--version": runVersion,

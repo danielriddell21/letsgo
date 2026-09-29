@@ -188,6 +188,47 @@ var known = map[string]string{
 // doing nothing.
 var blockOnly = map[string]bool{"variant": true}
 
+// docs is a one-line explanation per directive, for an editor's hover text.
+// Kept separate from known for the same reason handlers is: arity() reads
+// known, and every directive here already has an entry there.
+var docs = map[string]string{
+	"project": "Overrides the project name derived from the module path.",
+	"module":  "The directory, relative to the repository root, holding the go.mod to build.",
+	"build":   "Overrides the default build matrix of goos/goarch targets.",
+	"tags":    "Build tags applied to every build.",
+	"variant": "An additional build of the module's commands, with its own targets and tags.",
+	"plugin":  "Pins an external program at a hook, by digest.",
+	"ldflags": "Linker flags appended to the defaults.",
+	"version": "Names the variables version metadata is injected into.",
+	"archive": "Extra files to include in each archive.",
+	"budget":  "Caps a target's binary size; over it fails the release.",
+	"image":   "Describes the container image a release publishes.",
+	"brew":    "The Homebrew tap a formula is published to, or its caveats text.",
+	"release": "Sets a release option by key=value.",
+	"disable": "Turns off an optional feature by name.",
+	"require": "Turns a feature's missing tool into a failure instead of a skip.",
+}
+
+// Doc returns a directive's usage and documentation, for hover text. ok is
+// false for an unknown keyword.
+func Doc(keyword string) (usage, doc string, ok bool) {
+	usage, ok = known[keyword]
+	if !ok {
+		return "", "", false
+	}
+	return usage, docs[keyword], true
+}
+
+// Directives lists every known directive name, sorted.
+func Directives() []string {
+	names := make([]string, 0, len(known))
+	for name := range known {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // handlers folds each directive into the config.
 var handlers = map[string]func(cfg *Config, file string, line *Line) error{
 	"project": applyProject,

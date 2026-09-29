@@ -91,6 +91,42 @@ var globalHandlers = map[string]func(g *Global, file string, line *Line) error{
 	"update-check":  applyGlobalUpdateCheck,
 }
 
+// globalDocs is a one-line explanation per global directive, for an editor's
+// hover text. See docs, in decode.go, for why this is kept separate from
+// globalHandlers.
+var globalDocs = map[string]string{ //nolint:gosec // hover text, not a credential
+	"go":            "Overrides the resolved go toolchain binary.",
+	"git":           "Overrides the resolved git binary.",
+	"tool":          "Overrides where a named gate tool is found.",
+	"cache":         "Overrides the build cache location, or turns it off.",
+	"plugins":       "Overrides the plugin store location.",
+	"plugin-repo":   "Overrides the default repository `plugin install` installs from.",
+	"proxy":         "Overrides the module proxy warmed after a release.",
+	"token-command": "Runs to obtain a forge token once a flag and the environment both come up empty. Output is never written anywhere.",
+	"color":         "How output is colored.",
+	"update-check":  "How often letsgo checks for a newer release of itself.",
+}
+
+// GlobalDoc returns a global directive's usage and documentation, for hover
+// text. ok is false for an unknown keyword.
+func GlobalDoc(keyword string) (usage, doc string, ok bool) {
+	usage, ok = globalKnown[keyword]
+	if !ok {
+		return "", "", false
+	}
+	return usage, globalDocs[keyword], true
+}
+
+// GlobalDirectives lists every known global directive name, sorted.
+func GlobalDirectives() []string {
+	names := make([]string, 0, len(globalKnown))
+	for name := range globalKnown {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // DecodeGlobal interprets a parsed global config file.
 //
 // Its directive set is disjoint from letsgo.mod's: a directive that could

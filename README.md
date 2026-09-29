@@ -53,6 +53,7 @@ letsgo plugin install [<name>]         install a plugin, verified against its ma
 letsgo plugin list [--json]             the plugins this repository pins, and what is installed
 letsgo plugin prune                    remove store entries no pin in this repository references
 letsgo fmt [file|-]                    format letsgo.mod; - reads stdin, writes to stdout
+letsgo lsp [--restricted]              serve letsgo.mod over stdio JSON-RPC, for an editor
 letsgo version                         print the version (also --version)
 ```
 
