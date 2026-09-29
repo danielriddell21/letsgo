@@ -351,6 +351,8 @@ func TestServerHandlersRejectMalformedParams(t *testing.T) {
 		"textDocument/hover",
 		"textDocument/formatting",
 		"textDocument/documentSymbol",
+		"textDocument/codeAction",
+		"codeAction/resolve",
 	}
 	notifications := []string{
 		"textDocument/didOpen",

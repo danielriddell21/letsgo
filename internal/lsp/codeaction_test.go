@@ -157,3 +157,31 @@ func TestInitializeAdvertisesCodeActionsOnlyWithAResolver(t *testing.T) {
 		})
 	}
 }
+
+func TestCodeActionResolveLeavesAStaleOrForeignActionAlone(t *testing.T) {
+	c, uri := pinEditor(t, lsp.Options{ResolvePin: fixedPin(lsp.Pin{Version: "v0.2.0", Digest: newDigest}, nil)}, "letsgo.mod", pinLine+"\n")
+	c.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": uri},
+		"contentChanges": []map[string]any{{"text": "build linux/amd64\n"}},
+	})
+	c.awaitNotification("textDocument/publishDiagnostics")
+
+	for name, data := range map[string]any{
+		"not ours":          5,
+		"line is no pin":    map[string]any{"uri": uri, "line": 0},
+		"line out of range": map[string]any{"uri": uri, "line": 9},
+		"unopened":          map[string]any{"uri": uri + "x", "line": 0},
+	} {
+		body, err := json.Marshal(map[string]any{"title": "t", "data": data})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var resolved lsp.CodeAction
+		if err := json.Unmarshal(c.request("codeAction/resolve", json.RawMessage(body)), &resolved); err != nil {
+			t.Fatal(err)
+		}
+		if resolved.Edit != nil {
+			t.Errorf("%s: edit = %+v, want none", name, resolved.Edit)
+		}
+	}
+}
