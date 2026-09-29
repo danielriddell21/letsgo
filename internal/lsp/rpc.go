@@ -33,6 +33,34 @@ type response struct {
 	Error   *rpcError       `json:"error,omitempty"`
 }
 
+// MarshalJSON keeps a successful response's "result" even when it is null:
+// JSON-RPC requires exactly one of result and error, and a client such as
+// vscode-languageclient rejects a response carrying neither, which is what
+// `omitempty` produced for "shutdown" and for a request with nothing to say.
+func (r response) MarshalJSON() ([]byte, error) {
+	var (
+		body []byte
+		err  error
+	)
+	if r.Error != nil {
+		body, err = json.Marshal(struct {
+			JSONRPC string          `json:"jsonrpc"`
+			ID      json.RawMessage `json:"id"`
+			Error   *rpcError       `json:"error"`
+		}{r.JSONRPC, r.ID, r.Error})
+	} else {
+		body, err = json.Marshal(struct {
+			JSONRPC string          `json:"jsonrpc"`
+			ID      json.RawMessage `json:"id"`
+			Result  any             `json:"result"`
+		}{r.JSONRPC, r.ID, r.Result})
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lsp: %w", err)
+	}
+	return body, nil
+}
+
 // notification is the wire shape of a server-initiated notification, such as
 // textDocument/publishDiagnostics.
 type notification struct {

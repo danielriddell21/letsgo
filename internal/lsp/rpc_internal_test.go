@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +98,23 @@ func TestConnWriteErrorCarriesTheCode(t *testing.T) {
 	}
 	if resp.Error == nil || resp.Error.Code != errInvalidParams || resp.Error.Message != "bad params" {
 		t.Errorf("Error = %+v", resp.Error)
+	}
+}
+
+func TestResponseAlwaysCarriesExactlyOneOfResultAndError(t *testing.T) {
+	ok, err := json.Marshal(response{JSONRPC: "2.0", ID: json.RawMessage("1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(ok) != `{"jsonrpc":"2.0","id":1,"result":null}` {
+		t.Errorf("a null result = %s, want an explicit result:null", ok)
+	}
+
+	failed, err := json.Marshal(response{JSONRPC: "2.0", ID: json.RawMessage("2"), Error: &rpcError{Code: -32601, Message: "no"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(failed), `"result"`) {
+		t.Errorf("an error response = %s, must not carry a result", failed)
 	}
 }
