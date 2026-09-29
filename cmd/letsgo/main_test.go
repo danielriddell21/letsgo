@@ -589,6 +589,19 @@ func TestReleaseTag(t *testing.T) {
 	}
 }
 
+func TestReleaseTitle(t *testing.T) {
+	if got := releaseTitle(&plan.Plan{Tag: "v1.2.3"}); got != "v1.2.3" {
+		t.Errorf("releaseTitle for a root module = %q, want the bare tag", got)
+	}
+	scoped := &plan.Plan{
+		Tag:   "services/api/v1.2.3",
+		Scope: discover.Scope{Dir: "services/api", Prefix: "services/api/"},
+	}
+	if got := releaseTitle(scoped); got != "services/api v1.2.3" {
+		t.Errorf("releaseTitle for a scoped module = %q, want %q", got, "services/api v1.2.3")
+	}
+}
+
 func TestIsPrerelease(t *testing.T) {
 	tests := map[string]struct {
 		version string
