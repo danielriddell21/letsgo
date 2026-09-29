@@ -62,6 +62,11 @@ type Config struct {
 	// Budgets caps binary size per target, e.g. "linux/amd64" -> "15MB".
 	Budgets map[string]string
 
+	// BudgetPos is where each entry in Budgets was written, so a check raised
+	// against a bad budget can point at the line that caused it rather than
+	// merely naming the target.
+	BudgetPos map[string]Position
+
 	// Image describes the container image to publish. Nil means none: a
 	// release that creates a package in a registry should be something the
 	// repository asked for.
@@ -203,7 +208,7 @@ var handlers = map[string]func(cfg *Config, file string, line *Line) error{
 
 // Decode interprets a parsed file.
 func Decode(f *File) (*Config, error) {
-	cfg := &Config{Budgets: map[string]string{}}
+	cfg := &Config{Budgets: map[string]string{}, BudgetPos: map[string]Position{}}
 	seen := map[string]Position{}
 
 	for _, stmt := range f.Stmts {
@@ -418,7 +423,7 @@ func applyVariant(cfg *Config, file string, b *Block) error {
 	// A block's lines arrive as arguments to the block's own keyword, so the
 	// directive each one means is its first word — the same shape as
 	// `image ( base ... )`.
-	inner := &Config{Budgets: map[string]string{}}
+	inner := &Config{Budgets: map[string]string{}, BudgetPos: map[string]Position{}}
 	for _, line := range b.Lines {
 		if len(line.Args) == 0 {
 			continue
@@ -571,6 +576,7 @@ func applyBudget(cfg *Config, file string, line *Line) error {
 		return errAt(file, line.P, "budget for %s is already set", line.Args[0])
 	}
 	cfg.Budgets[line.Args[0]] = line.Args[1]
+	cfg.BudgetPos[line.Args[0]] = line.P
 	return nil
 }
 

@@ -353,6 +353,27 @@ func TestBudgetForAnUnbuiltTargetFailsThePlan(t *testing.T) {
 	}
 }
 
+// An editor turning a Fail into a diagnostic needs a line to point at, not
+// just the target name.
+func TestConfigChecksCarryPositions(t *testing.T) {
+	r := newRepo(t)
+	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\n\nbudget linux/arm64 15MB\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+
+	c := check(t, p, "budgets")
+	if c.Pos == nil {
+		t.Fatal("budgets check has no position")
+	}
+	wantFile := filepath.Join(r.dir, "letsgo.mod")
+	if c.Pos.File != wantFile || c.Pos.Line != 3 || c.Pos.Col != 1 {
+		t.Errorf("budgets check pos = %+v, want {%s 3 1}", c.Pos, wantFile)
+	}
+}
+
 func TestImageDefaultsToTheRepositoryOwner(t *testing.T) {
 	r := newRepo(t)
 	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
