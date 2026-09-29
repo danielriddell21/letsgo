@@ -111,6 +111,65 @@ func modulePath(goModPath string) (string, error) {
 	return "", fmt.Errorf("discover: %s has no module directive", goModPath)
 }
 
+// GoDirective reads the effective go version go.mod requires: the toolchain
+// directive when present, else the go directive, both normalized to a
+// "goX.Y[.Z]" form. exact reports which kind was found — a toolchain line
+// pins that exact version (anything else and GOTOOLCHAIN switches to it); a
+// go line names a minimum, satisfied by that version or any later one.
+func GoDirective(goModPath string) (version string, exact bool, err error) {
+	f, err := os.Open(goModPath)
+	if err != nil {
+		return "", false, fmt.Errorf("discover: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	var goLine, toolchainLine string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(stripComment(scanner.Text()))
+		if line == "" {
+			continue
+		}
+		if toolchainLine == "" {
+			if v, ok := directiveValue(line, "toolchain"); ok {
+				toolchainLine = v
+				continue
+			}
+		}
+		if goLine == "" {
+			if v, ok := directiveValue(line, "go"); ok {
+				goLine = v
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", false, fmt.Errorf("discover: reading %s: %w", goModPath, err)
+	}
+
+	if toolchainLine != "" {
+		return toolchainLine, true, nil
+	}
+	if goLine != "" {
+		return "go" + goLine, false, nil
+	}
+	return "", false, fmt.Errorf("discover: %s has no go directive", goModPath)
+}
+
+// directiveValue reports whether line is the named directive followed by a
+// value — requiring a separator so that, say, "go" does not match "goversion"
+// — and returns that value trimmed.
+func directiveValue(line, name string) (string, bool) {
+	rest, ok := strings.CutPrefix(line, name)
+	if !ok || (rest != "" && !isSpace(rest[0])) {
+		return "", false
+	}
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return "", false
+	}
+	return rest, true
+}
+
 // LocalReplace returns the module path and replacement directory of the
 // first replace directive in goModPath whose replacement is a filesystem
 // path rather than a module version. Both are empty when there is none.

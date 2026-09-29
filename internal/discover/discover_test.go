@@ -66,6 +66,48 @@ func TestModulePathIgnoresSimilarDirectives(t *testing.T) {
 	}
 }
 
+func TestGoDirective(t *testing.T) {
+	cases := map[string]struct {
+		goMod     string
+		want      string
+		wantExact bool
+	}{
+		"two-part go directive":     {"module example.com/foo\n\ngo 1.24\n", "go1.24", false},
+		"three-part go directive":   {"module example.com/foo\n\ngo 1.24.7\n", "go1.24.7", false},
+		"toolchain wins over go":    {"module example.com/foo\n\ngo 1.24\ntoolchain go1.24.7\n", "go1.24.7", true},
+		"comment stripped":          {"module example.com/foo\n\ngo 1.24 // a comment\n", "go1.24", false},
+		"tabbed":                    {"module example.com/foo\n\ngo\t1.24\n", "go1.24", false},
+		"similar directive ignored": {"module example.com/foo\n\ngoversion 1.24\ngo 1.23\n", "go1.23", false},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			write(t, dir, "go.mod", tc.goMod)
+
+			got, exact, err := GoDirective(filepath.Join(dir, "go.mod"))
+			if err != nil {
+				t.Fatalf("GoDirective: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("GoDirective version = %q, want %q", got, tc.want)
+			}
+			if exact != tc.wantExact {
+				t.Errorf("GoDirective exact = %v, want %v", exact, tc.wantExact)
+			}
+		})
+	}
+}
+
+func TestGoDirectiveReportsAbsence(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "go.mod", "module example.com/foo\n")
+
+	if _, _, err := GoDirective(filepath.Join(dir, "go.mod")); err == nil {
+		t.Error("want an error when go.mod has no go directive")
+	}
+}
+
 func TestLocalReplace(t *testing.T) {
 	cases := []struct {
 		name        string
