@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/audit"
@@ -96,30 +98,65 @@ func buildRelease(t *testing.T) *published {
 	return &published{dist: dist, result: result}
 }
 
+// served is one asset the fake forge is currently holding, keyed by ID.
+// audit.json starts absent and is added/replaced/removed by the same
+// upload/delete calls a real release-time publish or a later audit uses,
+// so the fake has to track this state rather than serve it statically.
+type served struct {
+	name string
+	data []byte
+}
+
+// controls lets a test break one specific request the fake forge would
+// otherwise serve normally, to drive audit's own error-handling paths
+// (a download, delete, or upload that the real API can fail on) without a
+// second, bespoke server.
+type controls struct {
+	mu sync.Mutex
+
+	failDownload string // asset name: GET its bytes 500s instead
+	corrupt      string // asset name: GET returns this instead of its real bytes
+	failDelete   string // asset name: DELETE 500s instead of removing it
+	failUpload   string // asset name: POST (upload) 500s instead of storing it
+}
+
 // serve exposes the built release through enough of the API for audit: the
-// tag lookup and asset downloads. tamper serves corrupted bytes for the
-// named asset, so its digest no longer matches what the manifest recorded —
-// the "tampered source" acceptance scenario. audit checks a downloaded
-// asset against the manifest's own digest, not against what the forge
-// reports for it, so corrupting only the reported digest (as verify's own
-// fixture does) would not exercise this path.
-func (p *published) serve(t *testing.T, tamper string) *github.Client {
+// tag lookup, asset downloads, and asset upload/delete (so a second
+// audit.Run against the same server sees the first run's audit.json).
+// tamper serves corrupted bytes for the named asset, so its digest no
+// longer matches what the manifest recorded — the "tampered source"
+// acceptance scenario. audit checks a downloaded asset against the
+// manifest's own digest, not against what the forge reports for it, so
+// corrupting only the reported digest (as verify's own fixture does) would
+// not exercise this path. The returned *controls lets a test inject a
+// failure into a later request against the same server.
+func (p *published) serve(t *testing.T, tamper string) (*github.Client, *controls) {
 	t.Helper()
 
-	var assets []github.Asset
-	byID := map[int64]string{}
-	id := int64(100)
+	ctl := &controls{}
+	byID := map[int64]served{}
+	nextID := int64(100)
 	for _, name := range p.result.Files {
 		data, err := os.ReadFile(filepath.Join(p.dist, name))
 		if err != nil {
 			t.Fatal(err)
 		}
-		id++
-		byID[id] = name
-		assets = append(assets, github.Asset{ID: id, Name: name, Size: int64(len(data)), Digest: "sha256:" + sha256Hex(data)})
+		nextID++
+		byID[nextID] = served{name: name, data: data}
+	}
+
+	assetsLocked := func() []github.Asset {
+		var assets []github.Asset
+		for id, s := range byID {
+			assets = append(assets, github.Asset{ID: id, Name: s.name, Size: int64(len(s.data)), Digest: "sha256:" + sha256Hex(s.data)})
+		}
+		return assets
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctl.mu.Lock()
+		defer ctl.mu.Unlock()
+
 		switch {
 		case strings.Contains(r.URL.Path, "/releases/tags/"):
 			if !strings.HasSuffix(r.URL.Path, "/v1.2.3") {
@@ -127,25 +164,55 @@ func (p *published) serve(t *testing.T, tamper string) *github.Client {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(github.Release{ID: 1, TagName: "v1.2.3", Assets: assets})
+			_ = json.NewEncoder(w).Encode(github.Release{ID: 1, TagName: "v1.2.3", Assets: assetsLocked()})
+
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/releases/") && strings.HasSuffix(r.URL.Path, "/assets"):
+			name := r.URL.Query().Get("name")
+			if name == ctl.failUpload {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			data, err := io.ReadAll(r.Body)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			nextID++
+			byID[nextID] = served{name: name, data: data}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(github.Asset{ID: nextID, Name: name, Size: int64(len(data)), Digest: "sha256:" + sha256Hex(data)})
+
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/releases/assets/"):
+			idText := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			assetID, _ := strconv.ParseInt(idText, 10, 64)
+			if byID[assetID].name == ctl.failDelete {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			delete(byID, assetID)
+			w.WriteHeader(http.StatusNoContent)
 
 		case strings.Contains(r.URL.Path, "/releases/assets/"):
 			idText := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 			assetID, _ := strconv.ParseInt(idText, 10, 64)
-			name, ok := byID[assetID]
+			s, ok := byID[assetID]
 			if !ok {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			if name == tamper {
+			if s.name == ctl.failDownload {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			if s.name == ctl.corrupt {
+				_, _ = w.Write([]byte("not valid json"))
+				return
+			}
+			if s.name == tamper {
 				_, _ = w.Write([]byte("not the real archive"))
 				return
 			}
-			data, err := os.ReadFile(filepath.Join(p.dist, name))
-			if err != nil {
-				t.Error(err)
-			}
-			_, _ = w.Write(data)
+			_, _ = w.Write(s.data)
 
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -155,7 +222,7 @@ func (p *published) serve(t *testing.T, tamper string) *github.Client {
 
 	client := github.New("token")
 	client.SetEndpoints(server.URL, server.URL)
-	return client
+	return client, ctl
 }
 
 // fakeGovulncheck puts a script named govulncheck ahead of PATH that prints
@@ -183,9 +250,10 @@ const affectedOutput = `{"config":{"scanner_version":"v1.1.4","db_last_modified"
 func TestRunReportsACleanRelease(t *testing.T) {
 	fakeGovulncheck(t, cleanOutput)
 	p := buildRelease(t)
+	client, _ := p.serve(t, "")
 
 	result, err := audit.Run(context.Background(), audit.Options{
-		Client: p.serve(t, ""), Repo: github.Repo{Owner: "you", Name: "demo"},
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
 		Tag: "v1.2.3", WorkDir: t.TempDir(),
 	})
 	if err != nil {
@@ -200,14 +268,18 @@ func TestRunReportsACleanRelease(t *testing.T) {
 	if len(result.Entry.Findings) != 0 {
 		t.Errorf("findings = %+v, want none", result.Entry.Findings)
 	}
+	if !result.Recorded {
+		t.Error("Recorded = false, want true for a release's first audit")
+	}
 }
 
 func TestRunReportsAnAffectedRelease(t *testing.T) {
 	fakeGovulncheck(t, affectedOutput)
 	p := buildRelease(t)
+	client, _ := p.serve(t, "")
 
 	result, err := audit.Run(context.Background(), audit.Options{
-		Client: p.serve(t, ""), Repo: github.Repo{Owner: "you", Name: "demo"},
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
 		Tag: "v1.2.3", WorkDir: t.TempDir(),
 	})
 	if err != nil {
@@ -222,6 +294,125 @@ func TestRunReportsAnAffectedRelease(t *testing.T) {
 	if result.Entry.Findings[0].Module != "golang.org/x/net" || result.Entry.Findings[0].Fixed != "v0.31.0" {
 		t.Errorf("finding = %+v", result.Entry.Findings[0])
 	}
+	if !result.Recorded {
+		t.Error("Recorded = false, want true for a release's first audit")
+	}
+}
+
+// A second run against an unchanged vulndb (same date, same findings) must
+// not append a new entry (AU-6), and must not touch any asset other than
+// audit.json (AU-8).
+func TestRunSkipsAnUnchangedRerun(t *testing.T) {
+	fakeGovulncheck(t, cleanOutput)
+	p := buildRelease(t)
+	client, _ := p.serve(t, "")
+	opts := audit.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Tag: "v1.2.3",
+	}
+
+	opts.WorkDir = t.TempDir()
+	first, err := audit.Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("first audit.Run: %v", err)
+	}
+	if !first.Recorded {
+		t.Fatal("first run was not recorded")
+	}
+
+	opts.WorkDir = t.TempDir()
+	second, err := audit.Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second audit.Run: %v", err)
+	}
+	if second.Recorded {
+		t.Error("second run recorded a duplicate entry, want it skipped")
+	}
+
+	record := fetchRecord(t, client)
+	if len(record.Audits) != 1 {
+		t.Fatalf("audits = %+v, want exactly 1", record.Audits)
+	}
+
+	release, err := client.ReleaseByTag(context.Background(), github.Repo{Owner: "you", Name: "demo"}, "v1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(release.Assets) != len(p.result.Files)+1 {
+		t.Fatalf("release has %d assets, want the %d built files plus %s",
+			len(release.Assets), len(p.result.Files), audit.FileName)
+	}
+	for _, name := range p.result.Files {
+		asset, ok := release.Asset(name)
+		if !ok {
+			t.Fatalf("release lost its %s asset", name)
+		}
+		data, err := os.ReadFile(filepath.Join(p.dist, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := asset.SHA256(); got != sha256Hex(data) {
+			t.Errorf("%s digest changed: got %s, want %s", name, got, sha256Hex(data))
+		}
+	}
+}
+
+// A run against a changed vulndb (a new database date, even with the same
+// findings) must append, keeping the earlier entry (AU-5).
+func TestRunAppendsWhenTheVulndbChanges(t *testing.T) {
+	fakeGovulncheck(t, cleanOutput)
+	p := buildRelease(t)
+	client, _ := p.serve(t, "")
+	opts := audit.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Tag: "v1.2.3",
+	}
+
+	opts.WorkDir = t.TempDir()
+	if _, err := audit.Run(context.Background(), opts); err != nil {
+		t.Fatalf("first audit.Run: %v", err)
+	}
+
+	fakeGovulncheck(t, laterOutput)
+	opts.WorkDir = t.TempDir()
+	second, err := audit.Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("second audit.Run: %v", err)
+	}
+	if !second.Recorded {
+		t.Error("Recorded = false, want true when the vulndb date changed")
+	}
+
+	record := fetchRecord(t, client)
+	if len(record.Audits) != 2 {
+		t.Fatalf("audits = %+v, want exactly 2", record.Audits)
+	}
+	if record.Audits[0].Vulndb != "2026-09-23" || record.Audits[1].Vulndb != "2026-09-24" {
+		t.Errorf("audits = %+v", record.Audits)
+	}
+}
+
+// fetchRecord reads back the audit.json the fake forge is currently
+// holding for v1.2.3, the same way a later audit.Run would.
+func fetchRecord(t *testing.T, client *github.Client) audit.Record {
+	t.Helper()
+	release, err := client.ReleaseByTag(context.Background(), github.Repo{Owner: "you", Name: "demo"}, "v1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	asset, ok := release.Asset(audit.FileName)
+	if !ok {
+		t.Fatalf("release has no %s", audit.FileName)
+	}
+	data, err := client.DownloadAsset(context.Background(), github.Repo{Owner: "you", Name: "demo"}, asset.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record audit.Record
+	if err := json.Unmarshal(data, &record); err != nil {
+		t.Fatal(err)
+	}
+	return record
 }
 
 // A tampered source archive must fail before govulncheck ever runs: the
@@ -229,9 +420,10 @@ func TestRunReportsAnAffectedRelease(t *testing.T) {
 func TestRunFailsOnATamperedSourceArchive(t *testing.T) {
 	fakeGovulncheck(t, cleanOutput)
 	p := buildRelease(t)
+	client, _ := p.serve(t, p.result.Manifest.Source.Archive)
 
 	_, err := audit.Run(context.Background(), audit.Options{
-		Client: p.serve(t, p.result.Manifest.Source.Archive),
+		Client: client,
 		Repo:   github.Repo{Owner: "you", Name: "demo"},
 		Tag:    "v1.2.3", WorkDir: t.TempDir(),
 	})
@@ -243,13 +435,97 @@ func TestRunFailsOnATamperedSourceArchive(t *testing.T) {
 func TestRunFailsForAnUnknownTag(t *testing.T) {
 	fakeGovulncheck(t, cleanOutput)
 	p := buildRelease(t)
+	client, _ := p.serve(t, "")
 
 	_, err := audit.Run(context.Background(), audit.Options{
-		Client: p.serve(t, ""), Repo: github.Repo{Owner: "you", Name: "demo"},
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
 		Tag: "v9.9.9", WorkDir: t.TempDir(),
 	})
 	if err == nil {
 		t.Fatal("an unknown tag was not rejected")
+	}
+}
+
+const laterOutput = `{"config":{"scanner_version":"v1.1.4","db_last_modified":"2026-09-24T00:00:00Z"}}`
+
+// secondRunFails audits a fresh release once (which always succeeds and
+// records the first entry), then breaks the fake forge via breakIt, runs a
+// second audit with secondOutput as govulncheck's result, and returns the
+// client (for a test to inspect what actually got recorded) and the second
+// run's error.
+func secondRunFails(t *testing.T, secondOutput string, breakIt func(*controls)) (*github.Client, error) {
+	t.Helper()
+	fakeGovulncheck(t, cleanOutput)
+	p := buildRelease(t)
+	client, ctl := p.serve(t, "")
+	opts := audit.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Tag: "v1.2.3",
+	}
+
+	opts.WorkDir = t.TempDir()
+	if _, err := audit.Run(context.Background(), opts); err != nil {
+		t.Fatalf("first audit.Run: %v", err)
+	}
+
+	fakeGovulncheck(t, secondOutput)
+	ctl.mu.Lock()
+	breakIt(ctl)
+	ctl.mu.Unlock()
+
+	opts.WorkDir = t.TempDir()
+	_, err := audit.Run(context.Background(), opts)
+	return client, err
+}
+
+// A release whose existing audit.json can't be downloaded fails the run
+// rather than silently starting over (which would lose its history).
+func TestRunFailsWhenTheExistingAuditJSONCannotBeDownloaded(t *testing.T) {
+	_, err := secondRunFails(t, cleanOutput, func(ctl *controls) { ctl.failDownload = audit.FileName })
+	if err == nil {
+		t.Fatal("a failed audit.json download was not rejected")
+	}
+}
+
+// A release whose existing audit.json does not parse fails the run rather
+// than silently discarding its history.
+func TestRunFailsWhenTheExistingAuditJSONDoesNotParse(t *testing.T) {
+	_, err := secondRunFails(t, cleanOutput, func(ctl *controls) { ctl.corrupt = audit.FileName })
+	if err == nil {
+		t.Fatal("an unparseable audit.json was not rejected")
+	}
+}
+
+// AU-8: a run that fails to replace the release's audit.json must not have
+// removed the old one first and left the release with none at all.
+func TestRunFailsWhenReplacingAuditJSONFails(t *testing.T) {
+	client, err := secondRunFails(t, laterOutput, func(ctl *controls) { ctl.failDelete = audit.FileName })
+	if err == nil {
+		t.Fatal("a failed replace was not rejected")
+	}
+
+	record := fetchRecord(t, client)
+	if len(record.Audits) != 1 {
+		t.Fatalf("audits = %+v, want the original entry still intact", record.Audits)
+	}
+}
+
+// A release audited for the first time whose audit.json upload fails must
+// surface the error.
+func TestRunFailsWhenTheFirstUploadFails(t *testing.T) {
+	fakeGovulncheck(t, cleanOutput)
+	p := buildRelease(t)
+	client, ctl := p.serve(t, "")
+	ctl.mu.Lock()
+	ctl.failUpload = audit.FileName
+	ctl.mu.Unlock()
+
+	_, err := audit.Run(context.Background(), audit.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Tag: "v1.2.3", WorkDir: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("a failed audit.json upload was not rejected")
 	}
 }
 
