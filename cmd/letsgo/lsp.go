@@ -7,6 +7,8 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/lsp"
+	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/selfupdate"
 )
 
 // runLSP serves letsgo.mod, the global config.mod and .letsgo/*.mod over
@@ -24,14 +26,16 @@ func runLSP(args []string) error {
 	}
 
 	var goBin string
+	var resolvePin lsp.PinResolver
 	if !*restricted {
+		resolvePin = latestPin
 		// A go binary that can't be resolved is not fatal: build-target
 		// completion just comes back empty, the same as it does in
 		// restricted mode.
 		goBin, _ = gobuild.Toolchain()
 	}
 
-	server := lsp.NewServer(os.Stdin, os.Stdout, lsp.Options{Restricted: *restricted, GoBin: goBin})
+	server := lsp.NewServer(os.Stdin, os.Stdout, lsp.Options{Restricted: *restricted, GoBin: goBin, ResolvePin: resolvePin})
 	code, err := server.Run(context.Background())
 	if err != nil {
 		return err
@@ -40,4 +44,21 @@ func runLSP(args []string) error {
 		os.Exit(code)
 	}
 	return nil
+}
+
+// latestPin backs the editor's "update pin" action: it installs the newest
+// release of a plugin into the store, exactly as `letsgo plugin install` would,
+// and reports the pin that names it.
+func latestPin(ctx context.Context, command string) (lsp.Pin, error) {
+	token, _ := plan.Token("")
+	release, _, _, err := fetchIntoStore(ctx, selfupdate.Options{
+		Repo:      defaultPluginRepo(),
+		Token:     token,
+		UserAgent: "letsgo/" + version,
+		Binary:    command,
+	})
+	if err != nil {
+		return lsp.Pin{}, err
+	}
+	return lsp.Pin{Version: "v" + release.Version, Digest: "sha256:" + release.BinarySHA256}, nil
 }

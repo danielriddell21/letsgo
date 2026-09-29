@@ -1,5 +1,7 @@
 package lsp
 
+import "encoding/json"
+
 // The types below are the minimal subset of the Language Server Protocol
 // this server speaks, hand-transcribed from the spec rather than imported —
 // the interfaces list in docs/pbs/vscode.md, no more.
@@ -74,11 +76,17 @@ type publishDiagnosticsParams struct {
 }
 
 type serverCapabilities struct {
-	TextDocumentSync           int       `json:"textDocumentSync"`
-	CompletionProvider         *struct{} `json:"completionProvider,omitempty"`
-	HoverProvider              bool      `json:"hoverProvider,omitempty"`
-	DocumentFormattingProvider bool      `json:"documentFormattingProvider,omitempty"`
-	DocumentSymbolProvider     bool      `json:"documentSymbolProvider,omitempty"`
+	TextDocumentSync           int                `json:"textDocumentSync"`
+	CompletionProvider         *struct{}          `json:"completionProvider,omitempty"`
+	HoverProvider              bool               `json:"hoverProvider,omitempty"`
+	DocumentFormattingProvider bool               `json:"documentFormattingProvider,omitempty"`
+	DocumentSymbolProvider     bool               `json:"documentSymbolProvider,omitempty"`
+	CodeActionProvider         *codeActionOptions `json:"codeActionProvider,omitempty"`
+}
+
+type codeActionOptions struct {
+	CodeActionKinds []string `json:"codeActionKinds"`
+	ResolveProvider bool     `json:"resolveProvider"`
 }
 
 type initializeResult struct {
@@ -126,3 +134,20 @@ const (
 	SymbolKindField     = 8
 	SymbolKindNamespace = 3
 )
+
+// CodeAction is offered without an edit and resolved into one on demand.
+type CodeAction struct {
+	Title string          `json:"title"`
+	Kind  string          `json:"kind,omitempty"`
+	Edit  *WorkspaceEdit  `json:"edit,omitempty"`
+	Data  json.RawMessage `json:"data,omitempty"`
+}
+
+type WorkspaceEdit struct {
+	Changes map[string][]TextEdit `json:"changes"`
+}
+
+type showMessageParams struct {
+	Type    int    `json:"type"`
+	Message string `json:"message"`
+}
