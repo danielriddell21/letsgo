@@ -1,0 +1,81 @@
+name: promote
+
+on:
+  # Flipping a prerelease's "Set as a pre-release" checkbox off in the GitHub
+  # UI fires this event. A human flip is a real actor, not a workflow-token
+  # write, so it starts the run without needing an App token of its own.
+  release:
+    types: [released]
+
+  # Same re-run affordance release.yml gives itself: a failed promotion, or
+  # one that predates this workflow, can be replayed by hand. Promoting is
+  # idempotent (it refuses once the stable tag already exists), so a second
+  # run is safe.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "RC tag to promote"
+        required: true
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  promote:
+    name: promote
+    # release: released also fires for an ordinary stable release; only a
+    # prerelease tag (one that carries a "-") is something to promote.
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.release.tag_name, '-')
+    runs-on: ubuntu-latest
+    steps:
+      - name: the token must exist
+        env:
+          TOKEN: ${{ secrets.LETSGO_TOKEN }}
+        run: |
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::LETSGO_TOKEN is not set; a release published with the workflow token is credited to github-actions[bot]"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.event.release.tag_name }}
+          fetch-tags: true
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: false
+
+      # See release.yml: scoped to the tap alone, so the App need not be
+      # installed on this repository at all.
+      - uses: actions/create-github-app-token@v3
+        id: tap-token
+        with:
+          app-id: ${{ vars.TAP_APP_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: homebrew-tap
+
+      - name: promote
+        run: go run ./cmd/letsgo promote --yes --work dist "${{ inputs.tag || github.event.release.tag_name }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.LETSGO_TOKEN }}
+          LETSGO_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
+
+      - name: attest provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/build/*.tar.gz
+            dist/build/*.zip
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: ignore
+          retention-days: 7
