@@ -52,7 +52,7 @@ letsgo update [--check]                update letsgo itself, verified against it
 letsgo plugin install [<name>]         install a plugin, verified against its manifest (or every pin, with none)
 letsgo plugin list [--json]             the plugins this repository pins, and what is installed
 letsgo plugin prune                    remove store entries no pin in this repository references
-letsgo fmt [file]                      format letsgo.mod
+letsgo fmt [file|-]                    format letsgo.mod; - reads stdin, writes to stdout
 letsgo version                         print the version (also --version)
 ```
 

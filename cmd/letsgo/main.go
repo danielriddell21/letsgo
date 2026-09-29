@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,7 +52,7 @@ usage:
   letsgo plugin install <name>           install a plugin, verified against its manifest
   letsgo plugin list [--json]            the plugins this repository pins, and what is installed
   letsgo features [--json]               the feature catalogue: what can be disabled or required
-  letsgo fmt [file]                      format letsgo.mod
+  letsgo fmt [file|-]                    format letsgo.mod; - reads stdin, writes to stdout
   letsgo version                         print the version (also --version)
 
 run a command with -h for its options.
@@ -1161,22 +1162,18 @@ func runFmt(args []string) error {
 		path = fs.Arg(0)
 	}
 
+	if path == "-" {
+		return fmtStdin()
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("letsgo: reading %s: %w", path, err)
 	}
-	file, err := config.Parse(filepath.Base(path), data)
+	formatted, err := formatConfig(filepath.Base(path), data)
 	if err != nil {
 		return err
 	}
-	// Decoding is not needed to format, but formatting a file that cannot be
-	// decoded would tidy something meaningless into something meaningless and
-	// well-indented.
-	if _, err := config.Decode(file); err != nil {
-		return err
-	}
-
-	formatted := file.Format()
 	if string(formatted) == string(data) {
 		return nil
 	}
@@ -1184,4 +1181,36 @@ func runFmt(args []string) error {
 		return fmt.Errorf("letsgo: writing %s: %w", path, err)
 	}
 	return nil
+}
+
+// fmtStdin reads letsgo.mod from stdin and writes the formatted result to
+// stdout, for format-on-save without writing the file behind the editor's
+// back.
+func fmtStdin() error {
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return fmt.Errorf("letsgo: reading stdin: %w", err)
+	}
+	formatted, err := formatConfig(plan.ConfigFile, data)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stdout.Write(formatted); err != nil {
+		return fmt.Errorf("letsgo: writing stdout: %w", err)
+	}
+	return nil
+}
+
+// formatConfig parses and decodes data before formatting it, so formatting a
+// file that cannot be decoded doesn't tidy something meaningless into
+// something meaningless and well-indented.
+func formatConfig(name string, data []byte) ([]byte, error) {
+	file, err := config.Parse(name, data)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := config.Decode(file); err != nil {
+		return nil, err
+	}
+	return file.Format(), nil
 }
