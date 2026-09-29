@@ -16,6 +16,7 @@ package verify
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -24,6 +25,11 @@ import (
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
+
+// auditFileName is internal/audit.FileName, duplicated rather than imported:
+// audit imports this package (to reuse FetchManifest/SourceFromArchive), so
+// the reverse import would cycle.
+const auditFileName = "audit.json"
 
 // Status is the outcome of one check.
 type Status string
@@ -154,6 +160,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	result.add("manifest", Pass, "letsgo.json describes %d artifacts, built by %s with %s",
 		len(m.Artifacts), m.Builder.Tool, m.Builder.Go)
 	reportFeatures(result, m)
+	reportAudit(ctx, o, result, release)
 
 	comparePublished(result, release, m)
 	checkProvenance(ctx, o, result, m)
@@ -290,6 +297,49 @@ func reportFeatures(result *Result, m *manifest.Manifest) {
 		parts = append(parts, "required: "+strings.Join(m.Features.Required, ", "))
 	}
 	result.add("features", Pass, "%s", strings.Join(parts, "; "))
+}
+
+// auditEntry is the one field set reportAudit needs from an audit.json
+// entry (internal/audit.Entry's own schema).
+type auditEntry struct {
+	Vulndb   string `json:"vulndb"`
+	Status   string `json:"status"`
+	Findings []struct {
+		ID string `json:"id"`
+	} `json:"findings"`
+}
+
+// reportAudit surfaces the release's latest audit.json entry, when one
+// exists (AU-10): informational only, so an affected release still passes
+// (AU-9) — a later audit re-checking against today's vulndb is not the
+// release's own fault.
+func reportAudit(ctx context.Context, o Options, result *Result, release *github.Release) {
+	asset, ok := release.Asset(auditFileName)
+	if !ok {
+		return
+	}
+	data, err := o.Client.DownloadAsset(ctx, o.Repo, asset.ID)
+	if err != nil {
+		result.add("audit", Warn, "could not read %s: %v", auditFileName, err)
+		return
+	}
+	var record struct {
+		Audits []auditEntry `json:"audits"`
+	}
+	if err := json.Unmarshal(data, &record); err != nil || len(record.Audits) == 0 {
+		return
+	}
+
+	last := record.Audits[len(record.Audits)-1]
+	if last.Status != "affected" {
+		result.add("audit", Pass, "clean (as of %s)", last.Vulndb)
+		return
+	}
+	ids := make([]string, len(last.Findings))
+	for i, f := range last.Findings {
+		ids[i] = f.ID
+	}
+	result.add("audit", Pass, "affected by %s (as of %s)", strings.Join(ids, ", "), last.Vulndb)
 }
 
 func short(digest string) string {

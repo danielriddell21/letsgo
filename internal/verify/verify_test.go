@@ -14,7 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/danielriddell21/letsgo/internal/audit"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -188,10 +190,26 @@ func serveNoAttestations(w http.ResponseWriter) {
 
 func (p *published) serve(t *testing.T, corrupt string) *github.Client {
 	t.Helper()
+	return p.serveWith(t, corrupt, "", nil)
+}
+
+// serveWith is serve, optionally also serving one more asset (extraName,
+// extraData) by literal bytes rather than a file under dist — for the
+// audit.json consumer checks (AU-9, AU-10), which have no counterpart
+// among the build's own published files.
+func (p *published) serveWith(t *testing.T, corrupt, extraName string, extraData []byte) *github.Client {
+	t.Helper()
 
 	assets, byID := assetsFrom(t, p.dist, p.result.Files, 100, corrupt)
 	for id, name := range byID {
 		p.assets[name] = id
+	}
+
+	const extraID = 999
+	if extraName != "" {
+		assets = append(assets, github.Asset{
+			ID: extraID, Name: extraName, Size: int64(len(extraData)), Digest: "sha256:" + sha256Of(extraData),
+		})
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +219,9 @@ func (p *published) serve(t *testing.T, corrupt string) *github.Client {
 			_ = json.NewEncoder(w).Encode(github.Release{
 				ID: 1, TagName: "v1.2.3", Assets: assets,
 			})
+
+		case extraName != "" && strings.HasSuffix(r.URL.Path, fmt.Sprintf("/releases/assets/%d", extraID)):
+			_, _ = w.Write(extraData)
 
 		case strings.Contains(r.URL.Path, "/releases/assets/"):
 			serveAsset(t, w, r, func(id int64) (string, string, bool) {
@@ -631,6 +652,68 @@ func TestVerifyOmitsFeaturesWhenNoneAreSet(t *testing.T) {
 	for _, c := range result.Checks {
 		if c.Name == "features" {
 			t.Errorf("features = %+v, want no features check when none are set", c)
+		}
+	}
+}
+
+// A release audited as affected still verifies (AU-9): a later vulndb
+// finding something is not the release's own fault, so it surfaces as an
+// informational pass naming the finding (AU-10), not a failure.
+func TestVerifyReportsAnAffectedAudit(t *testing.T) {
+	p := buildRelease(t)
+	record := audit.Record{Schema: audit.Schema, Tag: "v1.2.3", Audits: []audit.Entry{
+		{At: time.Now(), Vulndb: "2026-09-24", Status: audit.Affected, Findings: []audit.Finding{{ID: "GO-2026-1234", Module: "example.com/vuln"}}},
+	}}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := run(t, p, verify.Options{
+		Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		Client: p.serveWith(t, "", "audit.json", data),
+	})
+
+	if !result.OK() {
+		t.Errorf("an affected audit failed verification: %+v", result.Checks)
+	}
+	c := find(t, result, "audit")
+	if c.Status != verify.Pass || !strings.Contains(c.Detail, "affected by GO-2026-1234 (as of 2026-09-24)") {
+		t.Errorf("audit = %+v, want a pass naming the finding", c)
+	}
+}
+
+// A clean audit gets its own, shorter line.
+func TestVerifyReportsACleanAudit(t *testing.T) {
+	p := buildRelease(t)
+	record := audit.Record{Schema: audit.Schema, Tag: "v1.2.3", Audits: []audit.Entry{
+		{At: time.Now(), Vulndb: "2026-09-24", Status: audit.Clean},
+	}}
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := run(t, p, verify.Options{
+		Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		Client: p.serveWith(t, "", "audit.json", data),
+	})
+
+	c := find(t, result, "audit")
+	if c.Status != verify.Pass || c.Detail != "clean (as of 2026-09-24)" {
+		t.Errorf("audit = %+v, want a clean pass", c)
+	}
+}
+
+// A release with no audit.json is unaudited, not a failure: verify must not
+// invent a line to report.
+func TestVerifyOmitsAuditWhenNoneExists(t *testing.T) {
+	p := buildRelease(t)
+	result := run(t, p, verify.Options{Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true})
+
+	for _, c := range result.Checks {
+		if c.Name == "audit" {
+			t.Errorf("audit = %+v, want no audit check when audit.json is absent", c)
 		}
 	}
 }
