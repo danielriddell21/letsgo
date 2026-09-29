@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -18,31 +17,10 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/audit"
-	"github.com/danielriddell21/letsgo/internal/gobuild"
-	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
+	"github.com/danielriddell21/letsgo/internal/releasetest"
 )
-
-const mainGo = `package main
-
-import (
-	"fmt"
-	"os"
-)
-
-var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
-)
-
-func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("demo %s (%s) built %s\n", version, commit, date)
-	}
-}
-`
 
 // published is a release built by the real pipeline, so its source archive
 // and manifest digest are exactly what audit has to check against — the
@@ -73,46 +51,7 @@ func demoModulePath(tag string) string {
 // that need more than one real release (RunAll's grouping-by-major logic).
 func buildReleaseTagged(t *testing.T, tag string) *published {
 	t.Helper()
-	dir := t.TempDir()
-
-	for name, content := range map[string]string{
-		"go.mod":     "module " + demoModulePath(tag) + "\n\ngo 1.24\n",
-		"main.go":    mainGo,
-		"letsgo.mod": "build " + gobuild.Host().String() + "\n",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
-			"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	run("init", "-q", "-b", "main")
-	run("add", ".")
-	run("commit", "-q", "-m", "feat: first")
-	run("tag", tag)
-
-	p, err := plan.Resolve(context.Background(), plan.Options{Dir: dir})
-	if err != nil || !p.OK() {
-		t.Fatalf("plan: %v %+v", err, p.Checks)
-	}
-
-	dist := t.TempDir()
-	result, err := release.Build(context.Background(), p, dist, "test", nil, nil)
-	if err != nil {
-		t.Fatalf("release.Build: %v", err)
-	}
+	dist, result := releasetest.Build(t, demoModulePath(tag), tag)
 	return &published{tag: tag, dist: dist, result: result}
 }
 

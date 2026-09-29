@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/audit"
-	"github.com/danielriddell21/letsgo/internal/plan"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
 // runAudit re-checks a shipped release against today's vulnerability
@@ -31,33 +29,17 @@ func runAudit(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	repo, dir, err := targetRepo(ctx, *repoFlag)
+	run, err := resolveScratchRun(ctx, *repoFlag, *token, *work, "letsgo-audit-")
 	if err != nil {
 		return err
 	}
-	prefix, err := scopePrefix(ctx, *repoFlag, dir)
-	if err != nil {
-		return err
-	}
+	defer run.cleanup()
 
-	workDir := *work
-	if workDir == "" {
-		workDir, err = os.MkdirTemp("", "letsgo-audit-")
-		if err != nil {
-			return fmt.Errorf("letsgo: scratch directory: %w", err)
-		}
-		defer func() { _ = os.RemoveAll(workDir) }()
-	}
-
-	tokenValue, _ := plan.Token(*token)
-	client := github.New(tokenValue)
-	client.UserAgent = "letsgo/" + version
-
-	opts := audit.Options{Client: client, Repo: repo, Prefix: prefix, WorkDir: workDir}
+	opts := audit.Options{Client: run.Client, Repo: run.Repo, Prefix: run.Prefix, WorkDir: run.WorkDir}
 
 	if fs.NArg() == 1 {
 		result, err := audit.Run(ctx, audit.Options{
-			Client: client, Repo: repo, Tag: fs.Arg(0), WorkDir: workDir,
+			Client: run.Client, Repo: run.Repo, Tag: fs.Arg(0), WorkDir: run.WorkDir,
 		})
 		if err != nil {
 			return err
