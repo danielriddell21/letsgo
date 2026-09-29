@@ -481,20 +481,28 @@ func warmProxy(ctx context.Context, p *plan.Plan) {
 	fmt.Printf("  primed %s\n", p.Proxy)
 }
 
-// warmProxyAndCheckSumdb primes the module proxy, then cross-checks
-// sum.golang.org and the proxy against the published source archive — on
-// every non-snapshot, non-draft, non-scoped release. The sumdb check still
-// runs with proxy-warm disabled, so it can report its own skip reason
-// (SD-7) rather than going silent along with the warm.
+// warmProxyAndCheckSumdb cross-checks sum.golang.org and the proxy against
+// the published source archive, then primes the proxy — on every
+// non-snapshot, non-draft, non-scoped release. The sumdb check still runs
+// with proxy-warm disabled, so it can report its own skip reason (SD-7)
+// rather than going silent along with the warm.
+//
+// The check runs first deliberately: it is the one call in this pair that
+// waits for the proxy to agree on the release's own commit before ever
+// asking it for content (see sumdb.Check's expectedCommit), and the proxy
+// answers module@version once, from whatever it resolves at that first
+// ask, then repeats that answer forever. Warming first would risk locking
+// in a stale resolution before the check ever got a chance to wait it out.
 func warmProxyAndCheckSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.Result, snapshot, draft bool) error {
 	if snapshot || draft || p.Config.ModuleDir != "" {
 		return nil
 	}
 	proxyWarmOn := p.Features.On("proxy-warm")
+	err := checkSumdb(ctx, p, dir, result, !proxyWarmOn)
 	if proxyWarmOn {
 		warmProxy(ctx, p)
 	}
-	return checkSumdb(ctx, p, dir, result, !proxyWarmOn)
+	return err
 }
 
 func runVerify(args []string) error {

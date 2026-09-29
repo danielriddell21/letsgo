@@ -29,9 +29,15 @@ func checkSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.R
 
 	archivePath := filepath.Join(dir, result.Source.Name)
 
-	r, err := sumdb.Check(ctx, sumdb.DefaultURL, p.Proxy, p.Module.Path, p.Version, archivePath)
+	r, err := sumdb.Check(ctx, sumdb.DefaultURL, p.Proxy, p.Module.Path, p.Version, archivePath, p.Git.Commit)
 	if err != nil {
 		fmt.Printf("  ! could not check sum.golang.org: %v\n", err)
+		return nil
+	}
+
+	if r.ProxyPending {
+		fmt.Printf("  · the module proxy has not resolved %s@%s to its commit yet\n", p.Module.Path, p.Version)
+		fmt.Println("    check again in a few minutes")
 		return nil
 	}
 

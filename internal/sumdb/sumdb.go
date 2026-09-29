@@ -15,6 +15,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,14 +73,39 @@ type Result struct {
 	// module@version after retrying for sumdbRetryBudget (SD-6). Every
 	// other field is zero in that case — Check never reached the proxy.
 	NotFound bool
+
+	// ProxyPending is true when the module proxy hadn't resolved
+	// module@version to expectedCommit after retrying for
+	// sumdbRetryBudget — the same moment-after-tagging lag SD-6 already
+	// tolerates for sumdb's own lookup, extended to the proxy's own git
+	// resolution: it answers module@version once, from whatever its
+	// mirror of the VCS shows at that moment, and every endpoint for that
+	// version is then cached forever, so asking too soon risks
+	// permanently locking in the wrong commit's zip. Every other field is
+	// zero in that case — Check never reached sumdb or the zip.
+	ProxyPending bool
 }
 
 // Check fetches module@version's record from sumdb and its zip from proxy,
 // then compares every file in the zip against the same path in the local
 // source archive at archivePath (a tar.gz as internal/build.WriteSource
 // produces, with every entry under one top-level directory).
-func Check(ctx context.Context, sumdbURL, proxyURL, modulePath, version, archivePath string) (Result, error) {
+//
+// expectedCommit, when non-empty, is the git commit the release was
+// actually built from: before ever touching sumdb or the zip, Check waits
+// for the proxy to agree module@version resolves to that commit (see
+// ProxyPending), so a laggy proxy is reported as "not caught up yet"
+// instead of a false content mismatch. Pass "" to skip that wait.
+func Check(ctx context.Context, sumdbURL, proxyURL, modulePath, version, archivePath, expectedCommit string) (Result, error) {
 	version = normalizeVersion(version)
+
+	consistent, err := awaitProxyCommit(ctx, proxyURL, modulePath, version, expectedCommit)
+	if err != nil {
+		return Result{}, err
+	}
+	if !consistent {
+		return Result{ProxyPending: true}, nil
+	}
 
 	sumH1, found, err := lookupHashWithRetry(ctx, sumdbURL, modulePath, version)
 	if err != nil {
@@ -136,29 +162,99 @@ func normalizeVersion(version string) string {
 	return version
 }
 
+// retryUntil calls attempt repeatedly with exponential backoff (1s, 2s,
+// 4s, ...) until it reports done or a genuine error, giving up once the
+// next sleep would push total elapsed time past sumdbRetryBudget. Shared by
+// lookupHashWithRetry (SD-6: sumdb may not have a record yet) and
+// awaitProxyCommit (the module proxy's own git resolution can lag the same
+// way, moments after tagging).
+func retryUntil(attempt func() (done bool, err error)) error {
+	backoff := time.Second
+	var elapsed time.Duration
+	for {
+		done, err := attempt()
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
+		}
+		if elapsed+backoff > sumdbRetryBudget {
+			return nil
+		}
+		sumdbSleep(backoff)
+		elapsed += backoff
+		backoff *= 2
+	}
+}
+
 // lookupHashWithRetry calls lookupHashOnce, retrying with backoff while
 // sumdb has no record yet, up to sumdbRetryBudget (SD-6): a moment after
 // tagging, the record may simply not exist yet. found is false only when
 // the budget is exhausted with the record still missing — never on a
 // genuine error, which is returned instead.
 func lookupHashWithRetry(ctx context.Context, sumdbURL, modulePath, version string) (h1 string, found bool, err error) {
-	backoff := time.Second
-	var elapsed time.Duration
-	for {
-		h1, notFound, err := lookupHashOnce(ctx, sumdbURL, modulePath, version)
-		if err != nil {
-			return "", false, err
+	err = retryUntil(func() (bool, error) {
+		var notFound bool
+		var attemptErr error
+		h1, notFound, attemptErr = lookupHashOnce(ctx, sumdbURL, modulePath, version)
+		if attemptErr != nil {
+			return false, attemptErr
 		}
-		if !notFound {
-			return h1, true, nil
-		}
-		if elapsed+backoff > sumdbRetryBudget {
-			return "", false, nil
-		}
-		sumdbSleep(backoff)
-		elapsed += backoff
-		backoff *= 2
+		found = !notFound
+		return found, nil
+	})
+	return h1, found, err
+}
+
+// awaitProxyCommit retries the module proxy's .info endpoint until it
+// reports expectedCommit as module@version's origin commit, up to
+// sumdbRetryBudget. expectedCommit == "" (the caller has no commit to
+// verify against) always reports consistent. A proxy response with no
+// Origin field (a non-git VCS, or an implementation that doesn't report
+// one — Origin is proxy.golang.org's own extension, not part of the base
+// protocol) can't be verified either, and is likewise treated as
+// consistent rather than blocked on forever.
+func awaitProxyCommit(ctx context.Context, proxyURL, modulePath, version, expectedCommit string) (consistent bool, err error) {
+	if expectedCommit == "" {
+		return true, nil
 	}
+	err = retryUntil(func() (bool, error) {
+		commit, attemptErr := proxyOrigin(ctx, proxyURL, modulePath, version)
+		if attemptErr != nil {
+			return false, attemptErr
+		}
+		consistent = commit == "" || commit == expectedCommit
+		return consistent, nil
+	})
+	return consistent, err
+}
+
+// proxyOrigin fetches module@version's .info document from the proxy and
+// returns the commit its Origin recorded, or "" if the document carried no
+// Origin (or didn't parse as JSON at all) — left for the caller to treat as
+// "can't verify" rather than a hard error.
+func proxyOrigin(ctx context.Context, proxyURL, modulePath, version string) (commit string, err error) {
+	url := fmt.Sprintf("%s/%s/@v/%s.info", strings.TrimSuffix(proxyURL, "/"),
+		publish.EscapeModulePath(modulePath), publish.EscapeModulePath(version))
+
+	body, status, err := get(ctx, url, 1<<16)
+	if err != nil {
+		return "", err
+	}
+	if status < 200 || status > 299 {
+		return "", fmt.Errorf("sumdb: fetching %s: status %d", url, status)
+	}
+
+	var info struct {
+		Origin struct {
+			Hash string
+		}
+	}
+	if json.Unmarshal(body, &info) != nil {
+		return "", nil //nolint:nilerr // an unparseable .info body can't be verified, not a hard error
+	}
+	return info.Origin.Hash, nil
 }
 
 // lookupHashOnce fetches sumdb's lookup record for module@version and

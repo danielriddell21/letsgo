@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -157,7 +158,7 @@ func TestCheckReportsAMatch(t *testing.T) {
 	sumdbURL, proxyURL := fakeServers(t, modulePath, version, h1, zipData)
 	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", files)
 
-	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath)
+	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +179,7 @@ func TestCheckReportsAMismatchedFile(t *testing.T) {
 	archiveFiles := map[string]string{"go.mod": "module example.com/foo\n", "foo.go": "package foo\n// tampered\n"}
 	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", archiveFiles)
 
-	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath)
+	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +200,7 @@ func TestCheckReportsAMissingFile(t *testing.T) {
 	archiveFiles := map[string]string{"go.mod": "module example.com/foo\n"}
 	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", archiveFiles)
 
-	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath)
+	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +221,7 @@ func TestCheckReportsExtraArchiveFilesWithoutFailing(t *testing.T) {
 	archiveFiles := map[string]string{"go.mod": "module example.com/foo\n", "README.md": "docs\n"}
 	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", archiveFiles)
 
-	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath)
+	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +240,7 @@ func TestCheckReportsASumdbProxyDisagreement(t *testing.T) {
 	sumdbURL, proxyURL := fakeServers(t, modulePath, version, "h1:disagrees==", zipData)
 	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", files)
 
-	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath)
+	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +258,7 @@ func TestCheckFailsWhenTheArchiveIsMissing(t *testing.T) {
 	zipData, h1 := buildZip(t, modulePath, version, files)
 	sumdbURL, proxyURL := fakeServers(t, modulePath, version, h1, zipData)
 
-	_, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, filepath.Join(t.TempDir(), "missing.tar.gz"))
+	_, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, filepath.Join(t.TempDir(), "missing.tar.gz"), "")
 	if err == nil {
 		t.Fatal("Check succeeded with a missing archive")
 	}
@@ -275,7 +276,7 @@ func TestCheckReportsNotFoundAfterExhaustingTheRetryBudget(t *testing.T) {
 
 	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", map[string]string{"go.mod": "module example.com/foo\n"})
 
-	result, err := Check(context.Background(), sumdbServer.URL, "https://proxy.invalid", "example.com/foo", "v1.0.0", archivePath)
+	result, err := Check(context.Background(), sumdbServer.URL, "https://proxy.invalid", "example.com/foo", "v1.0.0", archivePath, "")
 	if err != nil {
 		t.Fatalf("Check() error = %v, want nil (a still-missing record is not an error)", err)
 	}
@@ -313,7 +314,7 @@ func TestCheckSucceedsAfterSumdbReturnsTheRecordOnRetry(t *testing.T) {
 
 	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", files)
 
-	result, err := Check(context.Background(), sumdbServer.URL, proxyServer.URL, modulePath, version, archivePath)
+	result, err := Check(context.Background(), sumdbServer.URL, proxyServer.URL, modulePath, version, archivePath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +342,7 @@ func TestCheckDoesNotRetryOnAGenuineSumdbError(t *testing.T) {
 
 	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", map[string]string{"go.mod": "module example.com/foo\n"})
 
-	_, err := Check(context.Background(), sumdbServer.URL, "https://proxy.invalid", "example.com/foo", "v1.0.0", archivePath)
+	_, err := Check(context.Background(), sumdbServer.URL, "https://proxy.invalid", "example.com/foo", "v1.0.0", archivePath, "")
 	if err == nil {
 		t.Fatal("Check succeeded despite a sumdb 500")
 	}
@@ -372,7 +373,7 @@ func TestCheckFailsWhenTheProxyErrors(t *testing.T) {
 
 	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", map[string]string{"go.mod": "module example.com/foo\n"})
 
-	_, err := Check(context.Background(), sumdbURL, proxyServer.URL, modulePath, version, archivePath)
+	_, err := Check(context.Background(), sumdbURL, proxyServer.URL, modulePath, version, archivePath, "")
 	if err == nil {
 		t.Fatal("Check succeeded despite a proxy 500")
 	}
@@ -390,7 +391,7 @@ func TestCheckFailsWhenTheProxyZipIsCorrupt(t *testing.T) {
 
 	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", map[string]string{"go.mod": "module example.com/foo\n"})
 
-	_, err := Check(context.Background(), sumdbURL, proxyServer.URL, modulePath, version, archivePath)
+	_, err := Check(context.Background(), sumdbURL, proxyServer.URL, modulePath, version, archivePath, "")
 	if err == nil {
 		t.Fatal("Check succeeded despite a corrupt proxy zip")
 	}
@@ -456,11 +457,143 @@ func TestCheckNormalizesVersionPrefix(t *testing.T) {
 	sumdbURL, proxyURL := fakeServers(t, modulePath, version, h1, zipData)
 	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", files)
 
-	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, "1.0.0", archivePath)
+	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, "1.0.0", archivePath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !result.Matched {
 		t.Errorf("Check() with an unprefixed version = %+v, want a match", result)
+	}
+}
+
+// infoProxy starts a proxy server whose .info responses come from
+// infoHandler, and whose every other request (the .zip) always returns
+// zipData — real module proxies resolve each endpoint independently, so a
+// test proxy needs to as well to exercise awaitProxyCommit on its own.
+func infoProxy(t *testing.T, zipData []byte, infoHandler http.HandlerFunc) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".info") {
+			infoHandler(w, r)
+			return
+		}
+		_, _ = w.Write(zipData)
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
+// The failure this guards against actually happened in production: two
+// letsgo releases in a row (v0.27.0, v0.28.0) each got tagged correctly in
+// git, but the very first request to touch proxy.golang.org for that
+// version resolved — and then permanently cached — the *previous*
+// release's commit, since the proxy's own git mirror hadn't caught up yet.
+// Every retry after that kept seeing the same wrong, now-immutable answer.
+func TestCheckReportsProxyPendingWhenTheOriginNeverCatchesUp(t *testing.T) {
+	restore := stubSumdbSleep(t)
+	defer restore()
+
+	const modulePath, version = "example.com/foo", "v1.0.0"
+	files := map[string]string{"go.mod": "module example.com/foo\n"}
+	zipData, h1 := buildZip(t, modulePath, version, files)
+	sumdbURL, _ := fakeServers(t, modulePath, version, h1, nil)
+
+	var requests int
+	proxyURL := infoProxy(t, zipData, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		fmt.Fprintf(w, `{"Version":%q,"Origin":{"Hash":"stale-commit"}}`, version)
+	})
+	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", files)
+
+	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath, "the-real-commit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.ProxyPending {
+		t.Errorf("Check() = %+v, want ProxyPending", result)
+	}
+	if requests < 2 {
+		t.Errorf("proxy saw %d .info requests, want retries", requests)
+	}
+}
+
+func TestCheckSucceedsAfterTheProxyOriginCatchesUpOnRetry(t *testing.T) {
+	restore := stubSumdbSleep(t)
+	defer restore()
+
+	const modulePath, version = "example.com/foo", "v1.0.0"
+	files := map[string]string{"go.mod": "module example.com/foo\n"}
+	zipData, h1 := buildZip(t, modulePath, version, files)
+	sumdbURL, _ := fakeServers(t, modulePath, version, h1, nil)
+
+	var requests int
+	proxyURL := infoProxy(t, zipData, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		hash := "stale-commit"
+		if requests > 2 {
+			hash = "the-real-commit"
+		}
+		fmt.Fprintf(w, `{"Version":%q,"Origin":{"Hash":%q}}`, version, hash)
+	})
+	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", files)
+
+	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath, "the-real-commit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ProxyPending {
+		t.Fatal("Check() reported ProxyPending despite the origin catching up")
+	}
+	if !result.Matched {
+		t.Errorf("Check() = %+v, want a match", result)
+	}
+	if requests != 3 {
+		t.Errorf("proxy saw %d .info requests, want 3 (two stale then the real commit)", requests)
+	}
+}
+
+// A proxy that reports no Origin at all (a non-git VCS, or an
+// implementation that simply doesn't include the field) can't be verified,
+// so Check must proceed rather than block on a check it can never satisfy.
+func TestCheckProceedsWhenTheProxyReportsNoOrigin(t *testing.T) {
+	const modulePath, version = "example.com/foo", "v1.0.0"
+	files := map[string]string{"go.mod": "module example.com/foo\n"}
+	zipData, h1 := buildZip(t, modulePath, version, files)
+	sumdbURL, _ := fakeServers(t, modulePath, version, h1, nil)
+
+	proxyURL := infoProxy(t, zipData, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"Version":%q}`, version)
+	})
+	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", files)
+
+	result, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, archivePath, "any-commit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ProxyPending {
+		t.Fatal("Check() reported ProxyPending despite the proxy having no Origin to disagree with")
+	}
+	if !result.Matched {
+		t.Errorf("Check() = %+v, want a match", result)
+	}
+}
+
+func TestCheckDoesNotRetryOnAGenuineProxyInfoError(t *testing.T) {
+	restore := stubSumdbSleep(t)
+	defer restore()
+
+	var requests int
+	proxyURL := infoProxy(t, nil, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	_, err := Check(context.Background(), "https://sumdb.invalid", proxyURL, "example.com/foo", "v1.0.0",
+		filepath.Join(t.TempDir(), "missing.tar.gz"), "any-commit")
+	if err == nil {
+		t.Fatal("Check succeeded despite a genuine proxy .info error")
+	}
+	if requests != 1 {
+		t.Errorf("proxy saw %d .info requests, want 1 (no retry on a real error)", requests)
 	}
 }
