@@ -1,20 +1,10 @@
 package doctor
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/config"
 )
-
-func write(t *testing.T, dir, name, content string) {
-	t.Helper()
-	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func TestVersionSatisfies(t *testing.T) {
 	cases := map[string]struct {
@@ -74,33 +64,20 @@ func TestCheckGateToolEscalatesToFailWhenRequired(t *testing.T) {
 
 func TestRequiresVulncheck(t *testing.T) {
 	t.Run("no letsgo.mod", func(t *testing.T) {
-		dir := t.TempDir()
-		if requiresVulncheck(dir) {
+		if requiresVulncheck(&config.Config{}) {
 			t.Error("want false with no letsgo.mod")
 		}
 	})
 
 	t.Run("require vulncheck", func(t *testing.T) {
-		dir := t.TempDir()
-		write(t, dir, plan.ConfigFile, "require vulncheck\n")
-		if !requiresVulncheck(dir) {
+		if !requiresVulncheck(&config.Config{Required: []string{"vulncheck"}}) {
 			t.Error("want true")
 		}
 	})
 
 	t.Run("require something else", func(t *testing.T) {
-		dir := t.TempDir()
-		write(t, dir, plan.ConfigFile, "require api-gate\n")
-		if requiresVulncheck(dir) {
+		if requiresVulncheck(&config.Config{Required: []string{"api-gate"}}) {
 			t.Error("want false")
-		}
-	})
-
-	t.Run("malformed letsgo.mod is not fatal", func(t *testing.T) {
-		dir := t.TempDir()
-		write(t, dir, plan.ConfigFile, "this is not a directive at all !!!\n")
-		if requiresVulncheck(dir) {
-			t.Error("want false rather than treating an unparsed file as a match")
 		}
 	})
 }
