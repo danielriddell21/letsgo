@@ -489,31 +489,15 @@ func runVerify(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	repo, dir, err := targetRepo(ctx, *repoFlag)
+	run, err := resolveScratchRun(ctx, *repoFlag, *token, *work, "letsgo-verify-")
 	if err != nil {
 		return err
 	}
-	prefix, err := scopePrefix(ctx, *repoFlag, dir)
-	if err != nil {
-		return err
-	}
-
-	workDir := *work
-	if workDir == "" {
-		workDir, err = os.MkdirTemp("", "letsgo-verify-")
-		if err != nil {
-			return fmt.Errorf("letsgo: scratch directory: %w", err)
-		}
-		defer func() { _ = os.RemoveAll(workDir) }()
-	}
-
-	tokenValue, _ := plan.Token(*token)
-	client := github.New(tokenValue)
-	client.UserAgent = "letsgo/" + version
+	defer run.cleanup()
 
 	result, err := verify.Run(ctx, verify.Options{
-		Client: client, Repo: repo, Tag: fs.Arg(0), Prefix: prefix,
-		Dir: dir, WorkDir: workDir, SkipRebuild: *noRebuild,
+		Client: run.Client, Repo: run.Repo, Tag: fs.Arg(0), Prefix: run.Prefix,
+		Dir: run.Dir, WorkDir: run.WorkDir, SkipRebuild: *noRebuild,
 		UserAgent: "letsgo/" + version,
 	})
 	if err != nil {
@@ -575,6 +559,53 @@ func resolveModuleRepo(ctx context.Context, token string) (moduleRepo, error) {
 	client.UserAgent = "letsgo/" + version
 
 	return moduleRepo{Module: module, Git: git, Repo: repo, Scope: scope, Token: tokenValue, Client: client}, nil
+}
+
+// scratchRun bundles what a command needs to act on a release with an
+// optional --repo override: the target repository, its local module
+// directory (empty when --repo named a repository outside this checkout),
+// its scope prefix, scratch space for extracted source, and a forge client.
+type scratchRun struct {
+	Repo    github.Repo
+	Dir     string
+	Prefix  string
+	WorkDir string
+	Client  *github.Client
+	cleanup func()
+}
+
+// resolveScratchRun is the bootstrapping runVerify and runAudit share: both
+// accept an optional --repo (unlike resolveModuleRepo, which always acts on
+// this checkout's own release) and tolerate an anonymous client for a
+// public repository (unlike resolveModuleRepo, which requires a token).
+// workDir is created under a temporary directory named tmpPrefix when work
+// is empty; cleanup removes it, and is a no-op when work was given
+// explicitly.
+func resolveScratchRun(ctx context.Context, repoFlag, token, work, tmpPrefix string) (scratchRun, error) {
+	repo, dir, err := targetRepo(ctx, repoFlag)
+	if err != nil {
+		return scratchRun{}, err
+	}
+	prefix, err := scopePrefix(ctx, repoFlag, dir)
+	if err != nil {
+		return scratchRun{}, err
+	}
+
+	workDir := work
+	cleanup := func() {}
+	if workDir == "" {
+		workDir, err = os.MkdirTemp("", tmpPrefix)
+		if err != nil {
+			return scratchRun{}, fmt.Errorf("letsgo: scratch directory: %w", err)
+		}
+		cleanup = func() { _ = os.RemoveAll(workDir) }
+	}
+
+	tokenValue, _ := plan.Token(token)
+	client := github.New(tokenValue)
+	client.UserAgent = "letsgo/" + version
+
+	return scratchRun{Repo: repo, Dir: dir, Prefix: prefix, WorkDir: workDir, Client: client, cleanup: cleanup}, nil
 }
 
 // targetRepo resolves which repository a command is asking about and, where

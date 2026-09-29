@@ -14,11 +14,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"sort"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/semver"
 	"github.com/danielriddell21/letsgo/internal/verify"
+	"github.com/danielriddell21/letsgo/internal/yank"
 )
 
 // Schema is the audit.json format version this letsgo writes.
@@ -65,8 +70,13 @@ type Options struct {
 	Client *github.Client
 	Repo   github.Repo
 
-	// Tag is the release to audit.
+	// Tag is the release to audit. Empty means every supported major
+	// (RunAll): see Options.Prefix.
 	Tag string
+
+	// Prefix scopes RunAll to one monorepo module's tags, the same way
+	// discover.Scope.Prefix does. Empty for a root module.
+	Prefix string
 
 	// WorkDir is scratch space for the release's extracted source.
 	WorkDir string
@@ -107,8 +117,7 @@ func (r *Result) Report(w io.Writer) {
 // scan the release-time gate does. The new entry is appended to the
 // release's audit.json unless it exactly matches the last recorded entry
 // (same vulndb date and findings), so a re-run against an unchanged
-// database costs nothing to repeat. Scanning every supported major with no
-// tag given, and scheduling, are later phases.
+// database costs nothing to repeat.
 func Run(ctx context.Context, o Options) (*Result, error) {
 	release, err := o.Client.ReleaseByTag(ctx, o.Repo, o.Tag)
 	if err != nil {
@@ -117,13 +126,82 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	if release == nil {
 		return nil, fmt.Errorf("audit: %s has no release tagged %s", o.Repo, o.Tag)
 	}
+	return auditRelease(ctx, o, release)
+}
 
+// RunAll audits the newest non-retracted stable release of each major
+// version in scope (AU-1): a supported line is checked once, without the
+// noise of every patch release on it. Drafts, retracted releases,
+// prereleases and out-of-scope tags are skipped. A release with no
+// manifest or source archive (predating letsgo) fails the whole run rather
+// than being skipped with a reason — that edge case is out of scope for
+// this phase.
+func RunAll(ctx context.Context, o Options) ([]*Result, error) {
+	releases, err := o.Client.ListReleases(ctx, o.Repo)
+	if err != nil {
+		return nil, err
+	}
+
+	scope := discover.Scope{Prefix: o.Prefix}
+	type candidate struct {
+		release *github.Release
+		version semver.Version
+	}
+	best := map[int]candidate{}
+	for i := range releases {
+		release := &releases[i]
+		if release.Draft || yank.IsRetracted(release.Body) {
+			continue
+		}
+		rest, ok := scope.MatchesTag(release.TagName)
+		if !ok {
+			continue
+		}
+		v, ok := semver.Parse(rest)
+		if !ok || v.IsPrerelease() {
+			continue
+		}
+		if cur, exists := best[v.Major]; !exists || semver.Compare(v, cur.version) > 0 {
+			best[v.Major] = candidate{release: release, version: v}
+		}
+	}
+
+	majors := make([]int, 0, len(best))
+	for major := range best {
+		majors = append(majors, major)
+	}
+	sort.Ints(majors)
+
+	results := make([]*Result, 0, len(majors))
+	for _, major := range majors {
+		result, err := auditRelease(ctx, o, best[major].release)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+// auditRelease is the per-release work Run and RunAll share.
+//
+// Each release gets its own extraction directory under o.WorkDir: RunAll
+// calls this once per major version against the same Options, and
+// SourceFromArchive rejects a directory that already holds another
+// release's extracted archive.
+func auditRelease(ctx context.Context, o Options, release *github.Release) (*Result, error) {
 	m, err := verify.FetchManifest(ctx, o.Client, o.Repo, release)
 	if err != nil {
 		return nil, err
 	}
 
-	source, err := verify.SourceFromArchive(ctx, o.Client, o.Repo, release, m, o.WorkDir)
+	sourceDir, err := os.MkdirTemp(o.WorkDir, "source-")
+	if err != nil {
+		return nil, fmt.Errorf("audit: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(sourceDir) }()
+
+	source, err := verify.SourceFromArchive(ctx, o.Client, o.Repo, release, m, sourceDir)
 	if err != nil {
 		return nil, fmt.Errorf("audit: %w", err)
 	}

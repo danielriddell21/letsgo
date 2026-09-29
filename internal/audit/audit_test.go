@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -18,84 +17,42 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/audit"
-	"github.com/danielriddell21/letsgo/internal/gobuild"
-	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
+	"github.com/danielriddell21/letsgo/internal/releasetest"
 )
-
-const mainGo = `package main
-
-import (
-	"fmt"
-	"os"
-)
-
-var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
-)
-
-func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("demo %s (%s) built %s\n", version, commit, date)
-	}
-}
-`
 
 // published is a release built by the real pipeline, so its source archive
 // and manifest digest are exactly what audit has to check against — the
 // same fixture shape internal/verify's tests use, trimmed to what audit
 // itself reads (the tags and asset-download endpoints; no attestations).
 type published struct {
+	tag    string
 	dist   string
 	result *release.Result
 }
 
 func buildRelease(t *testing.T) *published {
 	t.Helper()
-	dir := t.TempDir()
+	return buildReleaseTagged(t, "v1.2.3")
+}
 
-	for name, content := range map[string]string{
-		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
-		"main.go":    mainGo,
-		"letsgo.mod": "build " + gobuild.Host().String() + "\n",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+// demoModulePath gives the fixture's module a "/vN" suffix for a major 2+
+// tag, as Go's own module versioning rules require.
+func demoModulePath(tag string) string {
+	major, _, _ := strings.Cut(strings.TrimPrefix(tag, "v"), ".")
+	if major == "0" || major == "1" {
+		return "example.com/demo"
 	}
+	return "example.com/demo/v" + major
+}
 
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
-			"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	run("init", "-q", "-b", "main")
-	run("add", ".")
-	run("commit", "-q", "-m", "feat: first")
-	run("tag", "v1.2.3")
-
-	p, err := plan.Resolve(context.Background(), plan.Options{Dir: dir})
-	if err != nil || !p.OK() {
-		t.Fatalf("plan: %v %+v", err, p.Checks)
-	}
-
-	dist := t.TempDir()
-	result, err := release.Build(context.Background(), p, dist, "test", nil, nil)
-	if err != nil {
-		t.Fatalf("release.Build: %v", err)
-	}
-	return &published{dist: dist, result: result}
+// buildReleaseTagged is buildRelease with the tag as a parameter, for tests
+// that need more than one real release (RunAll's grouping-by-major logic).
+func buildReleaseTagged(t *testing.T, tag string) *published {
+	t.Helper()
+	dist, result := releasetest.Build(t, demoModulePath(tag), tag)
+	return &published{tag: tag, dist: dist, result: result}
 }
 
 // served is one asset the fake forge is currently holding, keyed by ID.
@@ -532,4 +489,165 @@ func TestRunFailsWhenTheFirstUploadFails(t *testing.T) {
 func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// serveMany serves ListReleases across several releases at once, for
+// RunAll: real ones (fully built, actually downloaded and scanned when
+// RunAll keeps them) alongside bare metadata-only entries a filter should
+// exclude before any asset is ever fetched (an older release in an
+// already-represented major, a draft, a retracted release, a prerelease,
+// or an out-of-scope tag).
+func serveMany(t *testing.T, real []*published, bare []github.Release) *github.Client {
+	t.Helper()
+
+	byID := map[int64]served{}
+	nextID := int64(100)
+	releases := make([]github.Release, 0, len(real)+len(bare))
+	for _, p := range real {
+		var assets []github.Asset
+		for _, name := range p.result.Files {
+			data, err := os.ReadFile(filepath.Join(p.dist, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			nextID++
+			byID[nextID] = served{name: name, data: data}
+			assets = append(assets, github.Asset{ID: nextID, Name: name, Size: int64(len(data)), Digest: "sha256:" + sha256Hex(data)})
+		}
+		nextID++
+		releases = append(releases, github.Release{ID: nextID, TagName: p.tag, Assets: assets})
+	}
+	releases = append(releases, bare...)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/releases/tags/"):
+			tag := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			for _, rel := range releases {
+				if rel.TagName == tag {
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(rel)
+					return
+				}
+			}
+			w.WriteHeader(http.StatusNotFound)
+
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/releases/") && strings.HasSuffix(r.URL.Path, "/assets"):
+			name := r.URL.Query().Get("name")
+			data, err := io.ReadAll(r.Body)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			nextID++
+			byID[nextID] = served{name: name, data: data}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(github.Asset{ID: nextID, Name: name, Size: int64(len(data)), Digest: "sha256:" + sha256Hex(data)})
+
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/releases/assets/"):
+			idText := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			assetID, _ := strconv.ParseInt(idText, 10, 64)
+			delete(byID, assetID)
+			w.WriteHeader(http.StatusNoContent)
+
+		case strings.Contains(r.URL.Path, "/releases/assets/"):
+			idText := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			assetID, _ := strconv.ParseInt(idText, 10, 64)
+			s, ok := byID[assetID]
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write(s.data)
+
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/releases"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(releases)
+
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+	return client
+}
+
+// AU-1 / the PBS acceptance scenario: given releases spanning several
+// majors, RunAll audits only the newest stable release of each. v0 forms
+// its own major line rather than being excluded, per the HLD's decision.
+func TestRunAllAuditsTheNewestReleaseOfEachMajor(t *testing.T) {
+	fakeGovulncheck(t, cleanOutput)
+	v0 := buildReleaseTagged(t, "v0.9.0")
+	v1 := buildReleaseTagged(t, "v1.4.0")
+	v2 := buildReleaseTagged(t, "v2.0.1")
+	client := serveMany(t, []*published{v0, v1, v2}, []github.Release{
+		{ID: 1, TagName: "v1.3.2"},
+	})
+
+	results, err := audit.RunAll(context.Background(), audit.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"}, WorkDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("audit.RunAll: %v", err)
+	}
+
+	var got []string
+	for _, r := range results {
+		got = append(got, r.Tag)
+	}
+	want := []string{"v0.9.0", "v1.4.0", "v2.0.1"}
+	if len(got) != len(want) {
+		t.Fatalf("audited %v, want %v", got, want)
+	}
+	for i, tag := range want {
+		if got[i] != tag {
+			t.Errorf("audited %v, want %v", got, want)
+			break
+		}
+	}
+}
+
+// A draft, a retracted release, and a prerelease must never reach
+// auditRelease: none of them carries a built source archive here, so a
+// filter failure would surface as a download/manifest error rather than a
+// silent pass.
+func TestRunAllExcludesDraftsRetractedAndPrereleases(t *testing.T) {
+	client := serveMany(t, nil, []github.Release{
+		{ID: 1, TagName: "v1.0.0", Draft: true},
+		{ID: 2, TagName: "v2.0.0", Body: "> [!CAUTION]\nretracted"},
+		{ID: 3, TagName: "v3.0.0-rc.1", Prerelease: true},
+	})
+
+	results, err := audit.RunAll(context.Background(), audit.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"}, WorkDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("audit.RunAll: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("results = %+v, want none", results)
+	}
+}
+
+// A tag outside the module's scope must not be audited as if it were this
+// module's own release.
+func TestRunAllExcludesOutOfScopeTags(t *testing.T) {
+	client := serveMany(t, nil, []github.Release{
+		{ID: 1, TagName: "v1.0.0"},
+		{ID: 2, TagName: "web/v1.0.0"},
+	})
+
+	results, err := audit.RunAll(context.Background(), audit.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Prefix: "services/api/", WorkDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("audit.RunAll: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("results = %+v, want none", results)
+	}
 }

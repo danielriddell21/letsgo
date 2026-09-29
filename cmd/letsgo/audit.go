@@ -8,14 +8,12 @@ import (
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/audit"
-	"github.com/danielriddell21/letsgo/internal/plan"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
 // runAudit re-checks a shipped release against today's vulnerability
 // database and records the result on the release: see docs/hld/audit.md.
-// Scanning every supported major with no tag given, and scheduling, are
-// later phases.
+// With a tag, it audits that one release; with none, it audits the newest
+// stable release of every major version in this module's scope.
 func runAudit(args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ExitOnError)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
@@ -24,44 +22,49 @@ func runAudit(args []string) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
-		return errUsage("letsgo audit <tag>")
+	if fs.NArg() > 1 {
+		return errUsage("letsgo audit [<tag>]")
 	}
 
 	ctx := context.Background()
 	started := time.Now()
 
-	repo, _, err := targetRepo(ctx, *repoFlag)
+	run, err := resolveScratchRun(ctx, *repoFlag, *token, *work, "letsgo-audit-")
 	if err != nil {
 		return err
 	}
+	defer run.cleanup()
 
-	workDir := *work
-	if workDir == "" {
-		workDir, err = os.MkdirTemp("", "letsgo-audit-")
+	opts := audit.Options{Client: run.Client, Repo: run.Repo, Prefix: run.Prefix, WorkDir: run.WorkDir}
+
+	if fs.NArg() == 1 {
+		result, err := audit.Run(ctx, audit.Options{
+			Client: run.Client, Repo: run.Repo, Tag: fs.Arg(0), WorkDir: run.WorkDir,
+		})
 		if err != nil {
-			return fmt.Errorf("letsgo: scratch directory: %w", err)
+			return err
 		}
-		defer func() { _ = os.RemoveAll(workDir) }()
+		reportAuditResult(result)
+		fmt.Printf("  audited in %s\n", took(started))
+		return nil
 	}
 
-	tokenValue, _ := plan.Token(*token)
-	client := github.New(tokenValue)
-	client.UserAgent = "letsgo/" + version
-
-	result, err := audit.Run(ctx, audit.Options{
-		Client: client, Repo: repo, Tag: fs.Arg(0), WorkDir: workDir,
-	})
+	results, err := audit.RunAll(ctx, opts)
 	if err != nil {
 		return err
 	}
+	for _, result := range results {
+		reportAuditResult(result)
+	}
+	fmt.Printf("  audited %d release(s) in %s\n", len(results), took(started))
+	return nil
+}
 
+func reportAuditResult(result *audit.Result) {
 	result.Report(os.Stdout)
 	if result.Recorded {
-		fmt.Println("\n  recorded in audit.json")
+		fmt.Println("  recorded in audit.json")
 	} else {
-		fmt.Println("\n  no change since the last audit; not recorded")
+		fmt.Println("  no change since the last audit; not recorded")
 	}
-	fmt.Printf("  audited in %s\n", took(started))
-	return nil
 }
