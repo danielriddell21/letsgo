@@ -378,6 +378,24 @@ func TestCheckFailsWhenTheProxyErrors(t *testing.T) {
 	}
 }
 
+func TestCheckFailsWhenTheProxyZipIsCorrupt(t *testing.T) {
+	const modulePath, version = "example.com/foo", "v1.0.0"
+	_, h1 := buildZip(t, modulePath, version, map[string]string{"go.mod": "module example.com/foo\n"})
+	sumdbURL, _ := fakeServers(t, modulePath, version, h1, nil)
+
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("not a zip"))
+	}))
+	defer proxyServer.Close()
+
+	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", map[string]string{"go.mod": "module example.com/foo\n"})
+
+	_, err := Check(context.Background(), sumdbURL, proxyServer.URL, modulePath, version, archivePath)
+	if err == nil {
+		t.Fatal("Check succeeded despite a corrupt proxy zip")
+	}
+}
+
 func TestLookupHashFailsWithNoMatchingLine(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, "example.com/foo v0.9.0 h1:wrongversion==\n")

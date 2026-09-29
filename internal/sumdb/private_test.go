@@ -49,6 +49,26 @@ func TestPrivateModule(t *testing.T) {
 			wantSkip:   true,
 			wantReason: "GOPRIVATE",
 		},
+		{
+			name:       "empty glob segment between commas is skipped",
+			env:        map[string]string{"GOPRIVATE": ",example.com/*,"},
+			modulePath: "example.com/x",
+			wantSkip:   true,
+			wantReason: "GOPRIVATE",
+		},
+		{
+			name:       "target with more path elements than the glob is truncated to match",
+			env:        map[string]string{"GOPRIVATE": "example.com/*"},
+			modulePath: "example.com/foo/bar/baz",
+			wantSkip:   true,
+			wantReason: "GOPRIVATE",
+		},
+		{
+			name:       "glob with more path elements than the target never matches",
+			env:        map[string]string{"GOPRIVATE": "example.com/foo/*"},
+			modulePath: "example.com/x",
+			wantSkip:   false,
+		},
 	}
 
 	for _, tt := range tests {
