@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/release"
@@ -57,9 +58,13 @@ func Build(t *testing.T, module, tag string) (dist string, result *release.Resul
 	}
 
 	ctx := context.Background()
+	gitBin, _, err := discover.GitSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.CommandContext(ctx, "git", args...)
+		cmd := exec.CommandContext(ctx, gitBin, args...)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(),
 			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
