@@ -59,19 +59,17 @@ jobs:
       # Published with the workflow token, this release would be credited to
       # github-actions[bot] instead of the identity every other release-time
       # write already uses (the tag itself, the tap commit).
-      - name: the token must exist
-        env:
-          TOKEN: ${{ secrets.LETSGO_TOKEN }}
-        run: |
-          if [ -z "${TOKEN}" ]; then
-            echo "::error::LETSGO_TOKEN is not set; a release published with the workflow token is credited to github-actions[bot]"
-            exit 1
-          fi
+      - uses: actions/create-github-app-token@v3
+        id: letsgo-token
+        with:
+          app-id: ${{ vars.LETSGO_APP_ID }}
+          private-key: ${{ secrets.LETSGO_APP_PRIVATE_KEY }}
+          repositories: letsgo
 
-      # LETSGO_TOKEN cannot write to another repository, so the tap needs an
-      # App token of its own. It is scoped to the tap and nothing else — a
-      # repository that never has to be added to an installation is one that
-      # cannot fail its first release for having been forgotten.
+      # The token above is scoped to this repository alone, so the tap needs
+      # an App token of its own. It is scoped to the tap and nothing else —
+      # a repository that never has to be added to an installation is one
+      # that cannot fail its first release for having been forgotten.
       - uses: actions/create-github-app-token@v3
         id: tap-token
         with:
@@ -89,13 +87,13 @@ jobs:
       - name: plan
         run: go run ./cmd/letsgo plan --publish
         env:
-          GITHUB_TOKEN: ${{ secrets.LETSGO_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.letsgo-token.outputs.token }}
           LETSGO_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
 
       - name: release
         run: go run ./cmd/letsgo release
         env:
-          GITHUB_TOKEN: ${{ secrets.LETSGO_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.letsgo-token.outputs.token }}
           LETSGO_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
 
       # Records which workflow built these bytes. Keyed by digest, so it

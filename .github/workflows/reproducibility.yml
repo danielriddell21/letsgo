@@ -144,16 +144,18 @@ jobs:
     permissions:
       contents: read
     steps:
-      # Checked before the clone so a missing secret fails here, saying what
-      # is missing, rather than as an unauthenticated checkout further down.
-      - name: the token must exist
-        env:
-          TOKEN: ${{ secrets.LETSGO_TOKEN }}
-        run: |
-          if [ -z "${TOKEN}" ]; then
-            echo "::error::LETSGO_TOKEN is not set; a tag pushed with the workflow token starts no release"
-            exit 1
-          fi
+      # Minted before the clone, scoped to this repo alone, so a missing or
+      # misconfigured App credential fails here rather than as an
+      # unauthenticated checkout further down.
+      #
+      # A tag pushed with the workflow token starts no workflow, so
+      # release.yml would never fire. A token of its own does.
+      - uses: actions/create-github-app-token@v3
+        id: letsgo-token
+        with:
+          app-id: ${{ vars.LETSGO_APP_ID }}
+          private-key: ${{ secrets.LETSGO_APP_PRIVATE_KEY }}
+          repositories: letsgo
 
       - uses: actions/checkout@v7
         with:
@@ -162,9 +164,7 @@ jobs:
           # no tags is not enough.
           fetch-depth: 0
 
-          # A tag pushed with the workflow token starts no workflow, so
-          # release.yml would never fire. A token of its own does.
-          token: ${{ secrets.LETSGO_TOKEN }}
+          token: ${{ steps.letsgo-token.outputs.token }}
 
       - uses: actions/setup-go@v7
         with:
