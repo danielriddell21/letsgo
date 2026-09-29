@@ -262,7 +262,12 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
-func TestListPluginsReportsEveryPin(t *testing.T) {
+// writeTwoPinFixture sets up a repository pinning one satisfied plugin
+// (archive-layout, on PATH with a matching digest) and one unsatisfied one
+// (ldflags, not installed), for tests of both listPlugins' text and JSON
+// forms.
+func writeTwoPinFixture(t *testing.T) {
+	t.Helper()
 	dir := t.TempDir()
 	writeProgram(t, dir, "letsgo-multi", "the multi plugin")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -276,9 +281,13 @@ func TestListPluginsReportsEveryPin(t *testing.T) {
 	write(t, "letsgo.mod", "build linux/amd64\n"+
 		"plugin archive-layout letsgo-multi v0.2.0 "+digest+"\n"+
 		"plugin ldflags letsgo-env v0.2.0 sha256:"+strings.Repeat("f", 64)+"\n")
+}
+
+func TestListPluginsReportsEveryPin(t *testing.T) {
+	writeTwoPinFixture(t)
 
 	var out bytes.Buffer
-	if err := listPlugins(&out); err != nil {
+	if err := listPlugins(&out, false); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -296,13 +305,43 @@ func TestListPluginsReportsEveryPin(t *testing.T) {
 	}
 }
 
+// letsgo plugin list --json reports the same resolution as the text table,
+// in its own schema-versioned wire form.
+func TestListPluginsJSON(t *testing.T) {
+	writeTwoPinFixture(t)
+
+	var out bytes.Buffer
+	if err := listPlugins(&out, true); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+
+	for _, want := range []string{
+		`"schema": 1`,
+		`"hook": "archive-layout"`,
+		`"command": "letsgo-multi"`,
+		`"ok": true`,
+		`"hook": "ldflags"`,
+		`"command": "letsgo-env"`,
+		`"ok": false`,
+		`"status": "not installed"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("listPlugins JSON output = %q, want it to contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "ok  ") {
+		t.Errorf("listPlugins JSON output = %q, want no text-report padding in status", got)
+	}
+}
+
 // A repository with no plugins is not an error, and should not print a table.
 func TestListPluginsWithNoPins(t *testing.T) {
 	t.Chdir(t.TempDir())
 	write(t, "letsgo.mod", "build linux/amd64\n")
 
 	var out bytes.Buffer
-	if err := listPlugins(&out); err != nil {
+	if err := listPlugins(&out, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "pins no plugins") {
@@ -347,7 +386,7 @@ func TestListPluginsReportsAMissingConfig(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var out bytes.Buffer
-	if err := listPlugins(&out); err == nil {
+	if err := listPlugins(&out, false); err == nil {
 		t.Fatal("no letsgo.mod should be an error for list, which has nothing to report without one")
 	}
 }
@@ -609,6 +648,22 @@ func TestRunPluginListWithoutAConfig(t *testing.T) {
 	}
 }
 
+func TestRunPluginListPrintsJSONWhenRequested(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile("letsgo.mod", nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		_ = runPluginList([]string{"--json"})
+	})
+
+	if !strings.Contains(out, `"schema": 1`) {
+		t.Errorf("runPluginList --json output = %q, want it to contain a schema field", out)
+	}
+}
+
 // An unwritable destination has to fail before anything is reported installed.
 func TestWriteExecutableReportsAnUnwritableDir(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "no-such-dir", "letsgo-multi")
@@ -697,7 +752,7 @@ func TestListPluginsReportsUnreferencedStoreEntries(t *testing.T) {
 		"plugin archive-layout letsgo-multi v0.1.0 "+kept+"\n")
 
 	var out bytes.Buffer
-	if err := listPlugins(&out); err != nil {
+	if err := listPlugins(&out, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "unreferenced by any pin here") {
