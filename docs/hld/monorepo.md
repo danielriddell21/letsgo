@@ -277,10 +277,24 @@ Phases, in order. Each is a vertical slice: a thin path through every layer, ver
 
 ## Open questions
 
-- Should `letsgo release` run at the repository root refuse when HEAD carries
-  only prefixed tags, or name the module to `cd` into? The second is kinder.
-- Release title: `services/api v1.2.0`, or the project name (`api v1.2.0`)?
 - `letsgo-mono tag` creates several tags on one commit. `letsgo tag` today
   refuses nothing about that, and each release reads only its own prefix, but
   a push of several tags triggers several workflow runs — which is what the
   tag-triggered CI wants, and worth stating in the docs.
+
+## Decided
+
+- Should `letsgo release` run at the repository root refuse when HEAD carries
+  only prefixed tags, or name the module to `cd` into? Neither: `Scope{}`'s
+  `MatchesTag` already rejects a prefixed tag for a root scope (it doesn't
+  start with `v`), so an unreleased root module in an otherwise-tagged
+  monorepo reads as "no previous release," same as any first release. That
+  is usually the true state of the world — a root module can be added to an
+  existing monorepo — so no refusal or redirect was added.
+- Release title: `services/api v1.2.0`, or the project name (`api v1.2.0`)?
+  Settled on the module's directory plus the version — `services/api
+  v1.2.0` — over the bare project name, since two modules with the same base
+  name (`services/api`, `tools/api`) would otherwise read identically on the
+  releases page. A root module's title is unchanged: the bare tag.
+  Implemented as `releaseTitle` in `cmd/letsgo/main.go` and mirrored in
+  `internal/promote/promote.go`.
