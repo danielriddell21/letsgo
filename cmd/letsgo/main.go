@@ -368,8 +368,8 @@ func runRelease(args []string) error {
 		return err
 	}
 
-	if p.Features.On("proxy-warm") && !*snapshot && !published.Release.Draft && p.Config.ModuleDir == "" {
-		warmProxy(ctx, p)
+	if err := warmProxyAndCheckSumdb(ctx, p, dir, result, *snapshot, published.Release.Draft); err != nil {
+		return err
 	}
 
 	if *snapshot {
@@ -474,6 +474,17 @@ func warmProxy(ctx context.Context, p *plan.Plan) {
 		return
 	}
 	fmt.Printf("  primed %s\n", p.Proxy)
+}
+
+// warmProxyAndCheckSumdb primes the module proxy, then cross-checks
+// sum.golang.org and the proxy against the published source archive — on
+// every non-snapshot, non-draft, non-scoped release with proxy-warm enabled.
+func warmProxyAndCheckSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.Result, snapshot, draft bool) error {
+	if !p.Features.On("proxy-warm") || snapshot || draft || p.Config.ModuleDir != "" {
+		return nil
+	}
+	warmProxy(ctx, p)
+	return checkSumdb(ctx, p, dir, result)
 }
 
 func runVerify(args []string) error {
