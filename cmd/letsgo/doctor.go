@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 
 	"github.com/danielriddell21/letsgo/internal/doctor"
@@ -12,6 +13,7 @@ import (
 // read-only and offline: see docs/hld/doctor.md.
 func runDoctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	jsonOutput := fs.Bool("json", false, "print the report as JSON")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -24,7 +26,16 @@ func runDoctor(args []string) error {
 		return err
 	}
 
-	result.Report(os.Stdout)
+	if *jsonOutput {
+		data, err := result.JSON()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+	} else {
+		result.Report(os.Stdout)
+	}
+
 	if !result.OK() {
 		return errDoctorFailed
 	}

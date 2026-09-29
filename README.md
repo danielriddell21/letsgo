@@ -43,7 +43,7 @@ letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without p
 letsgo release [--draft] [-o dir]      build and publish, resumably
 letsgo release --snapshot              rehearse a release without publishing
 letsgo verify [tag]                    rebuild a published release and compare it
-letsgo doctor                          diagnose tools and repository state, read-only
+letsgo doctor [--json]                 diagnose tools and repository state, read-only
 letsgo diff <from> [to]                compare two releases: size, dependencies, API
 letsgo tag [--major|--minor|--patch]   work out the next version and tag it
 letsgo promote <rc-tag>                rebuild a prerelease as a stable release

@@ -9,6 +9,7 @@ package doctor
 import (
 	"context"
 	"debug/buildinfo"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -47,16 +48,32 @@ func (s Status) symbol() string {
 
 // Check is one line of doctor's report.
 type Check struct {
-	Group  string
-	Name   string
-	Status Status
-	Detail string
-	Hint   string
+	Group  string `json:"group"`
+	Name   string `json:"name"`
+	Status Status `json:"status"`
+	Detail string `json:"detail"`
+	Hint   string `json:"hint,omitempty"`
 }
 
 // Result is everything doctor found.
 type Result struct {
 	Checks []Check
+}
+
+// jsonResult is Result's wire form: schema-versioned, so a consumer can tell
+// which shape it's reading before the fields under it ever change.
+type jsonResult struct {
+	Schema int     `json:"schema"`
+	Checks []Check `json:"checks"`
+}
+
+// JSON renders the report for machine consumers (`letsgo doctor --json`).
+func (r *Result) JSON() ([]byte, error) {
+	data, err := json.MarshalIndent(jsonResult{Schema: 1, Checks: r.Checks}, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("doctor: %w", err)
+	}
+	return data, nil
 }
 
 // OK reports whether every check passed.
