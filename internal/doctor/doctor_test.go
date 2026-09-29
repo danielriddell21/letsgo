@@ -291,3 +291,40 @@ func TestResultOK(t *testing.T) {
 		t.Error("OK() = true, want false with a Fail check present")
 	}
 }
+
+func TestResultJSON(t *testing.T) {
+	r := &doctor.Result{Checks: []doctor.Check{
+		{Group: "tools", Name: "go", Status: doctor.OK, Detail: "go1.24.0 (/usr/bin/go)"},
+		{Group: "tools", Name: "govulncheck", Status: doctor.Warn, Detail: "not installed", Hint: "go install golang.org/x/vuln/cmd/govulncheck@latest"},
+	}}
+
+	data, err := r.JSON()
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+
+	for _, want := range []string{
+		`"schema": 1`,
+		`"group": "tools"`,
+		`"name": "go"`,
+		`"status": "ok"`,
+		`"detail": "go1.24.0 (/usr/bin/go)"`,
+		`"hint": "go install golang.org/x/vuln/cmd/govulncheck@latest"`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("JSON() = %s, want it to contain %q", data, want)
+		}
+	}
+}
+
+func TestResultJSONOmitsAnEmptyHint(t *testing.T) {
+	r := &doctor.Result{Checks: []doctor.Check{{Group: "tools", Name: "go", Status: doctor.OK, Detail: "ok"}}}
+
+	data, err := r.JSON()
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	if strings.Contains(string(data), `"hint"`) {
+		t.Errorf("JSON() = %s, want no hint field when Hint is empty", data)
+	}
+}
