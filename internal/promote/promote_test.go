@@ -448,11 +448,48 @@ func demoRepo(t *testing.T, rcTag string) string {
 // shares, only rcTag and dir varying per case.
 func runPromote(t *testing.T, client *github.Client, rcTag, dir string) (*promote.Result, error) {
 	t.Helper()
+	return runPromoteWithWorkDir(t, client, rcTag, dir, t.TempDir())
+}
+
+// runPromoteWithWorkDir is runPromote with the scratch directory broken out,
+// so a test can exercise a WorkDir that isn't already absolute.
+func runPromoteWithWorkDir(t *testing.T, client *github.Client, rcTag, dir, workDir string) (*promote.Result, error) {
+	t.Helper()
 	return promote.Run(context.Background(), promote.Options{
 		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
 		RCTag: rcTag, Dir: dir, ModuleDir: dir,
-		ToolVersion: "test", WorkDir: t.TempDir(), Logf: t.Logf,
+		ToolVersion: "test", WorkDir: workDir, Logf: t.Logf,
 	})
+}
+
+// The rebuild step runs `go build` with its working directory set to the
+// worktree's own module directory (internal/gobuild.Build sets cmd.Dir), so
+// a relative WorkDir must still resolve correctly even though it no longer
+// means "relative to that worktree" — it must mean "relative to this
+// process's own cwd", exactly like every other relative flag. CI's
+// `promote.yml` passes `--work dist`, so this is not a hypothetical.
+func TestRunPromoteWithARelativeWorkDir(t *testing.T) {
+	dir := demoRepo(t, "v1.3.0-rc.1")
+
+	rc := buildRC(t, dir)
+	manifestData, err := os.ReadFile(filepath.Join(rc.Dir, manifest.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	forge := newFakeForge(t, "you/demo")
+	forge.seedRC("v1.3.0-rc.1", manifestData)
+	client := forge.client()
+
+	t.Chdir(t.TempDir())
+
+	result, err := runPromoteWithWorkDir(t, client, "v1.3.0-rc.1", dir, "work")
+	if err != nil {
+		t.Fatalf("promote.Run: %v", err)
+	}
+	if result.StableTag != "v1.3.0" {
+		t.Errorf("StableTag = %q, want v1.3.0", result.StableTag)
+	}
 }
 
 // assertForgeCalls checks how many times the fake forge's two write

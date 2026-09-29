@@ -102,6 +102,22 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		return nil, fmt.Errorf("promote: no tag given")
 	}
 
+	// WorkDir seeds both the rebuild worktree and its build output. The
+	// rebuild step below runs `go build` with its working directory set to
+	// the worktree's own module directory (see gobuild.Build), so a
+	// relative WorkDir would resolve the build output against the wrong
+	// directory the moment that differs from this process's cwd — which it
+	// always does inside a freshly created worktree. Absolute once here
+	// keeps every path derived from it correct regardless of where the
+	// build subprocess's cwd ends up.
+	if o.WorkDir != "" {
+		abs, err := filepath.Abs(o.WorkDir)
+		if err != nil {
+			return nil, fmt.Errorf("promote: resolving work directory: %w", err)
+		}
+		o.WorkDir = abs
+	}
+
 	stableTag, err := stableTagFor(o.RCTag, o.Prefix)
 	if err != nil {
 		return nil, err
