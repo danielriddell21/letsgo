@@ -81,6 +81,26 @@ func TestParseVulncheckRejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestParseVulncheckReportIncludesToolAndDBVersions(t *testing.T) {
+	const withConfig = `
+{"config":{"scanner_version":"v1.1.4","db_last_modified":"2026-09-23T00:00:00Z"}}
+{"finding":{"osv":"GO-2024-0001","fixed_version":"v0.23.0","trace":[{"module":"golang.org/x/net","package":"golang.org/x/net/http2","function":"readFrame"}]}}
+`
+	report, err := parseVulncheckReport(strings.NewReader(withConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.GovulncheckVersion != "v1.1.4" {
+		t.Errorf("GovulncheckVersion = %q", report.GovulncheckVersion)
+	}
+	if report.VulndbDate != "2026-09-23" {
+		t.Errorf("VulndbDate = %q", report.VulndbDate)
+	}
+	if len(report.Vulnerabilities) != 1 || report.Vulnerabilities[0].Module != "golang.org/x/net" {
+		t.Errorf("Vulnerabilities = %+v", report.Vulnerabilities)
+	}
+}
+
 func TestVulnerabilityString(t *testing.T) {
 	v := Vulnerability{ID: "GO-2024-0001", Symbol: "pkg.Fn", FixedIn: "v1.2.3"}
 	s := v.String()

@@ -210,6 +210,12 @@ func latestRelease(ctx context.Context, o Options) (*github.Release, error) {
 	return o.Client.ReleaseByTag(ctx, o.Repo, tag)
 }
 
+// FetchManifest downloads and decodes a release's manifest. Exported for
+// audit, which checks a release's manifest the same way verify does.
+func FetchManifest(ctx context.Context, client *github.Client, repo github.Repo, release *github.Release) (*manifest.Manifest, error) {
+	return fetchManifest(ctx, Options{Client: client, Repo: repo}, release)
+}
+
 func fetchManifest(ctx context.Context, o Options, release *github.Release) (*manifest.Manifest, error) {
 	asset, ok := release.Asset(manifest.FileName)
 	if !ok {
