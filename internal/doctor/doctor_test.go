@@ -13,26 +13,29 @@ import (
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
 
+// gitRun runs a git command in dir with a fixed test identity, so a commit
+// never depends on the runner's own (possibly absent) global git config.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
 // gitInit makes dir a git repository with one commit, so doctor.Run's
 // discover.FindGit has a repository to inspect.
 func gitInit(t *testing.T, dir string) {
 	t.Helper()
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
-			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
-			"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	run("init", "-q", "-b", "main")
-	run("add", ".")
-	run("commit", "-q", "-m", "first")
+	gitRun(t, dir, "init", "-q", "-b", "main")
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-q", "-m", "first")
 }
 
 func TestReportFormatsChecksGroupedInOrder(t *testing.T) {
@@ -213,15 +216,7 @@ func TestRunReportsANonGitHubOrigin(t *testing.T) {
 	dir := t.TempDir()
 	writeGoMod(t, dir, "module example.com/doctortest\n\ngo 1.24\n")
 	gitInit(t, dir)
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	run("remote", "add", "origin", "https://gitlab.com/you/doctortest.git")
+	gitRun(t, dir, "remote", "add", "origin", "https://gitlab.com/you/doctortest.git")
 
 	result, err := doctor.Run(context.Background(), dir)
 	if err != nil {
@@ -261,20 +256,8 @@ func TestRunReportsAShallowClone(t *testing.T) {
 	// A second commit so the shallow clone below (depth 1) is provably
 	// shallower than the source's own history.
 	writeGoMod(t, src, "module example.com/doctortest\n\ngo 1.24\n// v2\n")
-	run := func(dir string, args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
-			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	run(src, "add", ".")
-	run(src, "commit", "-q", "-m", "second")
+	gitRun(t, src, "add", ".")
+	gitRun(t, src, "commit", "-q", "-m", "second")
 
 	dir := t.TempDir()
 	shallow := filepath.Join(dir, "clone")
