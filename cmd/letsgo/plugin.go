@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -51,7 +52,7 @@ usage:
   letsgo plugin install                    install every plugin this repository pins
   letsgo plugin install <name>[@version]   download one plugin, verified, and print its pin
   letsgo plugin install --link             also put the plugin on PATH, for running it by hand
-  letsgo plugin list                       the plugins this repository pins, and what is installed
+  letsgo plugin list [--json]              the plugins this repository pins, and what is installed
   letsgo plugin list --available           the plugins letsgo publishes, and what each answers
   letsgo plugin prune                      remove store entries no pin in this repository references
 
@@ -283,13 +284,14 @@ func pinnedHook(name string) string {
 func runPluginList(args []string) error {
 	fs := flag.NewFlagSet("plugin list", flag.ExitOnError)
 	available := fs.Bool("available", false, "list the plugins letsgo publishes, not what this repository pins")
+	jsonOutput := fs.Bool("json", false, "print what this repository pins as JSON")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if *available {
 		return listAvailablePlugins(os.Stdout)
 	}
-	return listPlugins(os.Stdout)
+	return listPlugins(os.Stdout, *jsonOutput)
 }
 
 // listAvailablePlugins prints the plugins letsgo publishes: the hook each
@@ -307,17 +309,41 @@ func listAvailablePlugins(w io.Writer) error {
 	return nil
 }
 
+// pluginEntry is one pin resolved against the store/PATH, for `letsgo
+// plugin list --json`.
+type pluginEntry struct {
+	Hook    string `json:"hook"`
+	Command string `json:"command"`
+	Version string `json:"version"`
+	Digest  string `json:"digest,omitempty"`
+	OK      bool   `json:"ok"`
+	Status  string `json:"status"`
+}
+
+// jsonPluginsResult is the pin list's wire form for `letsgo plugin list
+// --json`: schema-versioned (ED-13), so a consumer can tell which shape it's
+// reading before the fields under it ever change.
+type jsonPluginsResult struct {
+	Schema  int           `json:"schema"`
+	Plugins []pluginEntry `json:"plugins"`
+}
+
 // listPlugins answers the question that follows every pin: is the program this
 // file names actually here, and is it the one the file means?
 //
 // Takes a writer for the same reason the updater does: what it reports is the
 // behaviour worth testing, and that is not checkable while it is tangled up
 // with os.Stdout.
-func listPlugins(w io.Writer) error {
+func listPlugins(w io.Writer, jsonOutput bool) error {
 	cfg, err := loadPluginConfig()
 	if err != nil {
 		return err
 	}
+
+	if jsonOutput {
+		return printPluginsJSON(w, cfg)
+	}
+
 	if len(cfg.Plugins) == 0 {
 		fmt.Fprintf(w, "%s pins no plugins\n", plan.ConfigFile)
 		return nil
@@ -339,6 +365,26 @@ func listPlugins(w io.Writer) error {
 	}
 
 	reportUnreferencedStoreEntries(w, cfg)
+	return nil
+}
+
+// printPluginsJSON is listPlugins' --json path: the same store/PATH
+// resolution, minus the column-padded text formatting.
+func printPluginsJSON(w io.Writer, cfg *config.Config) error {
+	entries := make([]pluginEntry, 0, len(cfg.Plugins))
+	for _, p := range cfg.Plugins {
+		status, ok := pluginStatus(p)
+		entries = append(entries, pluginEntry{
+			Hook: p.Hook, Command: p.Command, Version: p.Version, Digest: p.Digest,
+			OK: ok, Status: strings.TrimPrefix(status, "ok  "),
+		})
+	}
+
+	data, err := json.MarshalIndent(jsonPluginsResult{Schema: 1, Plugins: entries}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("letsgo: %w", err)
+	}
+	fmt.Fprintln(w, string(data))
 	return nil
 }
 
