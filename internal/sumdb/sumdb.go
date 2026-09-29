@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/danielriddell21/letsgo/internal/publish"
 )
@@ -32,6 +33,14 @@ const DefaultURL = "https://sum.golang.org"
 // input from the network, and one that claimed to grow without limit would
 // otherwise be answered by filling memory.
 const maxZipSize = 512 << 20
+
+// sumdbRetryBudget bounds how long Check waits for sum.golang.org to publish
+// a record before giving up and reporting NotFound rather than failing
+// (SD-6): a moment after tagging, the record may simply not exist yet.
+const sumdbRetryBudget = 60 * time.Second
+
+// sumdbSleep is time.Sleep, replaced in tests so the retry loop runs fast.
+var sumdbSleep = time.Sleep
 
 // Result is what comparing a release's source archive against sum.golang.org
 // and the module proxy found.
@@ -58,6 +67,11 @@ type Result struct {
 	// can legitimately exclude files the archive carries, so this is
 	// informational and never fails the check.
 	Extra []string
+
+	// NotFound is true when sum.golang.org still had no record for
+	// module@version after retrying for sumdbRetryBudget (SD-6). Every
+	// other field is zero in that case — Check never reached the proxy.
+	NotFound bool
 }
 
 // Check fetches module@version's record from sumdb and its zip from proxy,
@@ -67,9 +81,12 @@ type Result struct {
 func Check(ctx context.Context, sumdbURL, proxyURL, modulePath, version, archivePath string) (Result, error) {
 	version = normalizeVersion(version)
 
-	sumH1, err := lookupHash(ctx, sumdbURL, modulePath, version)
+	sumH1, found, err := lookupHashWithRetry(ctx, sumdbURL, modulePath, version)
 	if err != nil {
 		return Result{}, err
+	}
+	if !found {
+		return Result{NotFound: true}, nil
 	}
 
 	zipData, err := fetchZip(ctx, proxyURL, modulePath, version)
@@ -119,54 +136,94 @@ func normalizeVersion(version string) string {
 	return version
 }
 
-// lookupHash fetches sumdb's lookup record for module@version and returns
-// the h1: line for the module zip (not the /go.mod line).
-func lookupHash(ctx context.Context, sumdbURL, modulePath, version string) (string, error) {
+// lookupHashWithRetry calls lookupHashOnce, retrying with backoff while
+// sumdb has no record yet, up to sumdbRetryBudget (SD-6): a moment after
+// tagging, the record may simply not exist yet. found is false only when
+// the budget is exhausted with the record still missing — never on a
+// genuine error, which is returned instead.
+func lookupHashWithRetry(ctx context.Context, sumdbURL, modulePath, version string) (h1 string, found bool, err error) {
+	backoff := time.Second
+	var elapsed time.Duration
+	for {
+		h1, notFound, err := lookupHashOnce(ctx, sumdbURL, modulePath, version)
+		if err != nil {
+			return "", false, err
+		}
+		if !notFound {
+			return h1, true, nil
+		}
+		if elapsed+backoff > sumdbRetryBudget {
+			return "", false, nil
+		}
+		sumdbSleep(backoff)
+		elapsed += backoff
+		backoff *= 2
+	}
+}
+
+// lookupHashOnce fetches sumdb's lookup record for module@version and
+// returns the h1: line for the module zip (not the /go.mod line). notFound
+// is true only when sumdb responded 404 (no record yet); any other
+// non-2xx status or transport failure is a hard error.
+func lookupHashOnce(ctx context.Context, sumdbURL, modulePath, version string) (h1 string, notFound bool, err error) {
 	url := fmt.Sprintf("%s/lookup/%s@%s", strings.TrimSuffix(sumdbURL, "/"),
 		publish.EscapeModulePath(modulePath), publish.EscapeModulePath(version))
 
-	body, err := get(ctx, url, 1<<20)
+	body, status, err := get(ctx, url, 1<<20)
 	if err != nil {
-		return "", err
+		return "", false, err
+	}
+	if status == http.StatusNotFound {
+		return "", true, nil
+	}
+	if status < 200 || status > 299 {
+		return "", false, fmt.Errorf("sumdb: fetching %s: status %d", url, status)
 	}
 
 	for _, line := range strings.Split(string(body), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 3 && fields[1] == version && strings.HasPrefix(fields[2], "h1:") {
-			return fields[2], nil
+			return fields[2], false, nil
 		}
 	}
-	return "", fmt.Errorf("sumdb: no h1 hash for %s@%s in sumdb's response", modulePath, version)
+	return "", false, fmt.Errorf("sumdb: no h1 hash for %s@%s in sumdb's response", modulePath, version)
 }
 
 // fetchZip downloads the module proxy's zip for module@version.
 func fetchZip(ctx context.Context, proxyURL, modulePath, version string) ([]byte, error) {
 	url := fmt.Sprintf("%s/%s/@v/%s.zip", strings.TrimSuffix(proxyURL, "/"),
 		publish.EscapeModulePath(modulePath), publish.EscapeModulePath(version))
-	return get(ctx, url, maxZipSize)
+	data, status, err := get(ctx, url, maxZipSize)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status > 299 {
+		return nil, fmt.Errorf("sumdb: fetching %s: status %d", url, status)
+	}
+	return data, nil
 }
 
-func get(ctx context.Context, url string, limit int64) ([]byte, error) {
+// get performs a GET request, returning the response body and status code.
+// err is non-nil only for a request-building or transport-level failure;
+// callers decide how to treat a non-2xx status themselves.
+func get(ctx context.Context, url string, limit int64) (data []byte, status int, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("sumdb: %w", err)
+		return nil, 0, fmt.Errorf("sumdb: %w", err)
 	}
 	req.Header.Set("User-Agent", "letsgo")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("sumdb: fetching %s: %w", url, err)
+		return nil, 0, fmt.Errorf("sumdb: fetching %s: %w", url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return nil, fmt.Errorf("sumdb: fetching %s: %s", url, resp.Status)
-	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, limit))
+	data, err = io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
-		return nil, fmt.Errorf("sumdb: reading %s: %w", url, err)
+		return nil, 0, fmt.Errorf("sumdb: reading %s: %w", url, err)
 	}
-	return data, nil
+	return data, resp.StatusCode, nil
 }
 
 // hashZip reads every entry of a module zip, keyed by its path relative to
