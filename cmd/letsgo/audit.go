@@ -13,9 +13,9 @@ import (
 )
 
 // runAudit re-checks a shipped release against today's vulnerability
-// database: see docs/hld/audit.md. This is its tracer bullet — one tagged
-// release, checked and reported; recording the result on the release, and
-// scanning every supported major with no tag given, are later phases.
+// database and records the result on the release: see docs/hld/audit.md.
+// Scanning every supported major with no tag given, and scheduling, are
+// later phases.
 func runAudit(args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ExitOnError)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
@@ -57,6 +57,11 @@ func runAudit(args []string) error {
 	}
 
 	result.Report(os.Stdout)
-	fmt.Printf("\n  audited in %s\n", took(started))
+	if result.Recorded {
+		fmt.Println("\n  recorded in audit.json")
+	} else {
+		fmt.Println("\n  no change since the last audit; not recorded")
+	}
+	fmt.Printf("  audited in %s\n", took(started))
 	return nil
 }

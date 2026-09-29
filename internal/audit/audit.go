@@ -9,7 +9,9 @@
 package audit
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
@@ -21,6 +23,11 @@ import (
 
 // Schema is the audit.json format version this letsgo writes.
 const Schema = 1
+
+// FileName is the asset audit history is kept in, attached to the release
+// alongside its other published files. It is not part of the manifest or
+// SHA256SUMS (ADR-0012): it is written after the release, by a later audit.
+const FileName = "audit.json"
 
 // Status is the outcome of one audit run.
 type Status string
@@ -69,6 +76,10 @@ type Options struct {
 type Result struct {
 	Tag   string
 	Entry Entry
+
+	// Recorded is false when this run's entry matched the last recorded one
+	// (same vulndb date and findings) and so was not appended.
+	Recorded bool
 }
 
 // Report writes a human-readable summary.
@@ -88,14 +99,16 @@ func (r *Result) Report(w io.Writer) {
 }
 
 // Run re-checks one release's source against today's vulnerability
-// database.
+// database and records the result on the release.
 //
-// This is audit's tracer bullet: it fetches the release, verifies its
-// source archive against the manifest (reusing verify's own path, so an
-// audit and a verify never disagree about what "the release's source"
-// means), and runs the same reachability-aware scan the release-time gate
-// does. Recording the result on the release, and skipping unchanged runs,
-// is a later phase.
+// It fetches the release, verifies its source archive against the manifest
+// (reusing verify's own path, so an audit and a verify never disagree about
+// what "the release's source" means), and runs the same reachability-aware
+// scan the release-time gate does. The new entry is appended to the
+// release's audit.json unless it exactly matches the last recorded entry
+// (same vulndb date and findings), so a re-run against an unchanged
+// database costs nothing to repeat. Scanning every supported major with no
+// tag given, and scheduling, are later phases.
 func Run(ctx context.Context, o Options) (*Result, error) {
 	release, err := o.Client.ReleaseByTag(ctx, o.Repo, o.Tag)
 	if err != nil {
@@ -121,7 +134,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	}
 
 	entry := Entry{
-		At:          time.Now().UTC(),
+		At:          time.Now().UTC().Truncate(time.Second),
 		Vulndb:      report.VulndbDate,
 		Govulncheck: report.GovulncheckVersion,
 		Status:      Clean,
@@ -131,5 +144,86 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		entry.Findings = append(entry.Findings, Finding{ID: v.ID, Module: v.Module, Fixed: v.FixedIn})
 	}
 
-	return &Result{Tag: release.TagName, Entry: entry}, nil
+	record, err := loadRecord(ctx, o, release)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &Result{Tag: release.TagName, Entry: entry}
+	if !shouldAppend(record, entry) {
+		return result, nil
+	}
+	record.Audits = append(record.Audits, entry)
+	if err := saveRecord(ctx, o, release, record); err != nil {
+		return nil, err
+	}
+	result.Recorded = true
+	return result, nil
+}
+
+// loadRecord fetches a release's existing audit.json, or starts a fresh
+// one when the release has never been audited before.
+func loadRecord(ctx context.Context, o Options, release *github.Release) (*Record, error) {
+	asset, ok := release.Asset(FileName)
+	if !ok {
+		return &Record{Schema: Schema, Tag: release.TagName}, nil
+	}
+	data, err := o.Client.DownloadAsset(ctx, o.Repo, asset.ID)
+	if err != nil {
+		return nil, fmt.Errorf("audit: %w", err)
+	}
+	var record Record
+	if err := json.Unmarshal(data, &record); err != nil {
+		return nil, fmt.Errorf("audit: release %s has a %s that does not parse: %w", release.TagName, FileName, err)
+	}
+	return &record, nil
+}
+
+// shouldAppend reports whether entry is new information: a release's first
+// audit always is, and a later one is only when the vulndb it ran against
+// or what it found has changed since the last recorded run (AU-6).
+func shouldAppend(record *Record, entry Entry) bool {
+	if len(record.Audits) == 0 {
+		return true
+	}
+	last := record.Audits[len(record.Audits)-1]
+	if last.Vulndb != entry.Vulndb {
+		return true
+	}
+	return !equalFindings(last.Findings, entry.Findings)
+}
+
+func equalFindings(a, b []Finding) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// saveRecord writes a release's audit.json, replacing any existing one.
+// There is no "update asset content" API, so this follows the same
+// delete-then-upload replace pattern internal/publish uses (AU-8: nothing
+// else about the release is touched).
+func saveRecord(ctx context.Context, o Options, release *github.Release, record *Record) error {
+	data, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return fmt.Errorf("audit: %w", err)
+	}
+	data = append(data, '\n')
+
+	if existing, ok := release.Asset(FileName); ok {
+		if err := o.Client.DeleteAsset(ctx, o.Repo, existing.ID); err != nil {
+			return fmt.Errorf("audit: %w", err)
+		}
+	}
+	_, err = o.Client.UploadAsset(ctx, o.Repo, release.ID, FileName, int64(len(data)), bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("audit: %w", err)
+	}
+	return nil
 }
