@@ -144,16 +144,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      # Checked before the clone so a missing secret fails here, saying what
-      # is missing, rather than as an unauthenticated checkout further down.
-      - name: the token must exist
-        env:
-          TOKEN: ${{ secrets.LETSGO_TOKEN }}
-        run: |
-          if [ -z "${TOKEN}" ]; then
-            echo "::error::LETSGO_TOKEN is not set; a tag pushed with the workflow token starts no release"
-            exit 1
-          fi
+      # Minted before the clone so a missing or misconfigured App credential
+      # fails here rather than as an unauthenticated checkout further down.
+      #
+      # A tag pushed with the workflow token starts no workflow, so
+      # release.yml would never fire. A token of its own does.
+      - uses: actions/create-github-app-token@v3
+        id: letsgo-token
+        with:
+          app-id: ${{ vars.TAP_APP_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          repositories: letsgo
 
       - uses: actions/checkout@v7
         with:
@@ -162,14 +163,18 @@ jobs:
           # no tags is not enough.
           fetch-depth: 0
 
-          # A tag pushed with the workflow token starts no workflow, so
-          # release.yml would never fire. A token of its own does.
-          token: ${{ secrets.LETSGO_TOKEN }}
+          token: ${{ steps.letsgo-token.outputs.token }}
 
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: false
+
+      # The tagger recorded on the annotated tag object itself — separate
+      # from, and unaffected by, which credential authenticates the push
+      # below. A local composite action needs the checkout above to already
+      # exist on disk.
+      - uses: ./.github/actions/champ-git-identity
 
       - name: tag and push
         run: |
@@ -183,14 +188,14 @@ jobs:
             exit 0
           fi
 
-          git config user.name "letsgo-champ[bot]"
-          git config user.email "293666020+letsgo-champ[bot]@users.noreply.github.com"
-
           # --warranted: no feat, fix or API change means no release. Without
           # it letsgo falls back to a patch, which is the right answer when a
           # person asks for a version and the wrong one when a documentation
           # commit does.
-          go run ./cmd/letsgo tag --yes --warranted
+          #
+          # --pre: trunk pushes propose a release candidate rather than a
+          # stable tag, so `letsgo promote` decides when an RC actually ships.
+          go run ./cmd/letsgo tag --yes --warranted --pre
 
           tag=$(git tag --points-at HEAD)
           if [ -z "${tag}" ]; then
