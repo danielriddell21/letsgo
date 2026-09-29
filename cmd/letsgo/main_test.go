@@ -270,6 +270,52 @@ func TestRunTagSkipsAnInterveningPrereleaseTag(t *testing.T) {
 	}
 }
 
+// `tag --json` is a dry run: it prints the proposal and creates nothing, so
+// an editor can show it without the write `--yes` performs.
+func TestRunTagPrintsJSONWhenRequestedAndCreatesNoTag(t *testing.T) {
+	repoDir, moduleDir := scopedModuleFixture(t)
+	t.Chdir(moduleDir)
+
+	out := captureStdout(t, func() {
+		if err := runTag([]string{"--json"}); err != nil {
+			t.Fatalf("runTag: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, `"schema": 1`) {
+		t.Errorf("runTag --json output = %q, want it to contain a schema field", out)
+	}
+
+	tags, err := exec.Command("git", "-C", repoDir, "tag", "--points-at", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git tag --points-at HEAD: %v\n%s", err, tags)
+	}
+	if strings.Contains(string(tags), "v0.1.0") {
+		t.Errorf("tags at HEAD = %q, want no new tag from a --json dry run", tags)
+	}
+}
+
+// A dirty worktree blocks a real tag (a tag names a commit, so uncommitted
+// work has to be dealt with first), but --json is read-only and an editor
+// needs it to keep working while a file is being edited.
+func TestRunTagJSONWorksWithUncommittedChanges(t *testing.T) {
+	repoDir, moduleDir := scopedModuleFixture(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "dirty.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(moduleDir)
+
+	out := captureStdout(t, func() {
+		if err := runTag([]string{"--json"}); err != nil {
+			t.Fatalf("runTag: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, `"schema": 1`) {
+		t.Errorf("runTag --json output = %q, want it to contain a schema field", out)
+	}
+}
+
 // A worktree always checks out the whole repository, so a nested module has
 // to be compared at <worktree>/relDir, never at the worktree's own root: the
 // same bug `plan.checkoutTag` had, in the command that proposes a tag rather

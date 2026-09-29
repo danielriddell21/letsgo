@@ -45,7 +45,7 @@ letsgo release --snapshot              rehearse a release without publishing
 letsgo verify [tag]                    rebuild a published release and compare it
 letsgo doctor [--json]                 diagnose tools and repository state, read-only
 letsgo diff <from> [to]                compare two releases: size, dependencies, API
-letsgo tag [--major|--minor|--patch]   work out the next version and tag it
+letsgo tag [--major|--minor|--patch|--json]  work out the next version and tag it
 letsgo promote <rc-tag>                rebuild a prerelease as a stable release
 letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
 letsgo update [--check]                update letsgo itself, verified against its manifest

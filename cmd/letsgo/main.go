@@ -46,7 +46,7 @@ usage:
   letsgo diff <from> [to]                compare two releases: size, dependencies, API
   letsgo promote <rc-tag>                rebuild a prerelease as a stable release
   letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
-  letsgo tag [--major|--minor|--patch]   work out the next version and tag it
+  letsgo tag [--major|--minor|--patch|--json]  work out the next version and tag it
   letsgo update [--check]                update letsgo itself, verified against its manifest
   letsgo plugin install <name>           install a plugin, verified against its manifest
   letsgo plugin list                     the plugins this repository pins, and what is installed
@@ -788,6 +788,7 @@ func runTag(args []string) error {
 	major := fs.Bool("major", false, "force a major bump")
 	minor := fs.Bool("minor", false, "force a minor bump")
 	patch := fs.Bool("patch", false, "force a patch bump")
+	jsonOutput := fs.Bool("json", false, "print the proposal as JSON, without creating a tag")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -802,7 +803,7 @@ func runTag(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !git.Clean {
+	if !*jsonOutput && !git.Clean {
 		return fmt.Errorf("uncommitted changes; a tag names a commit, so commit first")
 	}
 	scope, err := discover.NewScope(git.TopLevel, module.Dir)
@@ -820,27 +821,51 @@ func runTag(args []string) error {
 	if err != nil {
 		return err
 	}
-	tag := scope.Prefix + proposal.Next
+
+	if *jsonOutput {
+		return printTagJSON(proposal)
+	}
+
+	return createTag(ctx, module.Dir, scope.Prefix, proposal, previous, *warranted, *yes)
+}
+
+// printTagJSON is `letsgo tag --json`'s whole job: the proposal, wire-formed,
+// and nothing else — no confirmation, no write.
+func printTagJSON(proposal bump.Proposal) error {
+	data, err := proposal.JSON()
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
+// createTag reports the proposal as text, then creates the tag unless
+// --warranted finds nothing to signal a release or the operator declines.
+func createTag(
+	ctx context.Context, dir, prefix string, proposal bump.Proposal, previous string, warranted, yes bool,
+) error {
+	tag := prefix + proposal.Next
 
 	reportProposal(proposal, previous)
 
 	// Unattended, the absence of a signal is an answer: nothing here claims to
 	// be a release, so making one would put a version on a commit whose author
 	// did not ask for it.
-	if *warranted && !proposal.Signalled() {
+	if warranted && !proposal.Signalled() {
 		fmt.Println("\n  nothing was tagged: no commit or API change calls for a release")
 		return nil
 	}
 
-	if discover.TagExists(ctx, module.Dir, tag) {
+	if discover.TagExists(ctx, dir, tag) {
 		return fmt.Errorf("%s already exists", tag)
 	}
-	if !*yes && !confirm(tag) {
+	if !yes && !confirm(tag) {
 		fmt.Println("\n  nothing was tagged")
 		return nil
 	}
 
-	if err := discover.CreateTag(ctx, module.Dir, tag, tag); err != nil {
+	if err := discover.CreateTag(ctx, dir, tag, tag); err != nil {
 		return err
 	}
 	fmt.Printf("\n  tagged %s\n  push it with: git push origin %s\n", tag, tag)
