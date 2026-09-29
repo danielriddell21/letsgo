@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/lsp"
+	"github.com/danielriddell21/letsgo/internal/releasetest"
 )
 
 // client drives a Server over an in-memory pipe the way a real editor drives
@@ -272,9 +272,12 @@ func TestServerEndToEnd(t *testing.T) {
 }
 
 func TestServerRestrictedModeSkipsPlanDiagnostics(t *testing.T) {
-	dir := t.TempDir()
-	writeModuleFixtureWithBudgetFailure(t, dir)
-	path := filepath.Join(dir, "letsgo.mod")
+	r := releasetest.NewRepo(t)
+	r.Write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.Write("main.go", "package main\n\nvar version = \"dev\"\n\nfunc main() {}\n")
+	r.Write("letsgo.mod", "build linux/amd64\nbudget windows/arm64 10MB\n")
+	r.Commit("v1.0.0")
+	path := filepath.Join(r.Dir, "letsgo.mod")
 	uri := "file://" + path
 
 	c := newClient(t, lsp.Options{Restricted: true})
@@ -342,34 +345,9 @@ func writeModuleFixture(t *testing.T, dir string) {
 	mustWrite(t, filepath.Join(dir, "letsgo.mod"), "build linux/amd64\n")
 }
 
-func writeModuleFixtureWithBudgetFailure(t *testing.T, dir string) {
-	t.Helper()
-	mustWrite(t, filepath.Join(dir, "go.mod"), "module github.com/you/foo\n\ngo 1.24\n")
-	mustWrite(t, filepath.Join(dir, "main.go"), "package main\n\nvar version = \"dev\"\n\nfunc main() {}\n")
-	mustWrite(t, filepath.Join(dir, "letsgo.mod"), "build linux/amd64\nbudget windows/arm64 10MB\n")
-	gitRun(t, dir, "init", "-q", "-b", "main")
-	gitRun(t, dir, "add", ".")
-	gitRun(t, dir, "-c", "user.name=Test", "-c", "user.email=t@example.com", "commit", "-q", "-m", "commit")
-	gitRun(t, dir, "tag", "v1.0.0")
-}
-
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func gitRun(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
-		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
-		"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 }

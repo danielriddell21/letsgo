@@ -39,12 +39,71 @@ func main() {
 }
 `
 
+// Repo is a scratch git repository for tests that need real plan/discover
+// behaviour rather than a hand-rolled stand-in — the shared shape every
+// package's own git-fixture helper otherwise reimplements.
+type Repo struct {
+	t   *testing.T
+	Dir string
+}
+
+// NewRepo creates an empty repository in a fresh temp directory.
+func NewRepo(t *testing.T) *Repo {
+	t.Helper()
+	r := &Repo{t: t, Dir: t.TempDir()}
+	r.Git("init", "-q", "-b", "main")
+	return r
+}
+
+// Git runs a git command in the repo, with a fixed author/committer
+// identity so commits are reproducible across machines and CI runners.
+func (r *Repo) Git(args ...string) {
+	r.t.Helper()
+	gitBin, _, err := discover.GitSource()
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	cmd := exec.CommandContext(context.Background(), gitBin, args...)
+	cmd.Dir = r.Dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
+		"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		r.t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+// Write creates or overwrites a file in the repo, relative to its root.
+func (r *Repo) Write(name, content string) {
+	r.t.Helper()
+	path := filepath.Join(r.Dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		r.t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
+// Commit stages and commits every file written so far, and tags the commit
+// when tag is non-empty.
+func (r *Repo) Commit(tag string) {
+	r.t.Helper()
+	r.Git("add", ".")
+	r.Git("commit", "-q", "-m", "commit")
+	if tag != "" {
+		r.Git("tag", tag)
+	}
+}
+
 // Build writes a one-file module at the given path, commits and tags it,
 // then runs it through the real plan/release pipeline. It fails t on any
 // error, so callers can use its result directly.
 func Build(t *testing.T, module, tag string) (dist string, result *release.Result) {
 	t.Helper()
-	dir := t.TempDir()
+	r := NewRepo(t)
 
 	files := map[string]string{
 		"go.mod":     "module " + module + "\n\ngo 1.24\n",
@@ -52,35 +111,14 @@ func Build(t *testing.T, module, tag string) (dist string, result *release.Resul
 		"letsgo.mod": "build " + gobuild.Host().String() + "\n",
 	}
 	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		r.Write(name, content)
 	}
+	r.Git("add", ".")
+	r.Git("commit", "-q", "-m", "feat: first")
+	r.Git("tag", tag)
 
 	ctx := context.Background()
-	gitBin, _, err := discover.GitSource()
-	if err != nil {
-		t.Fatal(err)
-	}
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.CommandContext(ctx, gitBin, args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
-			"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
-	}
-	run("init", "-q", "-b", "main")
-	run("add", ".")
-	run("commit", "-q", "-m", "feat: first")
-	run("tag", tag)
-
-	p, err := plan.Resolve(ctx, plan.Options{Dir: dir})
+	p, err := plan.Resolve(ctx, plan.Options{Dir: r.Dir})
 	if err != nil || !p.OK() {
 		t.Fatalf("plan: %v %+v", err, p.Checks)
 	}

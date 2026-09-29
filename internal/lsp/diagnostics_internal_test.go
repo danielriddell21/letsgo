@@ -2,60 +2,13 @@ package lsp
 
 import (
 	"context"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/gobuild"
+	"github.com/danielriddell21/letsgo/internal/releasetest"
 )
-
-type repo struct {
-	t   *testing.T
-	dir string
-}
-
-func newRepo(t *testing.T) *repo {
-	t.Helper()
-	r := &repo{t: t, dir: t.TempDir()}
-	r.git("init", "-q", "-b", "main")
-	return r
-}
-
-func (r *repo) git(args ...string) {
-	r.t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = r.dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com",
-		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com",
-		"GIT_AUTHOR_DATE=2024-03-15T12:30:45Z", "GIT_COMMITTER_DATE=2024-03-15T12:30:45Z",
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		r.t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-	}
-}
-
-func (r *repo) write(name, content string) {
-	r.t.Helper()
-	path := filepath.Join(r.dir, name)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		r.t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		r.t.Fatal(err)
-	}
-}
-
-func (r *repo) commit(tag string) {
-	r.t.Helper()
-	r.git("add", ".")
-	r.git("commit", "-q", "-m", "commit")
-	if tag != "" {
-		r.git("tag", tag)
-	}
-}
 
 func TestKindOf(t *testing.T) {
 	tests := []struct {
@@ -112,13 +65,13 @@ func TestParseDiagnosticsDecodesGlobalConfig(t *testing.T) {
 }
 
 func TestPlanDiagnosticsReportsAFailingCheckWithPosition(t *testing.T) {
-	r := newRepo(t)
-	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
-	r.write("main.go", "package main\n\nvar version = \"dev\"\n\nfunc main() {}\n")
-	r.write("letsgo.mod", "build "+gobuild.Host().String()+"\nbudget windows/arm64 10MB\n")
-	r.commit("v1.0.0")
+	r := releasetest.NewRepo(t)
+	r.Write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	r.Write("main.go", "package main\n\nvar version = \"dev\"\n\nfunc main() {}\n")
+	r.Write("letsgo.mod", "build "+gobuild.Host().String()+"\nbudget windows/arm64 10MB\n")
+	r.Commit("v1.0.0")
 
-	path := filepath.Join(r.dir, "letsgo.mod")
+	path := filepath.Join(r.Dir, "letsgo.mod")
 	diags := planDiagnostics(context.Background(), path)
 	if len(diags) != 1 {
 		t.Fatalf("len(diags) = %d, want 1: %+v", len(diags), diags)
