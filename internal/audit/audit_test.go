@@ -373,7 +373,6 @@ func TestRunAppendsWhenTheVulndbChanges(t *testing.T) {
 		t.Fatalf("first audit.Run: %v", err)
 	}
 
-	const laterOutput = `{"config":{"scanner_version":"v1.1.4","db_last_modified":"2026-09-24T00:00:00Z"}}`
 	fakeGovulncheck(t, laterOutput)
 	opts.WorkDir = t.TempDir()
 	second, err := audit.Run(context.Background(), opts)
@@ -447,9 +446,15 @@ func TestRunFailsForAnUnknownTag(t *testing.T) {
 	}
 }
 
-// A release whose existing audit.json can't be downloaded fails the run
-// rather than silently starting over (which would lose its history).
-func TestRunFailsWhenTheExistingAuditJSONCannotBeDownloaded(t *testing.T) {
+const laterOutput = `{"config":{"scanner_version":"v1.1.4","db_last_modified":"2026-09-24T00:00:00Z"}}`
+
+// secondRunFails audits a fresh release once (which always succeeds and
+// records the first entry), then breaks the fake forge via breakIt, runs a
+// second audit with secondOutput as govulncheck's result, and returns the
+// client (for a test to inspect what actually got recorded) and the second
+// run's error.
+func secondRunFails(t *testing.T, secondOutput string, breakIt func(*controls)) (*github.Client, error) {
+	t.Helper()
 	fakeGovulncheck(t, cleanOutput)
 	p := buildRelease(t)
 	client, ctl := p.serve(t, "")
@@ -463,12 +468,21 @@ func TestRunFailsWhenTheExistingAuditJSONCannotBeDownloaded(t *testing.T) {
 		t.Fatalf("first audit.Run: %v", err)
 	}
 
+	fakeGovulncheck(t, secondOutput)
 	ctl.mu.Lock()
-	ctl.failDownload = audit.FileName
+	breakIt(ctl)
 	ctl.mu.Unlock()
 
 	opts.WorkDir = t.TempDir()
-	if _, err := audit.Run(context.Background(), opts); err == nil {
+	_, err := audit.Run(context.Background(), opts)
+	return client, err
+}
+
+// A release whose existing audit.json can't be downloaded fails the run
+// rather than silently starting over (which would lose its history).
+func TestRunFailsWhenTheExistingAuditJSONCannotBeDownloaded(t *testing.T) {
+	_, err := secondRunFails(t, cleanOutput, func(ctl *controls) { ctl.failDownload = audit.FileName })
+	if err == nil {
 		t.Fatal("a failed audit.json download was not rejected")
 	}
 }
@@ -476,25 +490,8 @@ func TestRunFailsWhenTheExistingAuditJSONCannotBeDownloaded(t *testing.T) {
 // A release whose existing audit.json does not parse fails the run rather
 // than silently discarding its history.
 func TestRunFailsWhenTheExistingAuditJSONDoesNotParse(t *testing.T) {
-	fakeGovulncheck(t, cleanOutput)
-	p := buildRelease(t)
-	client, ctl := p.serve(t, "")
-	opts := audit.Options{
-		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
-		Tag: "v1.2.3",
-	}
-
-	opts.WorkDir = t.TempDir()
-	if _, err := audit.Run(context.Background(), opts); err != nil {
-		t.Fatalf("first audit.Run: %v", err)
-	}
-
-	ctl.mu.Lock()
-	ctl.corrupt = audit.FileName
-	ctl.mu.Unlock()
-
-	opts.WorkDir = t.TempDir()
-	if _, err := audit.Run(context.Background(), opts); err == nil {
+	_, err := secondRunFails(t, cleanOutput, func(ctl *controls) { ctl.corrupt = audit.FileName })
+	if err == nil {
 		t.Fatal("an unparseable audit.json was not rejected")
 	}
 }
@@ -502,27 +499,8 @@ func TestRunFailsWhenTheExistingAuditJSONDoesNotParse(t *testing.T) {
 // AU-8: a run that fails to replace the release's audit.json must not have
 // removed the old one first and left the release with none at all.
 func TestRunFailsWhenReplacingAuditJSONFails(t *testing.T) {
-	fakeGovulncheck(t, cleanOutput)
-	p := buildRelease(t)
-	client, ctl := p.serve(t, "")
-	opts := audit.Options{
-		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
-		Tag: "v1.2.3",
-	}
-
-	opts.WorkDir = t.TempDir()
-	if _, err := audit.Run(context.Background(), opts); err != nil {
-		t.Fatalf("first audit.Run: %v", err)
-	}
-
-	const laterOutput = `{"config":{"scanner_version":"v1.1.4","db_last_modified":"2026-09-24T00:00:00Z"}}`
-	fakeGovulncheck(t, laterOutput)
-	ctl.mu.Lock()
-	ctl.failDelete = audit.FileName
-	ctl.mu.Unlock()
-
-	opts.WorkDir = t.TempDir()
-	if _, err := audit.Run(context.Background(), opts); err == nil {
+	client, err := secondRunFails(t, laterOutput, func(ctl *controls) { ctl.failDelete = audit.FileName })
+	if err == nil {
 		t.Fatal("a failed replace was not rejected")
 	}
 
