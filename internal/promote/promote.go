@@ -161,7 +161,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		Notes:  notesMode(o.AppendNotes),
 		Release: github.ReleaseInput{
 			TagName:         stableTag,
-			Name:            stableTag,
+			Name:            releaseTitle(p, stableTag),
 			Body:            notes,
 			Draft:           false,
 			Prerelease:      false,
@@ -448,6 +448,15 @@ func notesMode(appendNotes bool) publish.NotesMode {
 // The HLD's "marked latest" (PR-11) is read as inheriting the same rule an
 // ordinary stable release already follows, not as overriding it for a
 // module that opted out of claiming "latest" at all.
+// releaseTitle mirrors cmd/letsgo/main.go's own: the tag alone for a root
+// module, or the module's directory plus the version for a scoped one.
+func releaseTitle(p *plan.Plan, tag string) string {
+	if p.Scope.Dir == "" {
+		return tag
+	}
+	return p.Scope.Dir + " " + strings.TrimPrefix(tag, p.Scope.Prefix)
+}
+
 func isLatest(p *plan.Plan) string {
 	switch p.Config.Latest {
 	case "true", "false":

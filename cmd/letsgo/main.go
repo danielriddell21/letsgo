@@ -340,7 +340,7 @@ func runRelease(args []string) error {
 		Notes:  notesMode(*appendNotes),
 		Release: github.ReleaseInput{
 			TagName:         releaseTag(p),
-			Name:            releaseTag(p),
+			Name:            releaseTitle(p),
 			Body:            notes,
 			Draft:           *draft || p.Config.Draft,
 			Prerelease:      isPrerelease(p),
@@ -922,6 +922,19 @@ func releaseTag(p *plan.Plan) string {
 		return p.Tag
 	}
 	return "v" + p.Version
+}
+
+// releaseTitle is the release's display name: the tag alone for a root
+// module, unchanged from every single-module repository today, or the
+// module's own directory plus the version for a scoped one — so two modules
+// in the same repository read apart on the releases page instead of both
+// showing a bare tag with an unlabeled prefix.
+func releaseTitle(p *plan.Plan) string {
+	tag := releaseTag(p)
+	if p.Scope.Dir == "" {
+		return tag
+	}
+	return p.Scope.Dir + " " + strings.TrimPrefix(tag, p.Scope.Prefix)
 }
 
 func notesMode(appendNotes bool) publish.NotesMode {
