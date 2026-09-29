@@ -50,7 +50,7 @@ usage:
   letsgo update [--check]                update letsgo itself, verified against its manifest
   letsgo plugin install <name>           install a plugin, verified against its manifest
   letsgo plugin list                     the plugins this repository pins, and what is installed
-  letsgo features                        the feature catalogue: what can be disabled or required
+  letsgo features [--json]               the feature catalogue: what can be disabled or required
   letsgo fmt [file]                      format letsgo.mod
   letsgo version                         print the version (also --version)
 

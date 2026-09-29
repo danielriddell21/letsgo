@@ -10,7 +10,7 @@ func TestListFeatures(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var buf strings.Builder
-	if err := listFeatures(&buf); err != nil {
+	if err := listFeatures(&buf, false); err != nil {
 		t.Fatal(err)
 	}
 	out := buf.String()
@@ -40,7 +40,7 @@ func featureLine(t *testing.T, config, prefix string) string {
 	}
 
 	var buf strings.Builder
-	if err := listFeatures(&buf); err != nil {
+	if err := listFeatures(&buf, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,7 +100,49 @@ func TestListFeaturesRejectsBadConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := listFeatures(&strings.Builder{}); err == nil {
+	if err := listFeatures(&strings.Builder{}, false); err == nil {
 		t.Error("listFeatures should have reported the config error")
+	}
+}
+
+// letsgo features --json prints the same catalogue as the text table, in its
+// own schema-versioned wire form.
+func TestListFeaturesJSON(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.WriteFile("letsgo.mod", []byte("disable sbom\nrequire vulncheck\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf strings.Builder
+	if err := listFeatures(&buf, true); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		`"schema": 1`,
+		`"name": "sbom"`,
+		`"kind": "output"`,
+		`"on": false`,
+		`"name": "vulncheck"`,
+		`"required": true`,
+		`"from": "letsgo.mod"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("listFeatures JSON output = %q, want it to contain %q", out, want)
+		}
+	}
+}
+
+func TestRunFeaturesPrintsJSONWhenRequested(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	out := captureStdout(t, func() {
+		_ = runFeatures([]string{"--json"})
+	})
+
+	if !strings.Contains(out, `"schema": 1`) {
+		t.Errorf("runFeatures --json output = %q, want it to contain a schema field", out)
 	}
 }

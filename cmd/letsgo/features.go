@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -15,25 +16,44 @@ import (
 
 func runFeatures(args []string) error {
 	fs := flag.NewFlagSet("features", flag.ExitOnError)
+	jsonOutput := fs.Bool("json", false, "print the catalogue as JSON")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	return listFeatures(os.Stdout)
+	return listFeatures(os.Stdout, *jsonOutput)
 }
 
-// listFeatures prints the catalogue: what each feature is called, its state
-// in this repository, where that state came from, and how to change it.
-func listFeatures(w io.Writer) error {
-	cfg, err := loadFeaturesConfig()
-	if err != nil {
-		return err
-	}
+// featureEntry is one catalogue entry resolved against this repository's own
+// config: what letsgo.mod (or its absence) makes of a feature, rather than
+// the bare catalogue default feature.Feature alone describes.
+type featureEntry struct {
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+	On       bool   `json:"on"`
+	Required bool   `json:"required,omitempty"`
+	From     string `json:"from"`
+	Hint     string `json:"hint"`
+}
+
+// jsonFeaturesResult is the catalogue's wire form for `letsgo features
+// --json`: schema-versioned (ED-13), so a consumer can tell which shape it's
+// reading before the fields under it ever change.
+type jsonFeaturesResult struct {
+	Schema   int            `json:"schema"`
+	Features []featureEntry `json:"features"`
+}
+
+// resolveFeatureEntries resolves the catalogue against cfg: what each
+// feature is called, its state in this repository, where that state came
+// from, and how to change it.
+func resolveFeatureEntries(cfg *config.Config) []featureEntry {
 	set := feature.Resolve(cfg.Disabled)
 	required := make(map[string]bool, len(cfg.Required))
 	for _, name := range cfg.Required {
 		required[name] = true
 	}
 
+	entries := make([]featureEntry, 0, len(feature.All))
 	for _, f := range feature.All {
 		// Set.On only means "not disabled", which describes a feature that is
 		// on unless told otherwise. One that is off unless told otherwise is
@@ -42,16 +62,44 @@ func listFeatures(w io.Writer) error {
 		if !f.Default {
 			on = enabledByDirective(cfg, f.Name)
 		}
-		state := onOff(on)
-		if required[f.Name] {
-			state += ", required"
-		}
 
 		from := "default"
 		if on != f.Default || required[f.Name] {
 			from = plan.ConfigFile
 		}
-		fmt.Fprintf(w, "%-14s %-9s %-14s %-11s %s\n", f.Name, f.Kind, state, from, changeHint(f))
+		entries = append(entries, featureEntry{
+			Name: f.Name, Kind: f.Kind.String(), On: on, Required: required[f.Name],
+			From: from, Hint: changeHint(f),
+		})
+	}
+	return entries
+}
+
+// listFeatures prints the catalogue: what each feature is called, its state
+// in this repository, where that state came from, and how to change it —
+// either as the human-readable table, or (jsonOutput) as JSON.
+func listFeatures(w io.Writer, jsonOutput bool) error {
+	cfg, err := loadFeaturesConfig()
+	if err != nil {
+		return err
+	}
+	entries := resolveFeatureEntries(cfg)
+
+	if jsonOutput {
+		data, err := json.MarshalIndent(jsonFeaturesResult{Schema: 1, Features: entries}, "", "  ")
+		if err != nil {
+			return fmt.Errorf("letsgo: %w", err)
+		}
+		fmt.Fprintln(w, string(data))
+		return nil
+	}
+
+	for _, e := range entries {
+		state := onOff(e.On)
+		if e.Required {
+			state += ", required"
+		}
+		fmt.Fprintf(w, "%-14s %-9s %-14s %-11s %s\n", e.Name, e.Kind, state, e.From, e.Hint)
 	}
 	return nil
 }
