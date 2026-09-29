@@ -13,6 +13,7 @@
 package bump
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -47,23 +48,34 @@ func (l Level) String() string {
 	}
 }
 
+// MarshalJSON renders a Level the same way String does, so `letsgo tag
+// --json` carries "patch"/"minor"/"major"/"none" rather than a bare number a
+// consumer would have to know this package's iota order to decode.
+func (l Level) MarshalJSON() ([]byte, error) {
+	data, err := json.Marshal(l.String())
+	if err != nil {
+		return nil, fmt.Errorf("bump: %w", err)
+	}
+	return data, nil
+}
+
 // Signal is one source's view of how large the change is.
 type Signal struct {
-	Source string
-	Level  Level
-	Detail string
+	Source string `json:"source"`
+	Level  Level  `json:"level"`
+	Detail string `json:"detail"`
 }
 
 // Proposal is a recommended next version and the evidence for it.
 type Proposal struct {
-	Previous string
-	Next     string
-	Level    Level
-	Signals  []Signal
+	Previous string   `json:"previous,omitempty"`
+	Next     string   `json:"next"`
+	Level    Level    `json:"level"`
+	Signals  []Signal `json:"signals,omitempty"`
 
 	// Notes carry anything the caller must act on beyond tagging, such as a
 	// module path that has to change first.
-	Notes []string
+	Notes []string `json:"notes,omitempty"`
 }
 
 // FromAPI reads the exported API delta.
