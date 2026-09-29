@@ -55,6 +55,31 @@ func TestConnReadMessageRejectsMissingContentLength(t *testing.T) {
 	}
 }
 
+func TestConnReadMessageRejectsAMalformedContentLength(t *testing.T) {
+	c := newConn(bytes.NewBufferString("Content-Length: not-a-number\r\n\r\n"), io.Discard)
+	if _, err := c.readMessage(); err == nil {
+		t.Fatal("expected an error for a non-numeric Content-Length")
+	}
+}
+
+func TestConnReadMessageRejectsATruncatedBody(t *testing.T) {
+	c := newConn(bytes.NewBufferString("Content-Length: 10\r\n\r\n{\"a\":1}"), io.Discard)
+	if _, err := c.readMessage(); err == nil {
+		t.Fatal("expected an error for a body shorter than Content-Length")
+	}
+}
+
+type errWriter struct{}
+
+func (errWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+func TestConnWriteMessagePropagatesAWriteError(t *testing.T) {
+	c := newConn(bytes.NewReader(nil), errWriter{})
+	if err := c.writeMessage(map[string]string{"ok": "yes"}); err == nil {
+		t.Fatal("expected an error when the underlying writer fails")
+	}
+}
+
 func TestConnWriteErrorCarriesTheCode(t *testing.T) {
 	var buf bytes.Buffer
 	c := newConn(&buf, &buf)

@@ -143,8 +143,29 @@ func TestArgumentCompletionsForUnknownKeywordReturnsNil(t *testing.T) {
 	}
 }
 
+func TestArgumentCompletionsForBuildOffersTargets(t *testing.T) {
+	items := argumentCompletions(context.Background(), "build", nil, true, "")
+	if len(items) == 0 {
+		t.Fatal("items is empty, want the toolchain's supported targets")
+	}
+}
+
+func TestArgumentCompletionsForRequireOffersRequireableFeatures(t *testing.T) {
+	items := argumentCompletions(context.Background(), "require", nil, false, "")
+	if len(items) == 0 {
+		t.Fatal("items is empty, want at least one requireable feature")
+	}
+}
+
 func TestTargetCompletionsIsEmptyWhenNotExec(t *testing.T) {
 	if items := targetCompletions(context.Background(), false, ""); items != nil {
 		t.Errorf("items = %+v, want nil in restricted mode", items)
+	}
+}
+
+func TestTargetCompletionsListsTheHostToolchainsTargets(t *testing.T) {
+	items := targetCompletions(context.Background(), true, "")
+	if len(items) == 0 {
+		t.Fatal("items is empty, want the toolchain's supported targets")
 	}
 }

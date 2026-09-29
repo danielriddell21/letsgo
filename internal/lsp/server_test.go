@@ -264,10 +264,128 @@ func TestServerEndToEnd(t *testing.T) {
 		t.Error("completions is empty, want at least the directive list")
 	}
 
+	c.notify("textDocument/didChange", map[string]any{
+		"textDocument":   map[string]any{"uri": uri},
+		"contentChanges": []map[string]any{{"text": "project foo\nproject bar\n"}},
+	})
+	changeParams := c.awaitNotification("textDocument/publishDiagnostics")
+	var changeDiags struct {
+		Diagnostics []lsp.Diagnostic `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(changeParams, &changeDiags); err != nil {
+		t.Fatal(err)
+	}
+	if len(changeDiags.Diagnostics) != 1 {
+		t.Errorf("diagnostics = %+v, want one: project appears twice", changeDiags.Diagnostics)
+	}
+
+	c.notify("textDocument/didClose", map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+	})
+	closedCompletion := c.request("textDocument/completion", map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"position":     map[string]any{"line": 0, "character": 0},
+	})
+	var closedItems []lsp.CompletionItem
+	if err := json.Unmarshal(closedCompletion, &closedItems); err != nil {
+		t.Fatal(err)
+	}
+	if len(closedItems) != 0 {
+		t.Errorf("items = %+v, want none: the document was closed", closedItems)
+	}
+
+	c.nextID++
+	c.send(map[string]any{"jsonrpc": "2.0", "id": c.nextID, "method": "textDocument/notAMethod", "params": map[string]any{}})
+	errBody := c.readMessage()
+	var errResp struct {
+		Error *struct {
+			Code int `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(errBody, &errResp); err != nil {
+		t.Fatal(err)
+	}
+	if errResp.Error == nil {
+		t.Errorf("response = %s, want an error for an unhandled method", errBody)
+	}
+
+	c.notify("textDocument/notANotification", map[string]any{})
+
 	shutdownResult := c.request("shutdown", nil)
 	if got := strings.TrimSpace(string(shutdownResult)); got != "" && got != "null" {
 		t.Errorf("shutdown result = %q, want empty or null", got)
 	}
+	c.notify("exit", nil)
+}
+
+func TestServerRejectsAMalformedMessageBody(t *testing.T) {
+	c := newClient(t, lsp.Options{})
+	c.request("initialize", map[string]any{})
+	c.notify("initialized", map[string]any{})
+
+	body := []byte("not json")
+	if _, err := fmt.Fprintf(c.toSrv, "Content-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+		t.Fatal(err)
+	}
+	errBody := c.readMessage()
+	var errResp struct {
+		Error *struct {
+			Code int `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(errBody, &errResp); err != nil {
+		t.Fatal(err)
+	}
+	if errResp.Error == nil {
+		t.Errorf("response = %s, want a parse error", errBody)
+	}
+
+	// The server must still be alive after a parse error.
+	c.request("shutdown", nil)
+	c.notify("exit", nil)
+}
+
+func TestServerHandlersRejectMalformedParams(t *testing.T) {
+	requests := []string{
+		"textDocument/completion",
+		"textDocument/hover",
+		"textDocument/formatting",
+		"textDocument/documentSymbol",
+	}
+	notifications := []string{
+		"textDocument/didOpen",
+		"textDocument/didChange",
+		"textDocument/didSave",
+		"textDocument/didClose",
+	}
+
+	c := newClient(t, lsp.Options{})
+	c.request("initialize", map[string]any{})
+	c.notify("initialized", map[string]any{})
+
+	for _, method := range requests {
+		c.nextID++
+		c.send(map[string]any{"jsonrpc": "2.0", "id": c.nextID, "method": method, "params": "not-an-object"})
+		body := c.readMessage()
+		var resp struct {
+			Error *struct {
+				Code int `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(body, &resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.Error == nil {
+			t.Errorf("%s: response = %s, want an error for malformed params", method, body)
+		}
+	}
+
+	for _, method := range notifications {
+		c.notify(method, "not-an-object")
+	}
+	// A notification with malformed params still gets no response; a
+	// following request round-trips cleanly, proving the server survived.
+	c.request("shutdown", nil)
 	c.notify("exit", nil)
 }
 

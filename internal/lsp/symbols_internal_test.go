@@ -60,3 +60,16 @@ func TestDocumentSymbolsBlockRangeCoversItsLastChild(t *testing.T) {
 		t.Errorf("block.Range.End.Line = %d, want 2 (the last child line)", block.Range.End.Line)
 	}
 }
+
+func TestSafeLineIsEmptyOutOfRange(t *testing.T) {
+	lines := []string{"a", "b"}
+	if got := safeLine(lines, -1); got != "" {
+		t.Errorf("safeLine(-1) = %q, want empty", got)
+	}
+	if got := safeLine(lines, 2); got != "" {
+		t.Errorf("safeLine(2) = %q, want empty", got)
+	}
+	if got := safeLine(lines, 1); got != "b" {
+		t.Errorf("safeLine(1) = %q, want %q", got, "b")
+	}
+}
