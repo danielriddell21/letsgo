@@ -144,19 +144,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      # Minted before the clone, scoped to this repo alone, so a missing or
-      # misconfigured App credential fails here rather than as an
-      # unauthenticated checkout further down.
-      #
-      # A tag pushed with the workflow token starts no workflow, so
-      # release.yml would never fire. A token of its own does.
-      - uses: actions/create-github-app-token@v3
-        id: letsgo-token
-        with:
-          app-id: ${{ vars.LETSGO_APP_ID }}
-          private-key: ${{ secrets.LETSGO_APP_PRIVATE_KEY }}
-          repositories: letsgo
-
+      # The default token is enough to read this same repository, so the
+      # clone needs nothing special. Only the push at the end needs an
+      # identity of its own — a tag pushed with the workflow token starts no
+      # workflow, so release.yml would never fire.
       - uses: actions/checkout@v7
         with:
           # letsgo tag looks for the previous tag and compares this tree's
@@ -164,14 +155,23 @@ jobs:
           # no tags is not enough.
           fetch-depth: 0
 
-          token: ${{ steps.letsgo-token.outputs.token }}
-
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           check-latest: false
 
+      # A local composite action needs the checkout above to already exist
+      # on disk, so this can't run any earlier.
+      - uses: ./.github/actions/mint-app-token
+        id: letsgo-token
+        with:
+          app-id: ${{ vars.LETSGO_APP_ID }}
+          private-key: ${{ secrets.LETSGO_APP_PRIVATE_KEY }}
+          repositories: letsgo
+
       - name: tag and push
+        env:
+          TOKEN: ${{ steps.letsgo-token.outputs.token }}
         run: |
           set -euo pipefail
 
@@ -183,6 +183,9 @@ jobs:
             exit 0
           fi
 
+          # The tagger recorded on the annotated tag object itself — separate
+          # from, and unaffected by, which credential authenticates the push
+          # below.
           git config user.name "letsgo-champ[bot]"
           git config user.email "293666020+letsgo-champ[bot]@users.noreply.github.com"
 
@@ -199,4 +202,9 @@ jobs:
           if [ -z "${tag}" ]; then
             exit 0
           fi
-          git push origin "${tag}"
+
+          # Only this push carries the minted token, via a one-off auth
+          # header rather than a persisted credential helper — the same
+          # mechanism actions/checkout's own token input uses.
+          auth=$(printf 'x-access-token:%s' "${TOKEN}" | base64 -w0)
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ${auth}" push origin "${tag}"

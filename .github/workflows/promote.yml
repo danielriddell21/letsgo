@@ -30,16 +30,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || contains(github.event.release.tag_name, '-')
     runs-on: ubuntu-latest
     steps:
-      # Published with the workflow token, this release would be credited to
-      # github-actions[bot] instead of the identity every other release-time
-      # write already uses (the tag itself, the tap commit).
-      - uses: actions/create-github-app-token@v3
-        id: letsgo-token
-        with:
-          app-id: ${{ vars.LETSGO_APP_ID }}
-          private-key: ${{ secrets.LETSGO_APP_PRIVATE_KEY }}
-          repositories: letsgo
-
+      # The checkout below deliberately does not carry an App token: its
+      # embedded git credential is only used if letsgo promote pushes with
+      # git directly, and that push must stay on the default token so it
+      # does not retrigger release.yml (see internal/promote — the stable
+      # release is published directly by this workflow instead).
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.event.release.tag_name }}
@@ -50,14 +45,24 @@ jobs:
           go-version-file: go.mod
           check-latest: false
 
+      # A local composite action needs the checkout above to already exist
+      # on disk. Published with the workflow token, this release would be
+      # credited to github-actions[bot] instead of the identity every other
+      # release-time write already uses (the tag itself, the tap commit).
+      - uses: ./.github/actions/mint-app-token
+        id: letsgo-token
+        with:
+          app-id: ${{ vars.LETSGO_APP_ID }}
+          private-key: ${{ secrets.LETSGO_APP_PRIVATE_KEY }}
+          repositories: letsgo
+
       # See release.yml: scoped to the tap alone, so the App need not be
       # installed on this repository at all.
-      - uses: actions/create-github-app-token@v3
+      - uses: ./.github/actions/mint-app-token
         id: tap-token
         with:
           app-id: ${{ vars.TAP_APP_ID }}
           private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
           repositories: homebrew-tap
 
       - name: promote

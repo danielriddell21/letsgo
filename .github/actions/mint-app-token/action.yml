@@ -1,0 +1,32 @@
+name: mint app token
+description: >
+  Mint a short-lived GitHub App installation token scoped to one repository.
+  A thin wrapper around actions/create-github-app-token: a composite action
+  does not inherit the caller's secrets or vars context, so app-id and
+  private-key must be passed through explicitly as inputs.
+
+inputs:
+  app-id:
+    description: The App's ID.
+    required: true
+  private-key:
+    description: The App's private key.
+    required: true
+  repositories:
+    description: The single repository to scope the token to.
+    required: true
+
+outputs:
+  token:
+    description: The minted installation token.
+    value: ${{ steps.mint.outputs.token }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/create-github-app-token@v3
+      id: mint
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        repositories: ${{ inputs.repositories }}
