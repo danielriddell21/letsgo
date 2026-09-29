@@ -36,8 +36,8 @@ jobs:
       - uses: actions/create-github-app-token@v3
         id: letsgo-token
         with:
-          app-id: ${{ vars.LETSGO_APP_ID }}
-          private-key: ${{ secrets.LETSGO_APP_PRIVATE_KEY }}
+          app-id: ${{ vars.TAP_APP_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
           repositories: letsgo
 
       # Deliberately does not carry the token above: its embedded git
