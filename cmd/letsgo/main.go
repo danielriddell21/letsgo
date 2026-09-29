@@ -36,7 +36,7 @@ var version = "dev"
 const usage = `letsgo builds and publishes Go releases.
 
 usage:
-  letsgo plan [--explain] [--publish]    resolve and check a release without performing one
+  letsgo plan [--explain] [--json] [--publish]  resolve and check a release without performing one
   letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
   letsgo release [--draft] [-o dir]      build and publish, resumably
   letsgo release --snapshot              rehearse a release without publishing
@@ -189,6 +189,7 @@ var errDoctorFailed = errors.New("doctor found a problem")
 func runPlan(args []string) error {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)
 	explain := fs.Bool("explain", false, "show where each resolved value came from")
+	jsonOutput := fs.Bool("json", false, "print the plan as JSON")
 	snapshot := fs.Bool("snapshot", false, "plan an untagged working version")
 	allowDirty := fs.Bool("allow-dirty", false, "permit an unclean worktree")
 	publishGates := fs.Bool("publish", false, "also check the gates a release needs: a forge, and a token that may write to it")
@@ -206,6 +207,18 @@ func runPlan(args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	if *jsonOutput {
+		data, err := p.JSON()
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		if !p.OK() {
+			return errPlanFailed
+		}
+		return nil
 	}
 
 	p.Report(os.Stdout, *explain)

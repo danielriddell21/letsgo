@@ -120,16 +120,16 @@ const (
 
 // Check is one gate result.
 type Check struct {
-	Name   string
-	Status Status
-	Detail string
+	Name   string `json:"name"`
+	Status Status `json:"status"`
+	Detail string `json:"detail"`
 }
 
 // Source records where a resolved value came from, for plan --explain.
 type Source struct {
-	Field string
-	Value string
-	From  string
+	Field string `json:"field"`
+	Value string `json:"value"`
+	From  string `json:"from"`
 }
 
 // Artifact is one archive a release would produce.

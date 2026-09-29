@@ -38,7 +38,7 @@ brew install danielriddell21/tap/letsgo
 ## Usage
 
 ```
-letsgo plan [--explain] [--publish]    resolve and check a release without performing one
+letsgo plan [--explain] [--json] [--publish]  resolve and check a release without performing one
 letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
 letsgo release [--draft] [-o dir]      build and publish, resumably
 letsgo release --snapshot              rehearse a release without publishing
