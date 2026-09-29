@@ -56,9 +56,9 @@ func (s Status) symbol() string {
 
 // Check is one verification result.
 type Check struct {
-	Name   string
-	Status Status
-	Detail string
+	Name   string `json:"name"`
+	Status Status `json:"status"`
+	Detail string `json:"detail"`
 }
 
 // Options describe a verification.
@@ -107,6 +107,30 @@ type Result struct {
 	// userAgent identifies letsgo to anything this verification contacts
 	// beyond the forge.
 	userAgent string
+}
+
+// jsonResult is Result's wire form for `letsgo verify --json`:
+// schema-versioned, so a consumer can tell which shape it's reading before
+// the fields under it ever change.
+type jsonResult struct {
+	Schema     int     `json:"schema"`
+	Tag        string  `json:"tag"`
+	SourceFrom string  `json:"sourceFrom,omitempty"`
+	Checks     []Check `json:"checks"`
+}
+
+// JSON renders the report for machine consumers (`letsgo verify --json`).
+func (r *Result) JSON() ([]byte, error) {
+	data, err := json.MarshalIndent(jsonResult{
+		Schema:     1,
+		Tag:        r.Tag,
+		SourceFrom: r.SourceFrom,
+		Checks:     r.Checks,
+	}, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("verify: %w", err)
+	}
+	return data, nil
 }
 
 // OK reports whether every check passed.
