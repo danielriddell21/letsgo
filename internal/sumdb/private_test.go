@@ -10,65 +10,15 @@ func TestPrivateModule(t *testing.T) {
 		wantSkip   bool
 		wantReason string
 	}{
-		{
-			name:       "GOPRIVATE match",
-			env:        map[string]string{"GOPRIVATE": "example.com/*"},
-			modulePath: "example.com/x",
-			wantSkip:   true,
-			wantReason: "GOPRIVATE",
-		},
-		{
-			name:       "no match",
-			env:        map[string]string{"GOPRIVATE": "example.com/*"},
-			modulePath: "other.com/x",
-			wantSkip:   false,
-		},
-		{
-			name:       "no env set",
-			modulePath: "example.com/x",
-			wantSkip:   false,
-		},
-		{
-			name:       "GONOSUMDB match",
-			env:        map[string]string{"GONOSUMDB": "example.com/*"},
-			modulePath: "example.com/x",
-			wantSkip:   true,
-			wantReason: "GONOSUMDB",
-		},
-		{
-			name:       "GONOSUMCHECK match",
-			env:        map[string]string{"GONOSUMCHECK": "example.com/*"},
-			modulePath: "example.com/x",
-			wantSkip:   true,
-			wantReason: "GONOSUMCHECK",
-		},
-		{
-			name:       "multiple comma-separated globs",
-			env:        map[string]string{"GOPRIVATE": "foo.com/*,example.com/*,bar.com/*"},
-			modulePath: "example.com/x",
-			wantSkip:   true,
-			wantReason: "GOPRIVATE",
-		},
-		{
-			name:       "empty glob segment between commas is skipped",
-			env:        map[string]string{"GOPRIVATE": ",example.com/*,"},
-			modulePath: "example.com/x",
-			wantSkip:   true,
-			wantReason: "GOPRIVATE",
-		},
-		{
-			name:       "target with more path elements than the glob is truncated to match",
-			env:        map[string]string{"GOPRIVATE": "example.com/*"},
-			modulePath: "example.com/foo/bar/baz",
-			wantSkip:   true,
-			wantReason: "GOPRIVATE",
-		},
-		{
-			name:       "glob with more path elements than the target never matches",
-			env:        map[string]string{"GOPRIVATE": "example.com/foo/*"},
-			modulePath: "example.com/x",
-			wantSkip:   false,
-		},
+		{"GOPRIVATE match", map[string]string{"GOPRIVATE": "example.com/*"}, "example.com/x", true, "GOPRIVATE"},
+		{"no match", map[string]string{"GOPRIVATE": "example.com/*"}, "other.com/x", false, ""},
+		{"no env set", nil, "example.com/x", false, ""},
+		{"GONOSUMDB match", map[string]string{"GONOSUMDB": "example.com/*"}, "example.com/x", true, "GONOSUMDB"},
+		{"GONOSUMCHECK match", map[string]string{"GONOSUMCHECK": "example.com/*"}, "example.com/x", true, "GONOSUMCHECK"},
+		{"multiple comma-separated globs", map[string]string{"GOPRIVATE": "foo.com/*,example.com/*,bar.com/*"}, "example.com/x", true, "GOPRIVATE"},
+		{"empty glob segment between commas is skipped", map[string]string{"GOPRIVATE": ",example.com/*,"}, "example.com/x", true, "GOPRIVATE"},
+		{"target with more path elements than the glob is truncated to match", map[string]string{"GOPRIVATE": "example.com/*"}, "example.com/foo/bar/baz", true, "GOPRIVATE"},
+		{"glob with more path elements than the target never matches", map[string]string{"GOPRIVATE": "example.com/foo/*"}, "example.com/x", false, ""},
 	}
 
 	for _, tt := range tests {
