@@ -250,6 +250,88 @@ func TestCheckReportsASumdbProxyDisagreement(t *testing.T) {
 	}
 }
 
+func TestCheckFailsWhenTheArchiveIsMissing(t *testing.T) {
+	const modulePath, version = "example.com/foo", "v1.0.0"
+	files := map[string]string{"go.mod": "module example.com/foo\n"}
+	zipData, h1 := buildZip(t, modulePath, version, files)
+	sumdbURL, proxyURL := fakeServers(t, modulePath, version, h1, zipData)
+
+	_, err := Check(context.Background(), sumdbURL, proxyURL, modulePath, version, filepath.Join(t.TempDir(), "missing.tar.gz"))
+	if err == nil {
+		t.Fatal("Check succeeded with a missing archive")
+	}
+}
+
+func TestCheckFailsWhenSumdbHasNoRecord(t *testing.T) {
+	sumdbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer sumdbServer.Close()
+
+	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", map[string]string{"go.mod": "module example.com/foo\n"})
+
+	_, err := Check(context.Background(), sumdbServer.URL, "https://proxy.invalid", "example.com/foo", "v1.0.0", archivePath)
+	if err == nil {
+		t.Fatal("Check succeeded despite a sumdb 404")
+	}
+}
+
+func TestCheckFailsWhenTheProxyErrors(t *testing.T) {
+	const modulePath, version = "example.com/foo", "v1.0.0"
+	_, h1 := buildZip(t, modulePath, version, map[string]string{"go.mod": "module example.com/foo\n"})
+	sumdbURL, _ := fakeServers(t, modulePath, version, h1, nil)
+
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer proxyServer.Close()
+
+	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", map[string]string{"go.mod": "module example.com/foo\n"})
+
+	_, err := Check(context.Background(), sumdbURL, proxyServer.URL, modulePath, version, archivePath)
+	if err == nil {
+		t.Fatal("Check succeeded despite a proxy 500")
+	}
+}
+
+func TestLookupHashFailsWithNoMatchingLine(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "example.com/foo v0.9.0 h1:wrongversion==\n")
+	}))
+	defer server.Close()
+
+	if _, err := lookupHash(context.Background(), server.URL, "example.com/foo", "v1.0.0"); err == nil {
+		t.Fatal("lookupHash succeeded with no matching h1 line")
+	}
+}
+
+func TestGetFailsOnANonSuccessStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer server.Close()
+
+	if _, err := get(context.Background(), server.URL, 1<<10); err == nil {
+		t.Fatal("get succeeded on a 418 response")
+	}
+}
+
+func TestHashZipFailsOnCorruptData(t *testing.T) {
+	if _, _, err := hashZip([]byte("not a zip"), "example.com/foo", "v1.0.0"); err == nil {
+		t.Fatal("hashZip succeeded on corrupt data")
+	}
+}
+
+func TestReadArchiveFailsOnCorruptData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bad.tar.gz")
+	if err := os.WriteFile(path, []byte("not a gzip"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readArchive(path); err == nil {
+		t.Fatal("readArchive succeeded on corrupt data")
+	}
+}
+
 func TestCheckNormalizesVersionPrefix(t *testing.T) {
 	const modulePath, version = "example.com/foo", "v1.0.0"
 	files := map[string]string{"go.mod": "module example.com/foo\n"}
