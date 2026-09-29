@@ -177,6 +177,44 @@ func TestEveryDirectiveIsHandled(t *testing.T) {
 	}
 }
 
+// TestEveryDirectiveHasADoc holds docs in step with known the same way
+// TestEveryDirectiveIsHandled holds handlers in step with it: a directive an
+// editor can hover over with nothing to show is a gap, not a variant.
+func TestEveryDirectiveHasADoc(t *testing.T) {
+	for name := range known {
+		if docs[name] == "" {
+			t.Errorf("directive %q has no hover doc", name)
+		}
+	}
+	for name := range docs {
+		if known[name] == "" {
+			t.Errorf("doc %q has no matching directive", name)
+		}
+	}
+}
+
+func TestDocReturnsUsageAndText(t *testing.T) {
+	usage, doc, ok := Doc("build")
+	if !ok || usage == "" || doc == "" {
+		t.Errorf("Doc(build) = %q, %q, %v, want non-empty usage and doc", usage, doc, ok)
+	}
+	if _, _, ok := Doc("not-a-real-directive"); ok {
+		t.Error("Doc(not-a-real-directive) ok = true, want false")
+	}
+}
+
+func TestDirectivesListsEveryKnownDirectiveSorted(t *testing.T) {
+	names := Directives()
+	if len(names) != len(known) {
+		t.Fatalf("len(names) = %d, want %d", len(names), len(known))
+	}
+	for i := 1; i < len(names); i++ {
+		if names[i-1] > names[i] {
+			t.Errorf("not sorted: %q before %q", names[i-1], names[i])
+		}
+	}
+}
+
 func TestPluginDirective(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("a", 64)
 	cfg := decode(t, "plugin archive-layout letsgo-multi v0.1.0 "+digest+"\n")

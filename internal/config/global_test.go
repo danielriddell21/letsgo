@@ -229,3 +229,40 @@ func TestLoadGlobalRejectsAMissingOverride(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+// TestEveryGlobalDirectiveHasADoc holds globalDocs in step with globalKnown,
+// the same way TestEveryDirectiveHasADoc holds decode.go's docs in step.
+func TestEveryGlobalDirectiveHasADoc(t *testing.T) {
+	for name := range globalKnown {
+		if globalDocs[name] == "" {
+			t.Errorf("global directive %q has no hover doc", name)
+		}
+	}
+	for name := range globalDocs {
+		if globalKnown[name] == "" {
+			t.Errorf("global doc %q has no matching directive", name)
+		}
+	}
+}
+
+func TestGlobalDocReturnsUsageAndText(t *testing.T) {
+	usage, doc, ok := GlobalDoc("go")
+	if !ok || usage == "" || doc == "" {
+		t.Errorf("GlobalDoc(go) = %q, %q, %v, want non-empty usage and doc", usage, doc, ok)
+	}
+	if _, _, ok := GlobalDoc("not-a-real-directive"); ok {
+		t.Error("GlobalDoc(not-a-real-directive) ok = true, want false")
+	}
+}
+
+func TestGlobalDirectivesListsEveryKnownDirectiveSorted(t *testing.T) {
+	names := GlobalDirectives()
+	if len(names) != len(globalKnown) {
+		t.Fatalf("len(names) = %d, want %d", len(names), len(globalKnown))
+	}
+	for i := 1; i < len(names); i++ {
+		if names[i-1] > names[i] {
+			t.Errorf("not sorted: %q before %q", names[i-1], names[i])
+		}
+	}
+}
