@@ -48,6 +48,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.event.release.tag_name }}
+
+          # Full history, unlike release.yml: the "Prerelease history" section
+          # is built from local git and is skipped on a shallow clone. Promote
+          # runs by hand, so the slower checkout costs little here.
+          fetch-depth: 0
           fetch-tags: true
 
       - uses: actions/setup-go@v7
