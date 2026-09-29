@@ -12,6 +12,28 @@ import (
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
 
+func TestReportFormatsChecksGroupedInOrder(t *testing.T) {
+	r := &doctor.Result{Checks: []doctor.Check{
+		{Group: "tools", Name: "go", Status: doctor.OK, Detail: "go1.24.0 (/usr/bin/go)"},
+		{Group: "tools", Name: "govulncheck", Status: doctor.Warn, Detail: "not installed", Hint: "go install golang.org/x/vuln/cmd/govulncheck@latest"},
+		{Group: "repository", Name: "letsgo.mod", Status: doctor.Fail, Detail: "invalid"},
+	}}
+
+	var buf strings.Builder
+	r.Report(&buf)
+	out := buf.String()
+
+	for _, want := range []string{
+		"tools", "✓ go", "go1.24.0 (/usr/bin/go)",
+		"! govulncheck", "not installed — go install golang.org/x/vuln/cmd/govulncheck@latest",
+		"repository", "✗ letsgo.mod", "invalid",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Report output missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
 func writeGoMod(t *testing.T, dir, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(content), 0o644); err != nil {
