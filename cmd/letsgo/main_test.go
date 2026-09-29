@@ -240,19 +240,17 @@ func TestRunTagCreatesAPrereleaseTag(t *testing.T) {
 	}
 }
 
-// A repeated --pre run against the same base advances rc.1, rc.2, ...
-// instead of colliding on the same candidate tag.
-func TestRunTagIncrementsAnExistingPrerelease(t *testing.T) {
-	repoDir, moduleDir := scopedModuleFixture(t)
-
-	write := func(name, content string) {
-		path := filepath.Join(repoDir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+// commitAndTag writes a file, commits it, and (if tag is non-empty) tags the
+// commit — the shared pattern behind every test that moves HEAD past an
+// existing tag before letting runTag propose from a fresh, untagged commit.
+func commitAndTag(t *testing.T, repoDir, file, tag string) {
+	t.Helper()
+	path := filepath.Join(repoDir, file)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(file+"\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	run := func(args ...string) {
 		t.Helper()
@@ -261,17 +259,23 @@ func TestRunTagIncrementsAnExistingPrerelease(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", full, err, out)
 		}
 	}
+	run("add", ".")
+	run("commit", "-q", "-m", "commit "+file)
+	if tag != "" {
+		run("tag", tag)
+	}
+}
+
+// A repeated --pre run against the same base advances rc.1, rc.2, ...
+// instead of colliding on the same candidate tag.
+func TestRunTagIncrementsAnExistingPrerelease(t *testing.T) {
+	repoDir, moduleDir := scopedModuleFixture(t)
 
 	// The fixture already tagged HEAD as the stable services/api/v1.2.3; move
 	// past it, tag a first prerelease of the next patch, then move past that
 	// too so runTag proposes from an untagged HEAD again.
-	write("services/api/a.txt", "a\n")
-	run("add", ".")
-	run("commit", "-q", "-m", "second")
-	run("tag", "services/api/v1.2.4-rc.1")
-	write("services/api/b.txt", "b\n")
-	run("add", ".")
-	run("commit", "-q", "-m", "third")
+	commitAndTag(t, repoDir, "services/api/a.txt", "services/api/v1.2.4-rc.1")
+	commitAndTag(t, repoDir, "services/api/b.txt", "")
 
 	t.Chdir(moduleDir)
 	if err := runTag([]string{"--yes", "--patch", "--pre"}); err != nil {
@@ -293,33 +297,11 @@ func TestRunTagIncrementsAnExistingPrerelease(t *testing.T) {
 func TestRunTagSkipsAnInterveningPrereleaseTag(t *testing.T) {
 	repoDir, moduleDir := scopedModuleFixture(t)
 
-	write := func(name, content string) {
-		path := filepath.Join(repoDir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	run := func(args ...string) {
-		t.Helper()
-		full := append([]string{"-C", repoDir}, args...)
-		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", full, err, out)
-		}
-	}
-
 	// The fixture already tagged HEAD as the stable services/api/v1.2.3; move
 	// past it with a higher prerelease, then an untagged commit for runTag to
 	// propose from.
-	write("services/api/a.txt", "a\n")
-	run("add", ".")
-	run("commit", "-q", "-m", "second")
-	run("tag", "services/api/v1.3.0-rc.1")
-	write("services/api/b.txt", "b\n")
-	run("add", ".")
-	run("commit", "-q", "-m", "third")
+	commitAndTag(t, repoDir, "services/api/a.txt", "services/api/v1.3.0-rc.1")
+	commitAndTag(t, repoDir, "services/api/b.txt", "")
 
 	t.Chdir(moduleDir)
 	if err := runTag([]string{"--yes", "--patch"}); err != nil {
