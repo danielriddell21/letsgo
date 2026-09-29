@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ usage:
   letsgo diff <from> [to]                compare two releases: size, dependencies, API
   letsgo promote <rc-tag>                rebuild a prerelease as a stable release
   letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
-  letsgo tag [--major|--minor|--patch|--json]  work out the next version and tag it
+  letsgo tag [--major|--minor|--patch|--pre|--json]  work out the next version and tag it
   letsgo update [--check]                update letsgo itself, verified against its manifest
   letsgo plugin install <name>           install a plugin, verified against its manifest
   letsgo plugin list [--json]            the plugins this repository pins, and what is installed
@@ -802,6 +803,7 @@ func runTag(args []string) error {
 	major := fs.Bool("major", false, "force a major bump")
 	minor := fs.Bool("minor", false, "force a minor bump")
 	patch := fs.Bool("patch", false, "force a patch bump")
+	pre := fs.Bool("pre", false, "propose a prerelease (-rc.N) instead of a stable version")
 	jsonOutput := fs.Bool("json", false, "print the proposal as JSON, without creating a tag")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -834,6 +836,9 @@ func runTag(args []string) error {
 	proposal, err := proposeVersion(ctx, module, scope, previous, forced(*major, *minor, *patch))
 	if err != nil {
 		return err
+	}
+	if *pre {
+		proposal.Next = nextPrerelease(tags, scope.Prefix, proposal.Next)
 	}
 
 	if *jsonOutput {
@@ -884,6 +889,25 @@ func createTag(
 	}
 	fmt.Printf("\n  tagged %s\n  push it with: git push origin %s\n", tag, tag)
 	return nil
+}
+
+// nextPrerelease appends an auto-incrementing "-rc.N" suffix to a proposed
+// base version. It scans the existing tags for the highest N already used
+// under that exact base, so repeated --pre runs advance rc.1, rc.2, ...
+// instead of colliding on the same candidate.
+func nextPrerelease(tags []string, prefix, base string) string {
+	want := prefix + base + "-rc."
+	n := 0
+	for _, tag := range tags {
+		suffix, ok := strings.CutPrefix(tag, want)
+		if !ok {
+			continue
+		}
+		if v, err := strconv.Atoi(suffix); err == nil && v > n {
+			n = v
+		}
+	}
+	return fmt.Sprintf("%s-rc.%d", base, n+1)
 }
 
 // forced returns the level a flag demands, or bump.None for no flag.
