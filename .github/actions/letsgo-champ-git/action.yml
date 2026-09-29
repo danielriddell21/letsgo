@@ -1,0 +1,13 @@
+name: letsgo-champ git identity
+description: >
+  Configure the local git identity as letsgo-champ[bot], so an annotated tag
+  created in this checkout records a tagger instead of failing with "Author
+  identity unknown."
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        git config user.name "letsgo-champ[bot]"
+        git config user.email "293666020+letsgo-champ[bot]@users.noreply.github.com"

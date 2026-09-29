@@ -169,6 +169,11 @@ jobs:
           private-key: ${{ secrets.LETSGO_APP_PRIVATE_KEY }}
           repositories: letsgo
 
+      # The tagger recorded on the annotated tag object itself — separate
+      # from, and unaffected by, which credential authenticates the push
+      # below.
+      - uses: ./.github/actions/letsgo-champ-git
+
       - name: tag and push
         env:
           TOKEN: ${{ steps.letsgo-token.outputs.token }}
@@ -182,12 +187,6 @@ jobs:
             echo "HEAD is already tagged; nothing to do"
             exit 0
           fi
-
-          # The tagger recorded on the annotated tag object itself — separate
-          # from, and unaffected by, which credential authenticates the push
-          # below.
-          git config user.name "letsgo-champ[bot]"
-          git config user.email "293666020+letsgo-champ[bot]@users.noreply.github.com"
 
           # --warranted: no feat, fix or API change means no release. Without
           # it letsgo falls back to a patch, which is the right answer when a

@@ -65,6 +65,11 @@ jobs:
           private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
           repositories: homebrew-tap
 
+      # letsgo promote tags the stable commit itself (internal/promote.go),
+      # which needs a git identity to record on the annotated tag — see
+      # reproducibility.yml's tag job for the same requirement.
+      - uses: ./.github/actions/letsgo-champ-git
+
       - name: promote
         run: go run ./cmd/letsgo promote --yes --work dist "${{ inputs.tag || github.event.release.tag_name }}"
         env:
