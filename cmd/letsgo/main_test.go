@@ -221,10 +221,75 @@ func TestRunTagCreatesAScopedTag(t *testing.T) {
 	}
 }
 
+// --pre proposes a prerelease instead of a stable version: the same base
+// bump.Propose computes, with an auto-numbered "-rc.N" suffix.
+func TestRunTagCreatesAPrereleaseTag(t *testing.T) {
+	repoDir, moduleDir := scopedModuleFixture(t)
+	t.Chdir(moduleDir)
+
+	if err := runTag([]string{"--yes", "--pre"}); err != nil {
+		t.Fatalf("runTag: %v", err)
+	}
+
+	out, err := exec.Command("git", "-C", repoDir, "tag", "--points-at", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git tag --points-at HEAD: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "services/api/v0.1.0-rc.1") {
+		t.Errorf("tags at HEAD = %q, want services/api/v0.1.0-rc.1", out)
+	}
+}
+
+// A repeated --pre run against the same base advances rc.1, rc.2, ...
+// instead of colliding on the same candidate tag.
+func TestRunTagIncrementsAnExistingPrerelease(t *testing.T) {
+	repoDir, moduleDir := scopedModuleFixture(t)
+
+	write := func(name, content string) {
+		path := filepath.Join(repoDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(args ...string) {
+		t.Helper()
+		full := append([]string{"-C", repoDir}, args...)
+		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", full, err, out)
+		}
+	}
+
+	// The fixture already tagged HEAD as the stable services/api/v1.2.3; move
+	// past it, tag a first prerelease of the next patch, then move past that
+	// too so runTag proposes from an untagged HEAD again.
+	write("services/api/a.txt", "a\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "second")
+	run("tag", "services/api/v1.2.4-rc.1")
+	write("services/api/b.txt", "b\n")
+	run("add", ".")
+	run("commit", "-q", "-m", "third")
+
+	t.Chdir(moduleDir)
+	if err := runTag([]string{"--yes", "--patch", "--pre"}); err != nil {
+		t.Fatalf("runTag: %v", err)
+	}
+
+	out, err := exec.Command("git", "-C", repoDir, "tag", "--points-at", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git tag --points-at HEAD: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "services/api/v1.2.4-rc.2") {
+		t.Errorf("tags at HEAD = %q, want services/api/v1.2.4-rc.2", out)
+	}
+}
+
 // A proposal must skip an intervening prerelease and bump from the last
-// stable: runTag has no flag for proposing a prerelease itself, so "previous"
-// for its purposes is always "the highest stable release, full stop," not
-// whatever tag git describe happens to be nearest to.
+// stable: without --pre, "previous" is always "the highest stable release,
+// full stop," not whatever tag git describe happens to be nearest to.
 func TestRunTagSkipsAnInterveningPrereleaseTag(t *testing.T) {
 	repoDir, moduleDir := scopedModuleFixture(t)
 
