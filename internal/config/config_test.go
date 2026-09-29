@@ -67,6 +67,9 @@ func TestDecodeSample(t *testing.T) {
 	if cfg.Budgets["linux/amd64"] != "15MB" {
 		t.Errorf("Budgets = %v", cfg.Budgets)
 	}
+	if pos := cfg.BudgetPos["linux/amd64"]; pos.Line != 18 || pos.Col != 1 {
+		t.Errorf("BudgetPos = %+v, want {18 1}", pos)
+	}
 	if cfg.Prerelease != "auto" || cfg.Draft || cfg.Latest != "auto" {
 		t.Errorf("Prerelease = %q, Draft = %v, Latest = %q", cfg.Prerelease, cfg.Draft, cfg.Latest)
 	}

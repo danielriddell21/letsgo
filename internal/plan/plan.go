@@ -123,6 +123,19 @@ type Check struct {
 	Name   string `json:"name"`
 	Status Status `json:"status"`
 	Detail string `json:"detail"`
+
+	// Pos is where in the config file this check's directive was written,
+	// when it was raised against one — nil for a check with no single line to
+	// blame (a missing tool, a registry response). An editor turns it into a
+	// diagnostic squiggle under that line.
+	Pos *Pos `json:"pos,omitempty"`
+}
+
+// Pos names a location in a config file.
+type Pos struct {
+	File string `json:"file"`
+	Line int    `json:"line"`
+	Col  int    `json:"col"`
 }
 
 // Source records where a resolved value came from, for plan --explain.
@@ -694,6 +707,24 @@ func (p *Plan) OK() bool {
 
 func (p *Plan) add(name string, status Status, format string, args ...any) {
 	p.Checks = append(p.Checks, Check{Name: name, Status: status, Detail: fmt.Sprintf(format, args...)})
+}
+
+// addAt is add for a check raised against a specific line in the config
+// file: an editor places it as a diagnostic there instead of only listing it
+// in the plan report.
+func (p *Plan) addAt(pos *Pos, name string, status Status, format string, args ...any) {
+	p.Checks = append(p.Checks,
+		Check{Name: name, Status: status, Detail: fmt.Sprintf(format, args...), Pos: pos})
+}
+
+// configPos turns a directive's position within letsgo.mod into a Check's
+// Pos, nil when there is nothing to point at (no config file, or a
+// directive that recorded no position for this value).
+func (p *Plan) configPos(cp config.Position) *Pos {
+	if cp.Line == 0 || p.ConfigPath == "" {
+		return nil
+	}
+	return &Pos{File: p.ConfigPath, Line: cp.Line, Col: cp.Col}
 }
 
 func (p *Plan) note(field, value, from string) {
@@ -1733,23 +1764,25 @@ func (p *Plan) resolveBudgets() {
 	}
 
 	budgets := make(map[string]bytesize.Size, len(p.Config.Budgets))
-	var problems []string
+	failed := false
 	for _, target := range sortedKeys(p.Config.Budgets) {
+		pos := p.configPos(p.Config.BudgetPos[target])
 		size, err := bytesize.Parse(p.Config.Budgets[target])
 		if err != nil {
-			problems = append(problems, fmt.Sprintf("budget %s: %v", target, err))
+			p.addAt(pos, "budgets", Fail, "budget %s: %v", target, err)
+			failed = true
 			continue
 		}
 		if !built[target] {
-			problems = append(problems,
-				fmt.Sprintf("budget names %s, which is not a target this release builds", target))
+			p.addAt(pos, "budgets", Fail,
+				"budget names %s, which is not a target this release builds", target)
+			failed = true
 			continue
 		}
 		budgets[target] = size
 	}
 
-	if len(problems) > 0 {
-		p.add("budgets", Fail, "%s", strings.Join(problems, "\n"))
+	if failed {
 		return
 	}
 	p.Budgets = budgets
