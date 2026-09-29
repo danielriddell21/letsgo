@@ -478,13 +478,18 @@ func warmProxy(ctx context.Context, p *plan.Plan) {
 
 // warmProxyAndCheckSumdb primes the module proxy, then cross-checks
 // sum.golang.org and the proxy against the published source archive — on
-// every non-snapshot, non-draft, non-scoped release with proxy-warm enabled.
+// every non-snapshot, non-draft, non-scoped release. The sumdb check still
+// runs with proxy-warm disabled, so it can report its own skip reason
+// (SD-7) rather than going silent along with the warm.
 func warmProxyAndCheckSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.Result, snapshot, draft bool) error {
-	if !p.Features.On("proxy-warm") || snapshot || draft || p.Config.ModuleDir != "" {
+	if snapshot || draft || p.Config.ModuleDir != "" {
 		return nil
 	}
-	warmProxy(ctx, p)
-	return checkSumdb(ctx, p, dir, result)
+	proxyWarmOn := p.Features.On("proxy-warm")
+	if proxyWarmOn {
+		warmProxy(ctx, p)
+	}
+	return checkSumdb(ctx, p, dir, result, !proxyWarmOn)
 }
 
 func runVerify(args []string) error {

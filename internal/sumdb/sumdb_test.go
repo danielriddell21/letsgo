@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 )
 
 // buildZip makes an in-memory module zip, keyed by path relative to the
@@ -262,9 +263,79 @@ func TestCheckFailsWhenTheArchiveIsMissing(t *testing.T) {
 	}
 }
 
-func TestCheckFailsWhenSumdbHasNoRecord(t *testing.T) {
+func TestCheckReportsNotFoundAfterExhaustingTheRetryBudget(t *testing.T) {
+	restore := stubSumdbSleep(t)
+
+	var requests int
 	sumdbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
 		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer sumdbServer.Close()
+
+	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", map[string]string{"go.mod": "module example.com/foo\n"})
+
+	result, err := Check(context.Background(), sumdbServer.URL, "https://proxy.invalid", "example.com/foo", "v1.0.0", archivePath)
+	if err != nil {
+		t.Fatalf("Check() error = %v, want nil (a still-missing record is not an error)", err)
+	}
+	if !result.NotFound {
+		t.Errorf("Check() = %+v, want NotFound", result)
+	}
+	if requests < 2 {
+		t.Errorf("Check() made %d sumdb requests, want retries", requests)
+	}
+	restore()
+}
+
+func TestCheckSucceedsAfterSumdbReturnsTheRecordOnRetry(t *testing.T) {
+	restore := stubSumdbSleep(t)
+
+	const modulePath, version = "example.com/foo", "v1.0.0"
+	files := map[string]string{"go.mod": "module example.com/foo\n"}
+	zipData, h1 := buildZip(t, modulePath, version, files)
+
+	var requests int
+	sumdbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests <= 2 {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		fmt.Fprintf(w, "%s %s %s\n%s %s/go.mod h1:irrelevant=\n\n-- signature --\n", modulePath, version, h1, modulePath, version)
+	}))
+	defer sumdbServer.Close()
+
+	proxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(zipData)
+	}))
+	defer proxyServer.Close()
+
+	archivePath := buildArchive(t, t.TempDir(), "foo-1.0.0", files)
+
+	result, err := Check(context.Background(), sumdbServer.URL, proxyServer.URL, modulePath, version, archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.NotFound {
+		t.Fatal("Check() reported NotFound despite the record arriving on retry")
+	}
+	if !result.Matched {
+		t.Errorf("Check() = %+v, want a match", result)
+	}
+	if requests != 3 {
+		t.Errorf("sumdb saw %d requests, want 3 (two 404s then the record)", requests)
+	}
+	restore()
+}
+
+func TestCheckDoesNotRetryOnAGenuineSumdbError(t *testing.T) {
+	restore := stubSumdbSleep(t)
+
+	var requests int
+	sumdbServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer sumdbServer.Close()
 
@@ -272,8 +343,21 @@ func TestCheckFailsWhenSumdbHasNoRecord(t *testing.T) {
 
 	_, err := Check(context.Background(), sumdbServer.URL, "https://proxy.invalid", "example.com/foo", "v1.0.0", archivePath)
 	if err == nil {
-		t.Fatal("Check succeeded despite a sumdb 404")
+		t.Fatal("Check succeeded despite a sumdb 500")
 	}
+	if requests != 1 {
+		t.Errorf("sumdb saw %d requests, want exactly 1 (no retry on a non-404 error)", requests)
+	}
+	restore()
+}
+
+// stubSumdbSleep replaces sumdbSleep with a no-op so retry-loop tests run
+// fast, restoring the real time.Sleep when the returned func is called.
+func stubSumdbSleep(t *testing.T) func() {
+	t.Helper()
+	original := sumdbSleep
+	sumdbSleep = func(time.Duration) {}
+	return func() { sumdbSleep = original }
 }
 
 func TestCheckFailsWhenTheProxyErrors(t *testing.T) {
@@ -300,19 +384,34 @@ func TestLookupHashFailsWithNoMatchingLine(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if _, err := lookupHash(context.Background(), server.URL, "example.com/foo", "v1.0.0"); err == nil {
-		t.Fatal("lookupHash succeeded with no matching h1 line")
+	if _, _, err := lookupHashOnce(context.Background(), server.URL, "example.com/foo", "v1.0.0"); err == nil {
+		t.Fatal("lookupHashOnce succeeded with no matching h1 line")
 	}
 }
 
-func TestGetFailsOnANonSuccessStatus(t *testing.T) {
+func TestGetReturnsTheStatusOnANonSuccessResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	}))
 	defer server.Close()
 
-	if _, err := get(context.Background(), server.URL, 1<<10); err == nil {
-		t.Fatal("get succeeded on a 418 response")
+	_, status, err := get(context.Background(), server.URL, 1<<10)
+	if err != nil {
+		t.Fatalf("get() error = %v, want nil (status handling is the caller's job)", err)
+	}
+	if status != http.StatusTeapot {
+		t.Errorf("get() status = %d, want %d", status, http.StatusTeapot)
+	}
+}
+
+func TestFetchZipFailsOnANonSuccessStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	if _, err := fetchZip(context.Background(), server.URL, "example.com/foo", "v1.0.0"); err == nil {
+		t.Fatal("fetchZip succeeded on a 404 response")
 	}
 }
 
