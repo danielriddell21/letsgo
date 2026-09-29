@@ -69,50 +69,75 @@ func (r *Result) OK() bool {
 	return true
 }
 
-// add records one tools check. Every check is in the "tools" group so far;
-// repository checks (Phase 2) will need a group parameter back.
-func (r *Result) add(name string, status Status, hint, format string, args ...any) {
+// The two groups doctor reports in, in the order they are printed.
+const (
+	toolsGroup      = "tools"
+	repositoryGroup = "repository"
+)
+
+// add records one check.
+func (r *Result) add(group, name string, status Status, hint, format string, args ...any) {
 	r.Checks = append(r.Checks, Check{
-		Group: "tools", Name: name, Status: status,
+		Group: group, Name: name, Status: status,
 		Detail: fmt.Sprintf(format, args...), Hint: hint,
 	})
 }
 
 // Run diagnoses the module at dir. It makes no network calls and writes
-// nothing (DR-10); an error means the module itself could not be found, the
-// same requirement every other command already has.
+// nothing (DR-10); an error means the module or its repository could not be
+// found at all — the same requirement every other command already has —
+// rather than a problem with what was found there, which becomes a check
+// instead so one run reports every issue.
 func Run(ctx context.Context, dir string) (*Result, error) {
 	root, err := discover.FindModule(dir)
 	if err != nil {
 		return nil, err
 	}
+	git, err := discover.FindGit(ctx, root.Dir)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := discover.NewScope(git.TopLevel, root.Dir)
+	if err != nil {
+		return nil, err
+	}
+
+	cfg, cfgErr := loadConfig(root.Dir)
 
 	r := &Result{}
 	r.checkGo(ctx, root)
 	r.checkGit(ctx)
-	r.checkVulncheck(requiresVulncheck(root.Dir))
+	r.checkVulncheck(cfgErr == nil && requiresVulncheck(cfg))
 	r.checkApidiff()
+
+	r.checkConfig(cfgErr)
+	if cfgErr == nil {
+		r.checkPlugins(cfg)
+	}
+	r.checkHistory(ctx, root.Dir, git, scope)
+	r.checkRemote(ctx, root.Dir)
+	r.checkWorktree(git)
 	return r, nil
 }
 
-// requiresVulncheck reports whether letsgo.mod's `require` directive names
-// vulncheck (DR-9) — read the same way plan.Resolve reads it
-// (config.Parse/Decode), so doctor and plan never disagree. A missing or
-// malformed letsgo.mod requires nothing here; letsgo.mod's own validity is a
-// repository check, not a tools one.
-func requiresVulncheck(moduleDir string) bool {
+// loadConfig reads letsgo.mod the same way plan.Resolve does
+// (config.Parse/Decode): a missing file is the primary path, not an error;
+// a parse or decode failure is returned for checkConfig to report (DR-4).
+func loadConfig(moduleDir string) (*config.Config, error) {
 	data, err := os.ReadFile(filepath.Join(moduleDir, plan.ConfigFile))
 	if err != nil {
-		return false
+		return &config.Config{}, nil //nolint:nilerr // absence is not a failure
 	}
 	file, err := config.Parse(plan.ConfigFile, data)
 	if err != nil {
-		return false
+		return nil, err
 	}
-	cfg, err := config.Decode(file)
-	if err != nil {
-		return false
-	}
+	return config.Decode(file)
+}
+
+// requiresVulncheck reports whether letsgo.mod's `require` directive names
+// vulncheck (DR-9), so doctor and plan never disagree about it.
+func requiresVulncheck(cfg *config.Config) bool {
 	for _, name := range cfg.Required {
 		if name == "vulncheck" {
 			return true
@@ -126,22 +151,22 @@ func requiresVulncheck(moduleDir string) bool {
 func (r *Result) checkGo(ctx context.Context, root discover.Module) {
 	path, _, err := gobuild.ToolchainSource()
 	if err != nil {
-		r.add("go", Fail, "", "%v", err)
+		r.add(toolsGroup, "go", Fail, "", "%v", err)
 		return
 	}
 
 	version, err := gobuild.Version(ctx, path)
 	if err != nil {
-		r.add("go", Fail, "", "%s: %v", path, err)
+		r.add(toolsGroup, "go", Fail, "", "%s: %v", path, err)
 		return
 	}
-	r.add("go", OK, "", "%s (%s)", version, path)
+	r.add(toolsGroup, "go", OK, "", "%s (%s)", version, path)
 
 	want, exact, err := discover.GoDirective(filepath.Join(root.Dir, "go.mod"))
 	if err != nil || versionSatisfies(want, exact, version) {
 		return
 	}
-	r.add("go.mod", Warn, "", "wants %s; GOTOOLCHAIN will switch", want)
+	r.add(toolsGroup, "go.mod", Warn, "", "wants %s; GOTOOLCHAIN will switch", want)
 }
 
 // versionSatisfies reports whether got (what the local go reports) meets
@@ -177,7 +202,7 @@ func parseGoVersion(s string) (semver.Version, bool) {
 func (r *Result) checkGit(ctx context.Context) {
 	path, _, err := discover.GitSource()
 	if err != nil {
-		r.add("git", Fail, "", "%v", err)
+		r.add(toolsGroup, "git", Fail, "", "%v", err)
 		return
 	}
 
@@ -187,7 +212,7 @@ func (r *Result) checkGit(ctx context.Context) {
 			version = strings.TrimPrefix(v, "git version ")
 		}
 	}
-	r.add("git", OK, "", "%s (%s)", version, path)
+	r.add(toolsGroup, "git", OK, "", "%s (%s)", version, path)
 }
 
 // checkVulncheck reports whether govulncheck is installed (DR-1, DR-2),
@@ -213,7 +238,7 @@ func (r *Result) checkGateTool(name, install string, required bool) {
 		if required {
 			status = Fail
 		}
-		r.add(name, status, install, "not installed")
+		r.add(toolsGroup, name, status, install, "not installed")
 		return
 	}
 
@@ -221,7 +246,7 @@ func (r *Result) checkGateTool(name, install string, required bool) {
 	if version := binaryVersion(path); version != "" {
 		detail = fmt.Sprintf("%s (%s)", version, path)
 	}
-	r.add(name, OK, "", "%s", detail)
+	r.add(toolsGroup, name, OK, "", "%s", detail)
 }
 
 // binaryVersion reads a Go binary's embedded module version, if any, without
