@@ -41,6 +41,7 @@ usage:
   letsgo release [--draft] [-o dir]      build and publish, resumably
   letsgo release --snapshot              rehearse a release without publishing
   letsgo verify [tag]                    rebuild a published release and compare it
+  letsgo audit <tag>                     re-check a published release against today's vulndb
   letsgo diff <from> [to]                compare two releases: size, dependencies, API
   letsgo promote <rc-tag>                rebuild a prerelease as a stable release
   letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
@@ -66,6 +67,7 @@ var commands = map[string]func([]string) error{
 	"build":    runBuild,
 	"release":  runRelease,
 	"verify":   runVerify,
+	"audit":    runAudit,
 	"diff":     runDiff,
 	"promote":  runPromote,
 	"yank":     runYank,

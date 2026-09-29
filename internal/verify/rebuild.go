@@ -85,6 +85,31 @@ func obtainSource(ctx context.Context, o Options, release *github.Release, m *ma
 		fmt.Sprintf("the release's own source archive (%s)", m.Source.Archive), nil
 }
 
+// SourceFromArchive extracts a release's own source archive into dir, after
+// checking its digest against the manifest, and returns the archive's
+// single root directory.
+//
+// audit calls this instead of obtainSource's local-checkout-preferred path:
+// an audit is checking what the release actually shipped, not what the
+// repository happens to contain today.
+func SourceFromArchive(
+	ctx context.Context, client *github.Client, repo github.Repo,
+	release *github.Release, m *manifest.Manifest, dir string,
+) (string, error) {
+	if m.Source == nil {
+		return "", fmt.Errorf("release %s published no source archive", release.TagName)
+	}
+	if err := extractSource(ctx, Options{Client: client, Repo: repo}, release, m, dir); err != nil {
+		return "", err
+	}
+	// The archive wraps everything in one directory.
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 || !entries[0].IsDir() {
+		return "", fmt.Errorf("source archive %s does not contain a single root directory", m.Source.Archive)
+	}
+	return filepath.Join(dir, entries[0].Name()), nil
+}
+
 func checkoutCommit(ctx context.Context, o Options, commit string) (string, error) {
 	dir := filepath.Join(o.WorkDir, "checkout")
 	if err := os.MkdirAll(o.WorkDir, 0o750); err != nil {
