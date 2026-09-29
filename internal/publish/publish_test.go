@@ -374,6 +374,27 @@ func TestAppendToEmptyNotesDoesNotAddSeparator(t *testing.T) {
 	}
 }
 
+// Appending empty notes is the disable-changelog resumption case: nothing
+// was generated, and the existing description must survive untouched rather
+// than being blanked.
+func TestAppendingEmptyNotesLeavesExistingBodyUntouched(t *testing.T) {
+	f := setup(t, true)
+	f.opts.Notes = publish.NotesAppend
+	f.opts.Release.Body = ""
+	f.fake.release = &github.Release{ID: 42, TagName: "v1.0.0", Body: "existing"}
+
+	result, err := publish.Run(context.Background(), f.opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if f.fake.release.Body != "existing" {
+		t.Errorf("release body = %q, want it unchanged", f.fake.release.Body)
+	}
+	if result.AppendedNotes {
+		t.Error("AppendedNotes reported when nothing was appended")
+	}
+}
+
 // A token that may attach files but not edit the description should still
 // attach the files. The assets are the substance of a release.
 func TestRefusedEditStillUploadsAssets(t *testing.T) {

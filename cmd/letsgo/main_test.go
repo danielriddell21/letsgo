@@ -840,11 +840,14 @@ func TestReleaseNotesOmitsWhatShippedWhenDisabled(t *testing.T) {
 }
 
 func TestNotesMode(t *testing.T) {
-	if notesMode(true) != publish.NotesAppend {
+	if notesMode(true, true) != publish.NotesAppend {
 		t.Error("--append-notes should append")
 	}
-	if notesMode(false) != publish.NotesReplace {
-		t.Error("the default should replace")
+	if notesMode(false, true) != publish.NotesReplace {
+		t.Error("the default, with changelog enabled, should replace")
+	}
+	if notesMode(false, false) != publish.NotesAppend {
+		t.Error("a disabled changelog should append (nothing), not replace")
 	}
 }
 

@@ -337,7 +337,7 @@ func runRelease(args []string) error {
 		Dir:    dir,
 		Files:  result.Files,
 		Sums:   sumsFrom(result),
-		Notes:  notesMode(*appendNotes),
+		Notes:  notesMode(*appendNotes, p.Features.On("changelog")),
 		Release: github.ReleaseInput{
 			TagName:         releaseTag(p),
 			Name:            releaseTitle(p),
@@ -937,8 +937,11 @@ func releaseTitle(p *plan.Plan) string {
 	return p.Scope.Dir + " " + strings.TrimPrefix(tag, p.Scope.Prefix)
 }
 
-func notesMode(appendNotes bool) publish.NotesMode {
-	if appendNotes {
+// notesMode also treats a disabled changelog as append-with-nothing-generated,
+// so resuming a release with `disable changelog` set never blanks an existing
+// description the way replacing it with empty notes would.
+func notesMode(appendNotes, changelogEnabled bool) publish.NotesMode {
+	if appendNotes || !changelogEnabled {
 		return publish.NotesAppend
 	}
 	return publish.NotesReplace

@@ -205,9 +205,16 @@ func ensureRelease(ctx context.Context, o Options, result *Result, logf func(str
 	}
 
 	input := o.Release
-	if o.Notes == NotesAppend && strings.TrimSpace(existing.Body) != "" && strings.TrimSpace(o.Release.Body) != "" {
-		input.Body = strings.TrimRight(existing.Body, "\n") + "\n\n" + o.Release.Body
-		result.AppendedNotes = true
+	if o.Notes == NotesAppend {
+		switch {
+		case strings.TrimSpace(o.Release.Body) == "":
+			// Nothing was generated: appending nothing must leave the
+			// existing description exactly as it is, not blank it.
+			input.Body = existing.Body
+		case strings.TrimSpace(existing.Body) != "":
+			input.Body = strings.TrimRight(existing.Body, "\n") + "\n\n" + o.Release.Body
+			result.AppendedNotes = true
+		}
 	}
 
 	updated, err := o.Client.UpdateRelease(ctx, o.Repo, existing.ID, input)
