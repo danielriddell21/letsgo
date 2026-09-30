@@ -41,31 +41,9 @@ type pinLine struct {
 }
 
 // pinOnLine reads a single-line `plugin <hook> <command> <version> <digest>`
-// pin, or reports ok=false for anything else. It works on the text rather than
-// the parsed file because the parser records where a line begins, not where
-// each argument does, and an edit needs the latter.
+// pin, or reports ok=false for anything else.
 func pinOnLine(line string) (pin pinLine, ok bool) {
-	if i := strings.Index(line, "//"); i >= 0 {
-		line = line[:i]
-	}
-
-	type field struct {
-		text       string
-		start, end int
-	}
-	var fields []field
-	for i := 0; i < len(line); {
-		if line[i] == ' ' || line[i] == '\t' {
-			i++
-			continue
-		}
-		start := i
-		for i < len(line) && line[i] != ' ' && line[i] != '\t' {
-			i++
-		}
-		fields = append(fields, field{line[start:i], start, i})
-	}
-
+	fields := tokensOf(line)
 	if len(fields) != 5 || fields[0].text != "plugin" {
 		return pinLine{}, false
 	}
