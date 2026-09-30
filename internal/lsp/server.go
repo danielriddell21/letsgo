@@ -22,6 +22,10 @@ type Options struct {
 	// leaves the action out: a server with nothing to look a release up with
 	// has nothing honest to offer.
 	ResolvePin PinResolver
+
+	// InstallPin backs the "install pinned plugin" code action, under the
+	// same conditions as ResolvePin.
+	InstallPin PinInstaller
 }
 
 type document struct {
@@ -125,7 +129,7 @@ func (s *Server) handle(ctx context.Context, req request) (any, error) {
 		return s.handleFormatting(req.Params)
 	case "textDocument/documentSymbol":
 		return s.handleDocumentSymbol(req.Params)
-	case "textDocument/codeAction", "codeAction/resolve":
+	case "textDocument/codeAction", "codeAction/resolve", "workspace/executeCommand":
 		return s.handleCodeActionMethod(ctx, req)
 	default:
 		if len(req.ID) == 0 {
@@ -148,6 +152,9 @@ func (s *Server) handleInitialize() (any, error) {
 	caps.CodeActionProvider = &codeActionOptions{
 		CodeActionKinds: []string{codeActionQuickFix},
 		ResolveProvider: !s.opts.Restricted && s.opts.ResolvePin != nil,
+	}
+	if !s.opts.Restricted && s.opts.InstallPin != nil {
+		caps.ExecuteCommandProvider = &executeCommandOptions{Commands: []string{commandInstallPins}}
 	}
 	return initializeResult{Capabilities: caps}, nil
 }

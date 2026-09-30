@@ -4,45 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/pluginstore"
 )
-
-// pinnedTool installs content as an executable named name into dir and returns
-// its digest, which is what a pin line would carry. On Windows the file gets
-// an .exe suffix, without which PATH lookup would not find it.
-func pinnedTool(t *testing.T, dir, name, content string) string {
-	t.Helper()
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	path := filepath.Join(dir, name)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil { //nolint:gosec // a plugin must be executable
-		t.Fatal(err)
-	}
-	digest, err := plugin.DigestOf(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return digest
-}
-
-// isolatePlugins points the plugin store and PATH at empty temp directories,
-// so no test sees the machine's own plugins.
-func isolatePlugins(t *testing.T) (storeDir, pathDir string) {
-	t.Helper()
-	storeDir, pathDir = t.TempDir(), t.TempDir()
-	t.Setenv(pluginstore.StoreEnvOverride, storeDir)
-	t.Setenv("PATH", pathDir)
-	return storeDir, pathDir
-}
 
 func TestHoverAtDocs(t *testing.T) {
 	tests := []struct {
@@ -120,8 +86,8 @@ func TestCheckPin(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			storeDir, pathDir := isolatePlugins(t)
-			digest := pinnedTool(t, t.TempDir(), "scratch", content)
+			storeDir, pathDir := IsolatePlugins(t)
+			digest := PinnedTool(t, t.TempDir(), "scratch", content)
 
 			if tt.inStore != "" {
 				store, err := pluginstore.Open(storeDir)
@@ -139,7 +105,7 @@ func TestCheckPin(t *testing.T) {
 				}
 			}
 			if tt.onPath != "" {
-				pinnedTool(t, pathDir, tt.command, tt.onPath)
+				PinnedTool(t, pathDir, tt.command, tt.onPath)
 			}
 
 			got := checkPin(t.TempDir(), pinLine{command: tt.command, version: "v0.1.0", digest: digest})
@@ -151,9 +117,9 @@ func TestCheckPin(t *testing.T) {
 }
 
 func TestCheckPinResolvesARelativeCommandAgainstTheRepository(t *testing.T) {
-	isolatePlugins(t)
+	IsolatePlugins(t)
 	repo := t.TempDir()
-	digest := pinnedTool(t, repo, "tools/env", "in the repository")
+	digest := PinnedTool(t, repo, "tools/env", "in the repository")
 
 	got := checkPin(repo, pinLine{command: "./tools/env", digest: digest})
 	if got.state != pinInstalled {
@@ -162,7 +128,7 @@ func TestCheckPinResolvesARelativeCommandAgainstTheRepository(t *testing.T) {
 }
 
 func TestCheckPinLeavesNoStoreBehind(t *testing.T) {
-	storeDir, _ := isolatePlugins(t)
+	storeDir, _ := IsolatePlugins(t)
 	absent := filepath.Join(storeDir, "never-created")
 	t.Setenv(pluginstore.StoreEnvOverride, absent)
 
@@ -173,8 +139,8 @@ func TestCheckPinLeavesNoStoreBehind(t *testing.T) {
 }
 
 func TestHoverAtShowsAPinsInstallState(t *testing.T) {
-	_, pathDir := isolatePlugins(t)
-	digest := pinnedTool(t, pathDir, "letsgo-env", "the env plugin")
+	_, pathDir := IsolatePlugins(t)
+	digest := PinnedTool(t, pathDir, "letsgo-env", "the env plugin")
 	line := "plugin ldflags letsgo-env v0.1.0 " + digest + "\n"
 
 	tests := []struct {

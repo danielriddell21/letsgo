@@ -76,12 +76,17 @@ type publishDiagnosticsParams struct {
 }
 
 type serverCapabilities struct {
-	TextDocumentSync           int                `json:"textDocumentSync"`
-	CompletionProvider         *struct{}          `json:"completionProvider,omitempty"`
-	HoverProvider              bool               `json:"hoverProvider,omitempty"`
-	DocumentFormattingProvider bool               `json:"documentFormattingProvider,omitempty"`
-	DocumentSymbolProvider     bool               `json:"documentSymbolProvider,omitempty"`
-	CodeActionProvider         *codeActionOptions `json:"codeActionProvider,omitempty"`
+	TextDocumentSync           int                    `json:"textDocumentSync"`
+	CompletionProvider         *struct{}              `json:"completionProvider,omitempty"`
+	HoverProvider              bool                   `json:"hoverProvider,omitempty"`
+	DocumentFormattingProvider bool                   `json:"documentFormattingProvider,omitempty"`
+	DocumentSymbolProvider     bool                   `json:"documentSymbolProvider,omitempty"`
+	CodeActionProvider         *codeActionOptions     `json:"codeActionProvider,omitempty"`
+	ExecuteCommandProvider     *executeCommandOptions `json:"executeCommandProvider,omitempty"`
+}
+
+type executeCommandOptions struct {
+	Commands []string `json:"commands"`
 }
 
 type codeActionOptions struct {
@@ -141,6 +146,18 @@ type CodeAction struct {
 	Kind  string          `json:"kind,omitempty"`
 	Edit  *WorkspaceEdit  `json:"edit,omitempty"`
 	Data  json.RawMessage `json:"data,omitempty"`
+
+	// Command is run by the server on request, for an action that does work
+	// no text edit can express, such as fetching a plugin.
+	Command *Command `json:"command,omitempty"`
+}
+
+// Command is a server-side command a client asks the server to run through
+// workspace/executeCommand.
+type Command struct {
+	Title     string `json:"title"`
+	Command   string `json:"command"`
+	Arguments []any  `json:"arguments,omitempty"`
 }
 
 type WorkspaceEdit struct {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -65,12 +66,15 @@ type codeActionData struct {
 }
 
 func (s *Server) updatable(uri string) bool {
-	return !s.opts.Restricted && s.opts.ResolvePin != nil && kindOf(uriToPath(uri)) == kindRepo
+	return s.opts.ResolvePin != nil && s.pinnable(uri)
 }
 
 func (s *Server) handleCodeActionMethod(ctx context.Context, req request) (any, error) {
-	if req.Method == "codeAction/resolve" {
+	switch req.Method {
+	case "codeAction/resolve":
 		return s.handleCodeActionResolve(ctx, req.Params)
+	case "workspace/executeCommand":
+		return s.handleExecuteCommand(ctx, req.Params)
 	}
 	return s.handleCodeAction(req.Params)
 }
@@ -93,28 +97,44 @@ func (s *Server) handleCodeAction(raw json.RawMessage) (any, error) {
 		return actions, nil
 	}
 	actions = append(actions, didYouMeanActions(p.TextDocument.URI, doc.text, p.Context.Diagnostics)...)
-	if !s.updatable(p.TextDocument.URI) {
+	if !s.pinnable(p.TextDocument.URI) {
 		return actions, nil
 	}
 
-	lines := strings.Split(doc.text, "\n")
-	for n := p.Range.Start.Line; n <= p.Range.End.Line && n < len(lines); n++ {
-		if n < 0 {
-			continue
-		}
+	pinActions, err := s.pinActions(p.TextDocument.URI, doc.text, p.Range)
+	return append(actions, pinActions...), err
+}
+
+// pinActions offers, for each pin line the range touches, an update and an
+// install of that pin, and once more an install of every pin that needs it.
+func (s *Server) pinActions(uri, text string, r Range) ([]CodeAction, error) {
+	var actions []CodeAction
+	installs := 0
+	dir := filepath.Dir(uriToPath(uri))
+	lines := strings.Split(text, "\n")
+	for n := max(r.Start.Line, 0); n <= r.End.Line && n < len(lines); n++ {
 		pin, ok := pinOnLine(lines[n])
 		if !ok {
 			continue
 		}
-		data, err := json.Marshal(codeActionData{URI: p.TextDocument.URI, Line: n})
-		if err != nil {
-			return nil, fmt.Errorf("lsp: %w", err)
+		if s.opts.ResolvePin != nil {
+			data, err := json.Marshal(codeActionData{URI: uri, Line: n})
+			if err != nil {
+				return nil, fmt.Errorf("lsp: %w", err)
+			}
+			actions = append(actions, CodeAction{
+				Title: fmt.Sprintf("Update pin: %s to the latest release", pin.command),
+				Kind:  codeActionQuickFix,
+				Data:  data,
+			})
 		}
-		actions = append(actions, CodeAction{
-			Title: fmt.Sprintf("Update pin: %s to the latest release", pin.command),
-			Kind:  codeActionQuickFix,
-			Data:  data,
-		})
+		if s.opts.InstallPin != nil && needsInstall(dir, pin) {
+			actions = append(actions, installAction(fmt.Sprintf("Install pinned plugin: %s %s", pin.command, pin.version), installArgs{URI: uri, Line: n}))
+			installs++
+		}
+	}
+	if installs > 0 && len(pinsToInstall(dir, text, allPins)) > 1 {
+		actions = append(actions, installAction("Install all missing pinned plugins", installArgs{URI: uri, Line: allPins}))
 	}
 	return actions, nil
 }
