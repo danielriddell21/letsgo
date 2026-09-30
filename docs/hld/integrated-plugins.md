@@ -1,12 +1,17 @@
 # HLD: thin plugin mains, plugin-aware core
 
-Status: partially implemented. The SDK (`letsgo/plugin`), `letsgo/manifest`,
-the `internal/plugin.Known` catalogue and the `tap-files` hook exist and are
-in use. `letsgo/plugins/{multi,env,cask}` — one pure function per plugin —
-was never split out of letsgo-plugins, and `plugin.ReadConfig` honouring
-`ConfigDir` doesn't exist, so the drift this proposal set out to end (private
-manifest reader, mismatched `base()`, unescaped download URL) is still there.
-Tracked in [#150](https://github.com/danielriddell21/letsgo/issues/150).
+Status: partially implemented, and the rest of this proposal as written below
+is superseded by [ADR-0023](../adr/0023-plugins-share-cores-wire-contract.md).
+The SDK (`letsgo/plugin`), `letsgo/manifest`, the `internal/plugin.Known`
+catalogue and the `tap-files` hook exist and are in use — that part landed.
+The `letsgo/plugins/{multi,env,cask}` packages described below — folding each
+plugin's logic into core — were never built, and per ADR-0023 they won't be:
+plugins keep their logic in letsgo-plugins and call core's exported helpers
+(`manifest.Read`, `manifest.BaseName`, the shared download URL builder, and a
+new `plugin.ReadConfig`) directly instead. The drift this proposal set out to
+end (private manifest reader, mismatched `base()`, unescaped download URL,
+`ConfigDir` never read) is still there either way. Tracked in
+[#150](https://github.com/danielriddell21/letsgo/issues/150).
 
 | | |
 |---|---|
