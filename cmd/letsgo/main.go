@@ -31,6 +31,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/randomart"
+	"github.com/danielriddell21/letsgo/internal/receipt"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/verify"
 )
@@ -531,6 +532,8 @@ func runVerify(args []string) error {
 	work := fs.String("work", "", "scratch directory (default: a temporary one)")
 	jsonOutput := fs.Bool("json", false, "print the report as JSON")
 	words := fs.Bool("words", false, "also print the manifest digest as words, for reading aloud")
+	receipted := fs.Bool("receipt", false, "")
+	hideFromUsage(fs, "receipt")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -553,29 +556,46 @@ func runVerify(args []string) error {
 		return err
 	}
 
-	if *jsonOutput {
+	switch {
+	case *jsonOutput:
 		data, err := result.JSON()
 		if err != nil {
 			return err
 		}
 		fmt.Println(string(data))
-	} else {
+	case *receipted:
+		fmt.Print(receipt.Render(result, time.Now()))
+	default:
 		result.Report(os.Stdout)
 		if *words {
 			result.ReportWords(os.Stdout)
 		}
 	}
 
+	quiet := *jsonOutput || *receipted
 	if !result.OK() {
-		if !*jsonOutput {
+		if !quiet {
 			fmt.Printf("\n  %s does not verify (%s)\n", result.Tag, took(started))
 		}
 		return errVerifyFailed
 	}
-	if !*jsonOutput {
+	if !quiet {
 		fmt.Printf("\n  %s verified in %s\n", result.Tag, took(started))
 	}
 	return nil
+}
+
+// hideFromUsage keeps a flag working but out of the command's --help.
+func hideFromUsage(fs *flag.FlagSet, name string) {
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage of %s:\n", fs.Name())
+		fs.VisitAll(func(f *flag.Flag) {
+			if f.Name == name {
+				return
+			}
+			fmt.Fprintf(fs.Output(), "  -%s\n    \t%s\n", f.Name, f.Usage)
+		})
+	}
 }
 
 // moduleRepo bundles what a command needs to act on this module's own

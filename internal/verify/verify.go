@@ -98,7 +98,16 @@ type Options struct {
 // Result is what verification established.
 type Result struct {
 	Tag      string
+	Repo     string
 	Manifest *manifest.Manifest
+
+	// Artifacts is what verification found out about each artifact the
+	// manifest describes, for anything that presents the result per item.
+	Artifacts []ArtifactResult
+
+	// published and rebuilt record each artifact's outcome as the two
+	// comparisons make it, and Artifacts is settled from them.
+	published, rebuilt map[string]Status
 
 	// manifestSum is the sha256 of the published letsgo.json, which the
 	// fingerprint drawn after a pass is made from.
@@ -115,6 +124,16 @@ type Result struct {
 	// userAgent identifies letsgo to anything this verification contacts
 	// beyond the forge.
 	userAgent string
+}
+
+// ArtifactResult is one artifact's outcome: Pass only when it was rebuilt and
+// matched, Fail when anything about it differed, and Skip when nothing
+// established either way, which is the honest reading of a check not run.
+type ArtifactResult struct {
+	Name   string
+	Size   int64
+	SHA256 string
+	Status Status
 }
 
 // jsonResult is Result's wire form for `letsgo verify --json`:
@@ -152,6 +171,24 @@ func (r *Result) OK() bool {
 		}
 	}
 	return true
+}
+
+// settleArtifacts derives each artifact's outcome from the two comparisons.
+func (r *Result) settleArtifacts() {
+	if r.Manifest == nil {
+		return
+	}
+	r.Artifacts = r.Artifacts[:0]
+	for _, a := range r.Manifest.Artifacts {
+		status := Skip
+		switch {
+		case r.published[a.Name] == Fail || r.rebuilt[a.Name] == Fail:
+			status = Fail
+		case r.rebuilt[a.Name] == Pass:
+			status = Pass
+		}
+		r.Artifacts = append(r.Artifacts, ArtifactResult{Name: a.Name, Size: a.Size, SHA256: a.SHA256, Status: status})
+	}
 }
 
 func (r *Result) add(name string, status Status, format string, args ...any) {
@@ -207,7 +244,10 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		return nil, err
 	}
 
-	result := &Result{Tag: release.TagName, userAgent: o.UserAgent}
+	result := &Result{
+		Tag: release.TagName, Repo: o.Repo.String(), userAgent: o.UserAgent,
+		published: map[string]Status{}, rebuilt: map[string]Status{},
+	}
 	if result.userAgent == "" {
 		result.userAgent = "letsgo"
 	}
@@ -229,9 +269,11 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 
 	if o.SkipRebuild {
 		result.add("rebuild", Skip, "not requested")
+		result.settleArtifacts()
 		return result, nil
 	}
 	rebuild(ctx, o, result, release, m)
+	result.settleArtifacts()
 	return result, nil
 }
 
@@ -325,6 +367,7 @@ func comparePublished(result *Result, release *github.Release, m *manifest.Manif
 		asset, found := published[want.Name]
 		if !found {
 			problems = append(problems, fmt.Sprintf("%s is described but not attached", want.Name))
+			result.published[want.Name] = Fail
 			continue
 		}
 		got, ok := asset.SHA256()
@@ -334,9 +377,11 @@ func comparePublished(result *Result, release *github.Release, m *manifest.Manif
 			continue
 		}
 		checked++
+		result.published[want.Name] = Pass
 		if got != want.SHA256 {
 			problems = append(problems,
 				fmt.Sprintf("%s: published %s, manifest says %s", want.Name, short(got), short(want.SHA256)))
+			result.published[want.Name] = Fail
 		}
 	}
 

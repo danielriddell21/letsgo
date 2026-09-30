@@ -286,6 +286,20 @@ func TestVerifyReproducesARealRelease(t *testing.T) {
 	if !strings.Contains(result.SourceFrom, "local checkout") {
 		t.Errorf("SourceFrom = %q, want the local checkout", result.SourceFrom)
 	}
+	assertArtifacts(t, result, verify.Pass)
+}
+
+// assertArtifacts requires every artifact to carry want, and there to be some.
+func assertArtifacts(t *testing.T, result *verify.Result, want verify.Status) {
+	t.Helper()
+	if len(result.Artifacts) == 0 {
+		t.Fatal("no per-artifact results")
+	}
+	for _, a := range result.Artifacts {
+		if a.Status != want {
+			t.Errorf("artifact %s = %s, want %s", a.Name, a.Status, want)
+		}
+	}
 }
 
 // Without a checkout the release's own source archive is used, and the report
@@ -321,6 +335,15 @@ func TestVerifyDetectsATamperedAsset(t *testing.T) {
 	if c.Status != verify.Fail || !strings.Contains(c.Detail, corrupted) {
 		t.Errorf("published assets = %+v, want a failure naming %s", c, corrupted)
 	}
+	failed := 0
+	for _, a := range result.Artifacts {
+		if a.Status == verify.Fail {
+			failed++
+		}
+	}
+	if failed != 1 {
+		t.Errorf("%d artifacts failed, want exactly the tampered one: %+v", failed, result.Artifacts)
+	}
 }
 
 func TestVerifySkipsRebuildWhenAsked(t *testing.T) {
@@ -333,6 +356,7 @@ func TestVerifySkipsRebuildWhenAsked(t *testing.T) {
 	if !result.OK() {
 		t.Errorf("skipping the rebuild should not fail verification: %+v", result.Checks)
 	}
+	assertArtifacts(t, result, verify.Skip)
 }
 
 // A release with no provenance is still verifiable; it carries one guarantee
