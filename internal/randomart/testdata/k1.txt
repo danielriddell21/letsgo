@@ -1,0 +1,12 @@
+256 SHA256:SiFqqe4kCDimSJ5VFNGRDUJoYbHyj67StWGlqvvirf0 no comment (ED25519)
++--[ED25519 256]--+
+|   +=*+o=        |
+|  .oo .o .       |
+| ......          |
+|. oo....         |
+|+o+o o. S        |
+|O+o B. .         |
+|*= = +.          |
+|* * .            |
+|*@++.E           |
++----[SHA256]-----+

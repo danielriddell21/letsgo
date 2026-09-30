@@ -16,6 +16,8 @@ package verify
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -24,6 +26,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/randomart"
 )
 
 // auditFileName is internal/audit.FileName, duplicated rather than imported:
@@ -96,6 +99,10 @@ type Result struct {
 	Tag      string
 	Manifest *manifest.Manifest
 
+	// manifestSum is the sha256 of the published letsgo.json, which the
+	// fingerprint drawn after a pass is made from.
+	manifestSum []byte
+
 	// SourceFrom describes where the rebuilt source came from, because it
 	// changes what the result means: a local checkout ties the binaries to the
 	// repository, while the release's own source archive ties them only to
@@ -162,6 +169,11 @@ func (r *Result) Report(w io.Writer) {
 			fmt.Fprintf(w, "    %-*s  %s\n", width, "", extra)
 		}
 	}
+
+	if r.OK() && len(r.manifestSum) > 0 {
+		fmt.Fprintf(w, "\n%s\nsha256:%s\n",
+			randomart.Render(r.manifestSum, randomart.Title(r.Tag)), hex.EncodeToString(r.manifestSum))
+	}
 }
 
 // Run verifies a release.
@@ -176,11 +188,12 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		result.userAgent = "letsgo"
 	}
 
-	m, err := fetchManifest(ctx, o, release)
+	m, sum, err := fetchManifest(ctx, o, release)
 	if err != nil {
 		return nil, err
 	}
 	result.Manifest = m
+	result.manifestSum = sum
 	result.add("manifest", Pass, "letsgo.json describes %d artifacts, built by %s with %s",
 		len(m.Artifacts), m.Builder.Tool, m.Builder.Go)
 	reportFeatures(result, m)
@@ -244,22 +257,30 @@ func latestRelease(ctx context.Context, o Options) (*github.Release, error) {
 // FetchManifest downloads and decodes a release's manifest. Exported for
 // audit, which checks a release's manifest the same way verify does.
 func FetchManifest(ctx context.Context, client *github.Client, repo github.Repo, release *github.Release) (*manifest.Manifest, error) {
-	return fetchManifest(ctx, Options{Client: client, Repo: repo}, release)
+	m, _, err := fetchManifest(ctx, Options{Client: client, Repo: repo}, release)
+	return m, err
 }
 
-func fetchManifest(ctx context.Context, o Options, release *github.Release) (*manifest.Manifest, error) {
+// fetchManifest also returns the sha256 of the manifest as published, which is
+// what identifies the release.
+func fetchManifest(ctx context.Context, o Options, release *github.Release) (*manifest.Manifest, []byte, error) {
 	asset, ok := release.Asset(manifest.FileName)
 	if !ok {
-		return nil, fmt.Errorf(
+		return nil, nil, fmt.Errorf(
 			"verify: release %s has no %s, so there is nothing describing what it should contain\n"+
 				"  only releases published by letsgo can be verified",
 			release.TagName, manifest.FileName)
 	}
 	data, err := o.Client.DownloadAsset(ctx, o.Repo, asset.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return manifest.Decode(data)
+	m, err := manifest.Decode(data)
+	if err != nil {
+		return nil, nil, err
+	}
+	sum := sha256.Sum256(data)
+	return m, sum[:], nil
 }
 
 // comparePublished checks the assets attached to the release against what the
