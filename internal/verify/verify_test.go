@@ -21,6 +21,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/randomart"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/verify"
 )
@@ -765,5 +766,80 @@ func TestResultJSONOmitsAnEmptySourceFrom(t *testing.T) {
 	}
 	if strings.Contains(string(data), `"sourceFrom"`) {
 		t.Errorf("JSON() = %s, want no sourceFrom field when empty", data)
+	}
+}
+
+// RA-4: a pass ends with the fingerprint of the published manifest.
+func TestVerifyPrintsTheFingerprintAfterAPass(t *testing.T) {
+	p := buildRelease(t)
+	result := run(t, p, verify.Options{Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true})
+
+	data, err := os.ReadFile(filepath.Join(p.dist, manifest.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	want := randomart.Render(sum[:], "letsgo v1.2.3") + "\nsha256:" + hex.EncodeToString(sum[:]) + "\n"
+
+	var out strings.Builder
+	result.Report(&out)
+	if !strings.HasSuffix(out.String(), "\n"+want) {
+		t.Errorf("report does not end with the fingerprint:\n%s", out.String())
+	}
+}
+
+// RA-5: a failure prints no art.
+func TestVerifyPrintsNoFingerprintOnAFailure(t *testing.T) {
+	p := buildRelease(t)
+	result := run(t, p, verify.Options{
+		Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		Client: p.serve(t, p.result.Artifacts[0].Archive),
+	})
+
+	var out strings.Builder
+	result.Report(&out)
+	if strings.Contains(out.String(), "[SHA256]") || strings.Contains(out.String(), "sha256:") {
+		t.Errorf("a failing report printed a fingerprint:\n%s", out.String())
+	}
+}
+
+// manifestClient serves a release whose letsgo.json download answers with the
+// given status and body.
+func manifestClient(t *testing.T, status int, body string) (*github.Client, *github.Release) {
+	t.Helper()
+	release := &github.Release{ID: 1, TagName: "v1.0.0", Assets: []github.Asset{{ID: 7, Name: manifest.FileName}}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+	return client, release
+}
+
+func TestFetchManifest(t *testing.T) {
+	repo := github.Repo{Owner: "you", Name: "demo"}
+	tests := []struct {
+		name    string
+		status  int
+		body    string
+		wantErr bool
+	}{
+		{"decodes a published manifest", http.StatusOK, fmt.Sprintf(`{"schema":%d}`, manifest.Schema), false},
+		{"reports a failed download", http.StatusInternalServerError, "boom", true},
+		{"rejects an unknown schema", http.StatusOK, `{"schema":99}`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, release := manifestClient(t, tt.status, tt.body)
+			m, err := verify.FetchManifest(context.Background(), client, repo, release)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && m == nil {
+				t.Error("no manifest returned")
+			}
+		})
 	}
 }
