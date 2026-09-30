@@ -155,16 +155,16 @@ var enableDirectives = map[string]struct {
 }{
 	"budget": {"budget " + gobuild.Host().String() + " 15MB\n", func(p *plan.Plan) bool { return len(p.Budgets) > 0 }},
 	"brew":   {"brew you/tap\n", func(p *plan.Plan) bool { return p.Tap.Name != "" }},
-	"image":  {imageConfig(), func(p *plan.Plan) bool { return p.Image != nil }},
+	"image":  {linuxTarget() + "image\n", func(p *plan.Plan) bool { return p.Image != nil }},
 }
 
-// imageConfig adds a linux target when the host is not one, since an image is
-// built for linux and the fixture builds for the host alone.
-func imageConfig() string {
+// linuxTarget adds a linux target when the host is not one. The fixture builds
+// for the host alone, and an image or install.sh is only made for unix.
+func linuxTarget() string {
 	if gobuild.Host().OS == "linux" {
-		return "image\n"
+		return ""
 	}
-	return "build linux/amd64\nimage\n"
+	return "build linux/amd64\n"
 }
 
 func requireEnableActs(t *testing.T, f feature.Feature) {
@@ -303,7 +303,7 @@ func installScriptSkipFails(t *testing.T, required bool) bool {
 func builtFile(name string) func(*testing.T, []string) bool {
 	return func(t *testing.T, disabled []string) bool {
 		t.Helper()
-		p := resolvePlan(t, directives(disabled, nil), nil, plan.Options{})
+		p := resolvePlan(t, linuxTarget()+directives(disabled, nil), nil, plan.Options{})
 		result, err := release.Build(context.Background(), p, filepath.Join(t.TempDir(), "dist"), "test", nil, nil)
 		if err != nil {
 			t.Fatalf("Build: %v", err)
