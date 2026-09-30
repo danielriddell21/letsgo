@@ -73,6 +73,13 @@ type Options struct {
 	// release with hand-edited notes since.
 	AppendNotes bool
 
+	// ExtraNotes renders the sections `letsgo release` appends after the
+	// changelog — what shipped, the manifest fingerprint — so a promoted
+	// release reads like any other. It is given the previous release the
+	// changelog used and the manifest as it will be published, promoted_from
+	// included, because that is what the fingerprint names. Optional.
+	ExtraNotes func(ctx context.Context, p *plan.Plan, previous string, current *manifest.Manifest, manifestSum []byte) (string, error)
+
 	Logf func(format string, args ...any)
 }
 
@@ -163,7 +170,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		return nil, err
 	}
 
-	notes, err := buildNotes(ctx, o, stableTag, p)
+	notes, err := buildNotes(ctx, o, stableTag, p, built)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +181,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		Dir:    built.Dir,
 		Files:  built.Files,
 		Sums:   sumsFrom(built),
-		Notes:  notesMode(o.AppendNotes),
+		Notes:  notesMode(o.AppendNotes, p.Features.On("changelog")),
 		Release: github.ReleaseInput{
 			TagName:         stableTag,
 			Name:            releaseTitle(p, stableTag),
@@ -417,7 +424,11 @@ func rewriteManifest(built *release.Result) error {
 // "Prerelease history" rebuilt from the RC tags themselves rather than
 // copied from their old descriptions, so a hand edit to an RC's notes is
 // never carried into the release that supersedes it.
-func buildNotes(ctx context.Context, o Options, stableTag string, p *plan.Plan) (string, error) {
+func buildNotes(ctx context.Context, o Options, stableTag string, p *plan.Plan, built *release.Result) (string, error) {
+	if !p.Features.On("changelog") {
+		return "", nil
+	}
+
 	previous, commits, err := changelog.Collect(ctx, changelog.Source{
 		Dir: o.Dir, Tag: stableTag, Prefix: o.Prefix,
 		Shallow: o.Shallow, Client: o.Client, Repo: o.Repo,
@@ -431,10 +442,37 @@ func buildNotes(ctx context.Context, o Options, stableTag string, p *plan.Plan) 
 	if err != nil {
 		return "", err
 	}
-	if history == "" {
+	if history != "" {
+		notes += "\n<details><summary>Prerelease history</summary>\n\n" + history + "</details>\n"
+	}
+
+	if o.ExtraNotes == nil {
 		return notes, nil
 	}
-	return notes + "\n<details><summary>Prerelease history</summary>\n\n" + history + "</details>\n", nil
+	sum, err := manifestDigest(built)
+	if err != nil {
+		return "", err
+	}
+	extra, err := o.ExtraNotes(ctx, p, previous, built.Manifest, sum)
+	if err != nil {
+		return "", err
+	}
+	return notes + extra, nil
+}
+
+// manifestDigest is the digest of the manifest as it will be published, read
+// from the file because stamping promoted_from changed what the in-memory
+// copy recorded of itself.
+func manifestDigest(built *release.Result) ([]byte, error) {
+	hexSum, err := sha256File(filepath.Join(built.Dir, manifest.FileName))
+	if err != nil {
+		return nil, err
+	}
+	sum, err := hex.DecodeString(hexSum)
+	if err != nil {
+		return nil, fmt.Errorf("promote: %w", err)
+	}
+	return sum, nil
 }
 
 func sumsFrom(built *release.Result) map[string]string {
@@ -451,8 +489,10 @@ func sumsFrom(built *release.Result) map[string]string {
 	return sums
 }
 
-func notesMode(appendNotes bool) publish.NotesMode {
-	if appendNotes {
+// notesMode mirrors `letsgo release`: a disabled changelog appends nothing
+// rather than blanking a description that is already there.
+func notesMode(appendNotes, changelogEnabled bool) publish.NotesMode {
+	if appendNotes || !changelogEnabled {
 		return publish.NotesAppend
 	}
 	return publish.NotesReplace
