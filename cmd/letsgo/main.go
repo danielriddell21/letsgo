@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1110,7 +1111,11 @@ func releaseNotes(
 	if !p.Features.On("diff-notes") {
 		return notes, nil
 	}
-	return notes + whatShipped(ctx, client, repo, previous, current), nil
+	shipped, err := whatShipped(ctx, client, repo, previous, current, p.Required)
+	if err != nil {
+		return "", err
+	}
+	return notes + shipped, nil
 }
 
 // whatShipped renders the manifest-diff section against the same previous
@@ -1118,17 +1123,28 @@ func releaseNotes(
 // because this supplementary section couldn't be built — a first release has
 // no previous tag, and a release published before letsgo recorded a manifest
 // has nothing to fetch — so any failure here is reported and the section is
-// left out, rather than propagated.
-func whatShipped(ctx context.Context, client *github.Client, repo github.Repo, previous string, current *manifest.Manifest) string {
+// left out, rather than propagated. A release that required diff-notes asked
+// for exactly that failure, so it is returned instead.
+func whatShipped(
+	ctx context.Context, client *github.Client, repo github.Repo, previous string, current *manifest.Manifest,
+	required []string,
+) (string, error) {
+	strict := slices.Contains(required, "diff-notes")
 	if previous == "" {
-		return ""
+		if strict {
+			return "", errors.New("diff-notes is required, but there is no previous release to compare")
+		}
+		return "", nil
 	}
 	before, err := diff.Fetch(ctx, client, repo, previous)
 	if err != nil {
+		if strict {
+			return "", fmt.Errorf("diff-notes is required, but %s has no manifest to compare: %w", previous, err)
+		}
 		fmt.Printf("  ! skipped the \"what shipped\" section: %v\n", err)
-		return ""
+		return "", nil
 	}
-	return diff.Compare(before, current).Notes(previous)
+	return diff.Compare(before, current).Notes(previous), nil
 }
 
 func sumsFrom(r *release.Result) map[string]string {
