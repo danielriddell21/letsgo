@@ -180,6 +180,7 @@ func TestReleaseTitle(t *testing.T) {
 		t.Errorf("releaseTitle for a scoped module = %q, want %q", got, "services/api v1.2.3")
 	}
 }
+
 func TestIsPrerelease(t *testing.T) {
 	tests := map[string]struct {
 		version string
@@ -276,6 +277,7 @@ func TestSumsFromCoversThePlanFile(t *testing.T) {
 		t.Errorf("sums = %v, want the plan file's digest", sums)
 	}
 }
+
 func diffFixture(t *testing.T) Options {
 	t.Helper()
 	p := releasePlan()
