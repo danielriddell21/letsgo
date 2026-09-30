@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -67,6 +68,31 @@ func TestCheckSumdbTreatsAnUnreachableDatabaseAsAWarningUnlessRequired(t *testin
 			err := checkSumdb(context.Background(), p, t.TempDir(), &release.Result{})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("checkSumdb = %v, want error %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// A snapshot, a draft and a `module <dir>` release never reach the network:
+// there is nothing public to compare against.
+func TestWarmProxyAndCheckSumdbSkipsWhatIsNotPublic(t *testing.T) {
+	p := &plan.Plan{Features: feature.Resolve([]string{"proxy-warm", "sumdb"})}
+	scoped := &plan.Plan{Config: &config.Config{ModuleDir: "web"}}
+
+	tests := map[string]struct {
+		p               *plan.Plan
+		snapshot, draft bool
+	}{
+		"snapshot": {p, true, false},
+		"draft":    {p, false, true},
+		"scoped":   {scoped, false, false},
+		"disabled": {p, false, false},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := warmProxyAndCheckSumdb(context.Background(), tt.p, t.TempDir(), &release.Result{}, tt.snapshot, tt.draft)
+			if err != nil {
+				t.Fatalf("warmProxyAndCheckSumdb = %v, want nil", err)
 			}
 		})
 	}
