@@ -56,5 +56,5 @@ prints a VOID stamp.
 
 ## Further Notes
 
-- Open questions: is "LETSGO MARKET" the shop name? A README footnote hint,
-  or fully secret?
+- The shop name is "SHIP IT & SAVE", and there is no README hint: the receipt
+  is fully secret.

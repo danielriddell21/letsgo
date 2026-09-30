@@ -1,6 +1,6 @@
 # ADR-0015: Easter eggs are renderers over `verify.Result`, never separate paths
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-09-24
 - Issue: [#36](https://github.com/danielriddell21/letsgo/issues/36)
 - HLD: [hld/receipt.md](../hld/receipt.md)

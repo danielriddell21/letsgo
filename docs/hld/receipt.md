@@ -1,6 +1,6 @@
 # HLD: `verify --receipt`
 
-Status: proposal. Nothing here is implemented.
+Status: implemented.
 
 | | |
 |---|---|
@@ -18,7 +18,7 @@ failure gets a VOID stamp.
 
 ```
         ╔═══════════════════════════════╗
-        ║        LETSGO  MARKET         ║
+        ║        SHIP IT & SAVE         ║
         ╚═══════════════════════════════╝
   you/gambit                       v1.3.0
   2026-09-24 14:02            go1.26.2
@@ -96,10 +96,10 @@ dependencies.
 - `TestReceiptMatchesVerify`: for every `Result` fixture, the receipt's total
   is ✓ exactly when `Result.OK()` is true.
 
-## Open questions
+## Decisions
 
-- Shop name: "LETSGO MARKET"?
-- A README footnote hint, or fully secret?
+- Shop name: "SHIP IT & SAVE".
+- No README hint: the receipt is fully secret.
 
 ## Delivery
 

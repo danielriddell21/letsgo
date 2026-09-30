@@ -9,7 +9,7 @@ Proposals are split by audience:
 | [ADR](adr/) | why this way, not another | context, decision, consequences, alternatives (Nygard style) |
 | [PBS](pbs/) | exactly what the product must do (product-based specification) | scope, interfaces, numbered MUST/SHOULD requirements traced to user stories, edge cases, Given/When/Then acceptance |
 
-Each HLD opens with its status. Implemented designs are kept as the record of why; randomart, PGP words, receipt and plan/apply are still proposals.
+Each HLD opens with its status. Implemented designs are kept as the record of why; plan/apply is still a proposal.
 
 ## Index
 
@@ -47,8 +47,8 @@ Each HLD opens with its status. Implemented designs are kept as the record of wh
 | [0011](adr/0011-previous-release-by-kind.md) | Previous release chosen by kind | accepted |
 | [0012](adr/0012-audit-results-append-only.md) | Audit results append-only, outside the integrity set | accepted |
 | [0013](adr/0013-sumdb-check-against-proxy-zip.md) | sumdb check against the proxy zip, as a gate | accepted |
-| [0014](adr/0014-fingerprints-from-manifest-digest.md) | Fingerprints derive only from the manifest digest | proposed |
-| [0015](adr/0015-easter-eggs-render-verify-result.md) | Easter eggs render `verify.Result` | proposed |
+| [0014](adr/0014-fingerprints-from-manifest-digest.md) | Fingerprints derive only from the manifest digest | accepted |
+| [0015](adr/0015-easter-eggs-render-verify-result.md) | Easter eggs render `verify.Result` | accepted |
 | [0016](adr/0016-plan-is-intent-apply-rebuilds.md) | A plan holds intent; apply rebuilds and compares | proposed |
 | [0017](adr/0017-stale-plan-by-observed-state.md) | Stale plan = tag moved or target in unplanned state | accepted |
 | [0018](adr/0018-native-summary-terraform-export.md) | Native job summary; Terraform export is the `letsgo-tfplan` companion | proposed |
