@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -135,7 +136,13 @@ func TestReleaseDraftFlagReachesTheTap(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			emptyForge(t)
-			t.Chdir(moduleFixtureWith(t, "build linux/amd64\nbrew you/homebrew-tap\n", nil))
+			// A formula needs a macOS or Linux build to install; a Windows
+			// host has neither, so it is given one.
+			config := "brew you/homebrew-tap\n"
+			if runtime.GOOS == "windows" {
+				config = "build linux/amd64\n" + config
+			}
+			t.Chdir(moduleFixtureWith(t, config, nil))
 
 			args := append([]string{"-snapshot", "-o", filepath.Join(t.TempDir(), "dist")}, tc.args...)
 			var err error
