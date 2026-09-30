@@ -65,5 +65,6 @@ can never change what a release is. Every value records its source.
 
 ## Further Notes
 
-- Open question: should `update-check` exist at all? It would be the only
-  unrequested network call.
+- Decided: `update-check` exists, opt-in and off by default, because it would
+  otherwise be the only unrequested network call. It only prints a notice on
+  stderr; it never installs.

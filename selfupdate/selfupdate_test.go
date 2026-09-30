@@ -669,3 +669,55 @@ func TestCheckWithChannelReportsNoQualifyingRelease(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// latest asks Latest about a forge serving releases.
+func latest(t *testing.T, repo, prefix string, releases []releaseFixture) (string, error) {
+	t.Helper()
+	return selfupdate.Latest(context.Background(), selfupdate.Options{
+		Repo: repo, APIEndpoint: channelForge(t, "you/tool", releases), Prefix: prefix,
+	})
+}
+
+// Latest is the newest stable release, never a prerelease, draft or yanked one.
+func TestLatestIsTheNewestStableRelease(t *testing.T) {
+	got, err := latest(t, "you/tool", "", []releaseFixture{
+		{tag: "v1.0.0"},
+		{tag: "v1.2.0-rc.1"},
+		{tag: "v1.3.0", draft: true},
+		{tag: "v1.4.0", body: "> [!CAUTION]\n> **This release is retracted.** bad.\n"},
+		{tag: "v1.1.0"},
+	})
+	if err != nil || got != "1.1.0" {
+		t.Fatalf("Latest = %q, %v; want 1.1.0", got, err)
+	}
+}
+
+func TestLatestHonoursThePrefix(t *testing.T) {
+	got, err := latest(t, "you/tool", "tools/cli/", []releaseFixture{
+		{tag: "v2.0.0"},
+		{tag: "tools/cli/v1.5.0"},
+	})
+	if err != nil || got != "1.5.0" {
+		t.Fatalf("Latest = %q, %v; want 1.5.0", got, err)
+	}
+}
+
+func TestLatestReportsNoStableRelease(t *testing.T) {
+	_, err := latest(t, "you/tool", "", []releaseFixture{{tag: "v1.0.0-rc.1"}})
+	if err == nil || !strings.Contains(err.Error(), "no stable releases") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestLatestNeedsARepository(t *testing.T) {
+	if _, err := latest(t, "", "", nil); err == nil {
+		t.Fatal("Latest with no repository succeeded")
+	}
+}
+
+func TestLatestReportsAForgeFailure(t *testing.T) {
+	_, err := selfupdate.Latest(context.Background(), selfupdate.Options{Repo: "you/tool", APIEndpoint: "http://127.0.0.1:1"})
+	if err == nil {
+		t.Fatal("Latest against an unreachable forge succeeded")
+	}
+}

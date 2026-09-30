@@ -117,13 +117,15 @@ func main() {
 		os.Exit(2)
 	}
 
+	code := 0
 	if err := run(args); err != nil {
-		if code := exitCode(err); code != 1 {
-			os.Exit(code)
+		code = exitCode(err)
+		if code == 1 {
+			fmt.Fprintln(os.Stderr, "letsgo:", err)
 		}
-		fmt.Fprintln(os.Stderr, "letsgo:", err)
-		os.Exit(1)
 	}
+	maybeNoticeUpdate(command, args)
+	os.Exit(code)
 }
 
 // exitCode is the status a failed command exits with. A plan that has changes
