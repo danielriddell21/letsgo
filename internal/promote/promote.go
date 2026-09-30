@@ -3,10 +3,9 @@
 // `letsgo promote v1.3.0-rc.1` runs five steps, each depending on the last
 // having succeeded except the first, which always runs: restore the RC to a
 // prerelease, tag its commit with the stable version, rebuild at that tag and
-// compare against the RC's own manifest, create the stable release from the
-// rebuilt assets, and publish Brew and Docker (the last of which is the
-// caller's job — see cmd/letsgo/promote.go — because it reuses the same
-// unexported helpers `letsgo release` does).
+// compare against the RC's own manifest, then publish the stable release from
+// the rebuilt assets, its Homebrew formula and its container image through the
+// same publication module `letsgo release` uses, checksum gate included.
 //
 // See docs/hld/promote.md and docs/pbs/promote.md for the full specification.
 package promote
@@ -21,11 +20,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
@@ -80,6 +81,13 @@ type Options struct {
 	// included, because that is what the fingerprint names. Optional.
 	ExtraNotes func(ctx context.Context, p *plan.Plan, previous string, current *manifest.Manifest, manifestSum []byte) (string, error)
 
+	// Tap, Token and Out are what the publication writes the formula, the
+	// container image and its report with, exactly as `letsgo release`
+	// supplies them. Tap may be nil when the module has no tap.
+	Tap   brew.FileAPI
+	Token string
+	Out   io.Writer
+
 	Logf func(format string, args ...any)
 }
 
@@ -91,8 +99,7 @@ type Result struct {
 	RC *github.Release
 
 	// Plan and Build describe the stable release exactly as `letsgo
-	// release` would report them, so the caller can run the same
-	// tap/image publishing step 5 needs without promote duplicating it.
+	// release` would report them.
 	Plan  *plan.Plan
 	Build *release.Result
 
@@ -161,10 +168,9 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	}
 	logf("rebuild matches %s (version, archive names and their digests aside)", o.RCTag)
 
-	// Step 4: stamp promoted_from, rebuild the notes, and create the
-	// release. publish.Run is what makes this resumable (PR-15): it adopts
-	// an existing release and re-verifies each asset rather than failing
-	// because one is already there.
+	// Step 4: stamp promoted_from, rebuild the notes, and publish. Publication
+	// is what makes this resumable (PR-15): it adopts an existing release and
+	// re-verifies each asset rather than failing because one is already there.
 	built.Manifest.PromotedFrom = &manifest.PromotedFrom{Tag: o.RCTag, ManifestSHA256: rcManifestSHA256}
 	if err := rewriteManifest(built); err != nil {
 		return nil, err
@@ -175,30 +181,31 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		return nil, err
 	}
 
-	published, err := publish.Run(ctx, publish.Options{
-		Client: o.Client,
-		Repo:   o.Repo,
+	// A promotion is by definition a public, stable release, whatever the
+	// repository's config says about drafts and prereleases.
+	stable := *p.Config
+	stable.Draft, stable.Prerelease = false, "false"
+	p.Config = &stable
+
+	published, err := publication.Publish(ctx, publication.Options{
+		Plan:   p,
+		Result: built,
 		Dir:    built.Dir,
-		Files:  built.Files,
-		Sums:   sumsFrom(built),
-		Notes:  notesMode(o.AppendNotes, p.Features.On("changelog")),
-		Release: github.ReleaseInput{
-			TagName:         stableTag,
-			Name:            releaseTitle(p, stableTag),
-			Body:            notes,
-			Draft:           false,
-			Prerelease:      false,
-			MakeLatest:      isLatest(p),
-			TargetCommitish: rcManifest.Commit,
-		},
-		Logf: logf,
+		Repo:   o.Repo,
+		Forge:  o.Client,
+		Tap:    o.Tap,
+		Info:   o.RepoInfo,
+		Notes:  notes,
+		Append: o.AppendNotes,
+		Token:  o.Token,
+		Out:    o.Out,
 	})
 	if err != nil {
 		return nil, err
 	}
 
 	return &Result{
-		StableTag: stableTag, RC: restored, Plan: p, Build: built, Published: published,
+		StableTag: stableTag, RC: restored, Plan: p, Build: built, Published: published.Forge,
 	}, nil
 }
 
@@ -473,55 +480,6 @@ func manifestDigest(built *release.Result) ([]byte, error) {
 		return nil, fmt.Errorf("promote: %w", err)
 	}
 	return sum, nil
-}
-
-func sumsFrom(built *release.Result) map[string]string {
-	sums := map[string]string{built.Source.Name: built.Source.SHA256}
-	for _, a := range built.Manifest.Artifacts {
-		sums[a.Name] = a.SHA256
-	}
-	// The manifest's digest changed the moment PromotedFrom was stamped onto
-	// it, after release.Build already returned; what it recorded of itself
-	// is stale, so the file on disk is asked instead.
-	if sum, err := sha256File(filepath.Join(built.Dir, manifest.FileName)); err == nil {
-		sums[manifest.FileName] = sum
-	}
-	return sums
-}
-
-// notesMode mirrors `letsgo release`: a disabled changelog appends nothing
-// rather than blanking a description that is already there.
-func notesMode(appendNotes, changelogEnabled bool) publish.NotesMode {
-	if appendNotes || !changelogEnabled {
-		return publish.NotesAppend
-	}
-	return publish.NotesReplace
-}
-
-// isLatest mirrors cmd/letsgo/main.go's isLatest: a repository has one
-// "latest" badge, so a scoped (monorepo) module defers to a root module's
-// release for it rather than fighting over it every time either promotes.
-// The HLD's "marked latest" (PR-11) is read as inheriting the same rule an
-// ordinary stable release already follows, not as overriding it for a
-// module that opted out of claiming "latest" at all.
-// releaseTitle mirrors cmd/letsgo/main.go's own: the tag alone for a root
-// module, or the module's directory plus the version for a scoped one.
-func releaseTitle(p *plan.Plan, tag string) string {
-	if p.Scope.Dir == "" {
-		return tag
-	}
-	return p.Scope.Dir + " " + strings.TrimPrefix(tag, p.Scope.Prefix)
-}
-
-func isLatest(p *plan.Plan) string {
-	switch p.Config.Latest {
-	case "true", "false":
-		return p.Config.Latest
-	}
-	if p.Scope.Prefix == "" {
-		return "true"
-	}
-	return "false"
 }
 
 func sha256File(path string) (string, error) {

@@ -5,20 +5,8 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
-	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
-
-func TestReleaseTitle(t *testing.T) {
-	root := &plan.Plan{}
-	if got := releaseTitle(root, "v1.2.3"); got != "v1.2.3" {
-		t.Errorf("releaseTitle for a root module = %q, want the bare tag", got)
-	}
-	scoped := &plan.Plan{Scope: discover.Scope{Dir: "services/api", Prefix: "services/api/"}}
-	if got := releaseTitle(scoped, "services/api/v1.2.3"); got != "services/api v1.2.3" {
-		t.Errorf("releaseTitle for a scoped module = %q, want %q", got, "services/api v1.2.3")
-	}
-}
 
 func TestStableTagFor(t *testing.T) {
 	tests := []struct {

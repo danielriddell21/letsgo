@@ -2,8 +2,12 @@ package publication
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -141,7 +145,7 @@ func TestDownstreamStopsWhenTheTapFails(t *testing.T) {
 	o, _, _ := publishFixture(t)
 	o.Tap = failingTap{}
 
-	if err := Downstream(t.Context(), o); err == nil {
+	if err := downstream(t.Context(), o); err == nil {
 		t.Error("a tap that could not be read did not stop the publication")
 	}
 }
@@ -150,7 +154,7 @@ func TestDownstreamPushesNothingForAnEmptyTapAndImageSet(t *testing.T) {
 	o, _, tap := publishFixture(t)
 	o.Plan.Tap = github.Repo{}
 
-	if err := Downstream(t.Context(), o); err != nil {
+	if err := downstream(t.Context(), o); err != nil {
 		t.Fatal(err)
 	}
 	if len(tap.writes) != 0 {
@@ -246,7 +250,7 @@ func TestNotesMode(t *testing.T) {
 // Uploads are checked against the digests the release recorded, so every
 // published file has to appear here.
 func TestSumsFromCoversSourceAndArtifacts(t *testing.T) {
-	sums := sumsFrom(&release.Result{
+	sums := sumsFrom(t.TempDir(), &release.Result{
 		Source: build.Source{Name: "foo_1.2.3_source.tar.gz", SHA256: "src"},
 		Manifest: &manifest.Manifest{Artifacts: []manifest.Artifact{
 			{Name: "foo_1.2.3_linux_amd64.tar.gz", SHA256: "aaa"},
@@ -270,11 +274,27 @@ func TestSumsFromCoversSourceAndArtifacts(t *testing.T) {
 }
 
 func TestSumsFromCoversThePlanFile(t *testing.T) {
-	sums := sumsFrom(&release.Result{
+	sums := sumsFrom(t.TempDir(), &release.Result{
 		Manifest: &manifest.Manifest{Plan: &manifest.PlanRecord{SHA256: "ppp"}},
 	})
 	if sums[release.PlanFileName] != "ppp" {
 		t.Errorf("sums = %v, want the plan file's digest", sums)
+	}
+}
+
+// The manifest records no digest of itself and may be rewritten after the
+// build, so the file on disk is what an upload is compared with.
+func TestSumsFromAsksTheManifestFileForItsOwnDigest(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, manifest.FileName), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sums := sumsFrom(dir, &release.Result{Manifest: &manifest.Manifest{}})
+
+	want := sha256.Sum256([]byte("{}"))
+	if got := sums[manifest.FileName]; got != hex.EncodeToString(want[:]) {
+		t.Errorf("manifest digest = %q, want %x", got, want)
 	}
 }
 

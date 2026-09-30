@@ -663,19 +663,6 @@ func wantsRepoInfo(p *plan.Plan) bool {
 	return p.Tap != (github.Repo{}) && p.HasRepo
 }
 
-// reportPublished summarises what reached the forge.
-func reportPublished(published *publish.Result) {
-	if published.NotesRefused {
-		fmt.Println("  ! the release description could not be updated with this token")
-	}
-
-	fmt.Printf("  uploaded %d, skipped %d", len(published.Uploaded), len(published.Skipped))
-	if len(published.Replaced) > 0 {
-		fmt.Printf(", replaced %d", len(published.Replaced))
-	}
-	fmt.Println()
-}
-
 func runVerify(args []string) error {
 	fs := flag.NewFlagSet("verify", flag.ExitOnError)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
