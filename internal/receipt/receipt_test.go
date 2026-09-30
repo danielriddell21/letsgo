@@ -127,3 +127,37 @@ func TestReceiptMatchesVerify(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderAMatchPrintsTheBarcodeAndReference(t *testing.T) {
+	r := result(verify.Pass, verify.Check{Name: "provenance", Status: verify.Pass})
+	r.ManifestSum = []byte{0xe5, 0x82, 0x94, 0xf2, 0xe9, 0xa2, 0x27, 0x48}
+
+	got := receipt.Render(r, printed)
+
+	for _, want := range []string{
+		"odds of an accidental match: 1 in 2²⁵⁶\n\n█▐ ▌",
+		"          e582 (manifest)\n",
+		"REF: topmost Istanbul ",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("receipt is missing %q:\n%s", want, got)
+		}
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if n := utf8.RuneCountInString(line); n > 40 {
+			t.Errorf("%d columns, want at most 40: %q", n, line)
+		}
+	}
+}
+
+func TestRenderAFailureCarriesNoFingerprint(t *testing.T) {
+	r := result(verify.Fail, verify.Check{Name: "rebuild", Status: verify.Fail})
+	r.ManifestSum = []byte{0xe5, 0x82, 0x94, 0xf2}
+
+	got := receipt.Render(r, printed)
+	for _, unwanted := range []string{"REF:", "(manifest)", "█"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("a failed verification prints %q:\n%s", unwanted, got)
+		}
+	}
+}
