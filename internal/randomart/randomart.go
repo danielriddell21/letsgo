@@ -20,30 +20,7 @@ const (
 // The picture is the nine field rows between the frame lines, so it matches
 // ssh-keygen byte for byte for the same digest; only the titles differ.
 func Render(digest []byte, title string) string {
-	var field [width][height]int
-	x, y := width/2, height/2
-	for _, b := range digest {
-		for range 4 {
-			if b&1 != 0 {
-				x++
-			} else {
-				x--
-			}
-			if b&2 != 0 {
-				y++
-			} else {
-				y--
-			}
-			x = min(max(x, 0), width-1)
-			y = min(max(y, 0), height-1)
-			if field[x][y] < len(glyphs)-3 {
-				field[x][y]++
-			}
-			b >>= 2
-		}
-	}
-	field[width/2][height/2] = len(glyphs) - 2
-	field[x][y] = len(glyphs) - 1
+	field := walk(digest)
 
 	var out strings.Builder
 	out.WriteString(frame(title))
@@ -57,6 +34,31 @@ func Render(digest []byte, title string) string {
 	}
 	out.WriteString(frame("SHA256"))
 	return out.String()
+}
+
+// walk moves the bishop across the digest and returns each square's visit
+// count, with the start and end squares set to their own glyphs.
+func walk(digest []byte) (field [width][height]int) {
+	x, y := width/2, height/2
+	for _, b := range digest {
+		for range 4 {
+			x = min(max(x+step(b&1), 0), width-1)
+			y = min(max(y+step(b&2), 0), height-1)
+			field[x][y] = min(field[x][y]+1, len(glyphs)-3)
+			b >>= 2
+		}
+	}
+	field[width/2][height/2] = len(glyphs) - 2
+	field[x][y] = len(glyphs) - 1
+	return field
+}
+
+// step is +1 when the move's bit is set and -1 when it is clear.
+func step(bit byte) int {
+	if bit != 0 {
+		return 1
+	}
+	return -1
 }
 
 // frame is a border line with text in square brackets, truncated to fit.
