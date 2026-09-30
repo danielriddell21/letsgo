@@ -228,6 +228,12 @@ func (p *Plan) resolvePlugins() {
 				return
 			}
 		}
+		if relativePath(configured.Command) {
+			p.addAt(p.posOf(pluginDirective+configured.Hook), "plugins", Warn,
+				"%s is a path inside the repository, so a change to the checkout can change the program that runs; "+
+					"its digest is what keeps that honest, so review any change to the pin closely",
+				configured.Command)
+		}
 		p.Plugins[hook] = plugin.Plugin{
 			Hook:    hook,
 			Command: configured.Command,
@@ -238,6 +244,12 @@ func (p *Plan) resolvePlugins() {
 	}
 
 	p.note("plugins", strings.Join(named, ", "), ConfigFile)
+}
+
+// relativePath reports whether a plugin command names a file relative to the
+// working directory rather than a program on PATH or at an absolute path.
+func relativePath(command string) bool {
+	return !filepath.IsAbs(command) && strings.ContainsAny(command, `/\`)
 }
 
 // checkPluginConfigFiles looks for a configured plugin's own config at the
