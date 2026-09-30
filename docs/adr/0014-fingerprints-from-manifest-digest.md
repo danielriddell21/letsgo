@@ -1,6 +1,6 @@
 # ADR-0014: Human fingerprints derive only from the manifest digest
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-09-24
 - Issues: [#34](https://github.com/danielriddell21/letsgo/issues/34), [#35](https://github.com/danielriddell21/letsgo/issues/35), [#36](https://github.com/danielriddell21/letsgo/issues/36)
 - HLDs: [randomart](../hld/randomart.md), [pgp-words](../hld/pgp-words.md), [receipt](../hld/receipt.md)

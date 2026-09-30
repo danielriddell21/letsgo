@@ -1,6 +1,6 @@
 # HLD: randomart fingerprint
 
-Status: proposal. Nothing here is implemented.
+Status: implemented.
 
 | | |
 |---|---|

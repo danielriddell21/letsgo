@@ -1,6 +1,6 @@
 # HLD: reading the manifest digest aloud (`verify --words`)
 
-Status: proposal. Nothing here is implemented.
+Status: implemented.
 
 | | |
 |---|---|
