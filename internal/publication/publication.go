@@ -209,13 +209,13 @@ func sumsFrom(dir string, r *release.Result) map[string]string {
 func fileSHA256(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("open %s: %w", path, err)
 	}
 	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
-		return "", err
+		return "", fmt.Errorf("hash %s: %w", path, err)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
