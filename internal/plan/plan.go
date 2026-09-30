@@ -47,6 +47,9 @@ const ConfigFile = "letsgo.mod"
 // pluginConfigDir is where a plugin's own config lives, beside ConfigFile.
 const pluginConfigDir = ".letsgo"
 
+// disabledByConfig is the detail of a check its feature switched off.
+const disabledByConfig = "disabled by config"
+
 // Options control how a plan is resolved.
 type Options struct {
 	// Dir is any directory inside the module.
@@ -964,7 +967,7 @@ func ReleaseToken(override, tokenOverride string) (token, source string) {
 // That is checkable, actionable, and rare enough to be worth stopping for.
 func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 	if !p.Features.On("vulncheck") {
-		p.add("vulnerabilities", Skip, "disabled by config")
+		p.add("vulnerabilities", Skip, disabledByConfig)
 		return
 	}
 
@@ -1015,7 +1018,7 @@ const (
 // found by other people.
 func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 	if !p.Features.On(apiGate) {
-		p.add(apiCompatibility, Skip, "disabled by config")
+		p.add(apiCompatibility, Skip, disabledByConfig)
 		return
 	}
 	if p.Tag == "" {
@@ -2278,7 +2281,7 @@ const (
 func (p *Plan) checkSumdb() {
 	switch {
 	case !p.Features.On(sumdbGate):
-		p.add(sumdbCheck, Skip, "disabled by config")
+		p.add(sumdbCheck, Skip, disabledByConfig)
 	case p.Snapshot || p.Tag == "":
 		p.skip(sumdbCheck, sumdbGate, "not a tagged release")
 	case p.Config.ModuleDir != "":
