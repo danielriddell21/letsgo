@@ -44,7 +44,7 @@ var version = "dev"
 const usage = `letsgo builds and publishes Go releases.
 
 usage:
-  letsgo plan [--explain] [--json] [--publish] [--diff [--exit-code]] [-out file]  resolve and check a release without performing one
+  letsgo plan [--explain] [--json] [--publish] [--diff [--exit-code]] [--format md] [-out file]  resolve and check a release without performing one
   letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
   letsgo release [--draft] [-o dir]      build and publish, resumably
   letsgo apply [file] [-auto-approve]   publish a release as a saved plan agreed it; with no file, plan it, show it and ask
@@ -217,6 +217,7 @@ func runPlan(args []string) error {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)
 	explain := fs.Bool("explain", false, "show where each resolved value came from")
 	jsonOutput := fs.Bool("json", false, "print the plan as JSON")
+	format := fs.String("format", "text", "how a diff is written: text, or md for a job summary (implies --diff)")
 	diff := fs.Bool("diff", false, "also build, read the forge, and show what a release would change there")
 	planOut := fs.String("out", "", "save the plan to `file` for `letsgo apply` (implies --diff)")
 	exitCode := fs.Bool("exit-code", false, "with --diff, exit 2 when the plan has changes, for drift detection")
@@ -235,13 +236,19 @@ func runPlan(args []string) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	markdown, err := markdownFormat(*format, *jsonOutput)
+	if err != nil {
+		return err
+	}
+	run := diffRun{Out: *planOut, ExitCode: *exitCode, Started: time.Now()}
+	defer run.toMarkdown(markdown)()
+
 	if *yankTag != "" {
-		return planYankCommand(*yankTag, yankFlags, *jsonOutput, diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken},
-			diffRun{Out: *planOut, ExitCode: *exitCode, Started: time.Now()})
+		return planYankCommand(*yankTag, yankFlags, *jsonOutput, diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken}, run)
 	}
 
 	saving := *planOut != ""
-	diffing := *diff || saving
+	diffing := *diff || saving || markdown
 	if diffing && *jsonOutput {
 		return errors.New("letsgo: --diff and -out have no JSON form yet")
 	}
@@ -262,15 +269,7 @@ func runPlan(args []string) error {
 	}
 
 	if *jsonOutput {
-		data, err := p.JSON()
-		if err != nil {
-			return err
-		}
-		fmt.Println(string(data))
-		if !p.OK() {
-			return errPlanFailed
-		}
-		return nil
+		return printPlanJSON(p)
 	}
 
 	p.Report(os.Stdout, *explain)
@@ -281,12 +280,24 @@ func runPlan(args []string) error {
 		return errPlanFailed
 	}
 	if diffing {
-		return diffAndSave(ctx, p, diffRun{
-			Tokens: diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken},
-			Out:    *planOut, ExitCode: *exitCode, Started: started,
-		})
+		run.Tokens = diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken}
+		run.Started = started
+		return diffAndSave(ctx, p, run)
 	}
 	fmt.Printf("\n  plan ok in %s · run `letsgo build` to produce artifacts\n", elapsed)
+	return nil
+}
+
+// printPlanJSON is `letsgo plan --json`: the plan, and a failure if it is not OK.
+func printPlanJSON(p *plan.Plan) error {
+	data, err := p.JSON()
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	if !p.OK() {
+		return errPlanFailed
+	}
 	return nil
 }
 
