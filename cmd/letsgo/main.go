@@ -4,6 +4,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -27,6 +29,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/randomart"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/verify"
 )
@@ -339,7 +342,11 @@ func runRelease(args []string) error {
 
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 
-	notes, err := releaseNotes(ctx, p, client, repo, result.Manifest)
+	manifestSum, err := fileSum(filepath.Join(result.Dir, manifest.FileName))
+	if err != nil {
+		return err
+	}
+	notes, err := releaseNotes(ctx, p, client, repo, result.Manifest, manifestSum)
 	if err != nil {
 		return err
 	}
@@ -1080,14 +1087,35 @@ func notesMode(appendNotes, changelogEnabled bool) publish.NotesMode {
 	return publish.NotesReplace
 }
 
+// fileSum is the sha256 of a file, which for the manifest is what identifies a
+// release.
+func fileSum(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	sum := sha256.Sum256(data)
+	return sum[:], nil
+}
+
+// fingerprint renders the collapsed block that identifies a release by its
+// manifest. It is release notes only: the manifest cannot contain it, since
+// the manifest is what it is made from.
+func fingerprint(tag string, sum []byte) string {
+	return fmt.Sprintf("\n<details><summary>Manifest fingerprint</summary>\n\n```\n%s\n```\n\n`sha256:%s`\n\n</details>\n",
+		randomart.Render(sum, randomart.Title(tag)), hex.EncodeToString(sum))
+}
+
 // releaseNotes builds the changelog for everything since the previous tag,
 // plus the collapsed "what shipped" section comparing this release's
-// manifest against that same previous release.
+// manifest against that same previous release, then the manifest's
+// fingerprint.
 //
 // A shallow checkout is the normal shape of a CI clone, so the history is
 // fetched from the forge rather than demanded of the caller.
 func releaseNotes(
 	ctx context.Context, p *plan.Plan, client *github.Client, repo github.Repo, current *manifest.Manifest,
+	manifestSum []byte,
 ) (string, error) {
 	if !p.Features.On("changelog") {
 		return "", nil
@@ -1108,14 +1136,17 @@ func releaseNotes(
 		return "", err
 	}
 	notes := changelog.Build(previous, p.Tag, commits).WithAPIChanges(p.APIChanges).Markdown()
-	if !p.Features.On("diff-notes") {
-		return notes, nil
+	if p.Features.On("diff-notes") {
+		shipped, err := whatShipped(ctx, client, repo, previous, current, p.Required)
+		if err != nil {
+			return "", err
+		}
+		notes += shipped
 	}
-	shipped, err := whatShipped(ctx, client, repo, previous, current, p.Required)
-	if err != nil {
-		return "", err
+	if p.Features.On("randomart") && len(manifestSum) > 0 {
+		notes += fingerprint(p.Tag, manifestSum)
 	}
-	return notes + shipped, nil
+	return notes, nil
 }
 
 // whatShipped renders the manifest-diff section against the same previous

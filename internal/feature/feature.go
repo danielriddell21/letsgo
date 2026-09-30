@@ -127,6 +127,10 @@ var All = []Feature{
 		Name: "diff-notes", Kind: Output, Default: true, Disable: true, Require: true,
 		Summary: "a collapsed \"what shipped\" section compares this release's manifest against the previous one",
 	},
+	{
+		Name: "randomart", Kind: Output, Default: true, Disable: true, Require: true,
+		Summary: "a collapsed fingerprint of the manifest is added to the release notes",
+	},
 
 	{
 		Name: "proxy-warm", Kind: Publish, Default: true, Disable: true,
