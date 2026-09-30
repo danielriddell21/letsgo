@@ -67,7 +67,12 @@ func diffAndSave(ctx context.Context, p *plan.Plan, r diffRun) error {
 	if err != nil {
 		return err
 	}
+	return finishDiff(p, d, r)
+}
 
+// finishDiff is everything after the forge has been read: show the actions,
+// save the plan, and answer --exit-code.
+func finishDiff(p *plan.Plan, d *forgeDiff, r diffRun) error {
 	fmt.Println()
 	fmt.Print(plandiff.Render(d.Actions))
 

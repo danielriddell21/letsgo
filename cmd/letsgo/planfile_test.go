@@ -188,3 +188,50 @@ func TestRunPlanRejectsExitCodeWithoutDiff(t *testing.T) {
 		t.Error("runPlan accepted --json with -out")
 	}
 }
+
+func TestFinishDiffSavesThePlanAndAnswersExitCode(t *testing.T) {
+	p := resolvedPlan("v1.3.0", "abc")
+	p.Repo.Owner, p.Repo.Name = "you", "demo"
+	changes := &forgeDiff{
+		Actions:  []plandiff.Action{{Op: plandiff.Add, Kind: plandiff.KindAsset, Target: "a.zip", Planned: "sha256:aa"}},
+		Manifest: []byte(`{}`), ManifestSHA256: "sha256:bb",
+	}
+	kept := &forgeDiff{
+		Actions:  []plandiff.Action{{Op: plandiff.Keep, Kind: plandiff.KindAsset, Target: "a.zip", Observed: "sha256:aa", Planned: "sha256:aa"}},
+		Manifest: []byte(`{}`), ManifestSHA256: "sha256:bb",
+	}
+	path := filepath.Join(t.TempDir(), "letsgo.plan")
+
+	for name, tc := range map[string]struct {
+		d       *forgeDiff
+		run     diffRun
+		wantErr error
+		saved   bool
+	}{
+		"changes, plain":           {changes, diffRun{}, nil, false},
+		"changes, exit code":       {changes, diffRun{ExitCode: true}, errPlanChanges, false},
+		"no changes, exit code":    {kept, diffRun{ExitCode: true}, nil, false},
+		"changes, saved":           {changes, diffRun{Out: path}, nil, true},
+		"saved and exit code":      {changes, diffRun{Out: path, ExitCode: true}, errPlanChanges, true},
+		"nothing to change, plain": {kept, diffRun{}, nil, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_ = os.Remove(path)
+			if err := finishDiff(p, tc.d, tc.run); !errors.Is(err, tc.wantErr) {
+				t.Errorf("finishDiff = %v, want %v", err, tc.wantErr)
+			}
+			_, err := os.Stat(path)
+			if saved := err == nil; saved != tc.saved {
+				t.Errorf("plan file saved = %v, want %v", saved, tc.saved)
+			}
+		})
+	}
+}
+
+func TestFinishDiffReportsAnUnwritablePlanPath(t *testing.T) {
+	err := finishDiff(resolvedPlan("v1", "abc"), &forgeDiff{Manifest: []byte(`{}`)},
+		diffRun{Out: filepath.Join(t.TempDir(), "no", "dir", "p")})
+	if err == nil {
+		t.Error("finishDiff succeeded writing into a missing directory")
+	}
+}
