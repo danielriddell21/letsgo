@@ -1,10 +1,19 @@
 package promote
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
@@ -82,5 +91,81 @@ func TestPrereleasesOfNoneMatch(t *testing.T) {
 	got := prereleasesOf([]string{"v1.2.0", "v1.3.0-rc.1"}, scope, target)
 	if len(got) != 0 {
 		t.Errorf("prereleasesOf = %v, want none for a target with no prereleases", got)
+	}
+}
+
+func TestRewriteManifestNamesWhatItCouldNotWrite(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T) *release.Result
+		wantErr string
+	}{
+		{
+			name: "the release directory is missing",
+			prepare: func(t *testing.T) *release.Result {
+				t.Helper()
+				return &release.Result{Dir: filepath.Join(t.TempDir(), "gone"), Manifest: &manifest.Manifest{}}
+			},
+			wantErr: "promote: writing the manifest",
+		},
+		{
+			name: "a listed file is missing",
+			prepare: func(t *testing.T) *release.Result {
+				t.Helper()
+				return &release.Result{Dir: t.TempDir(), Manifest: &manifest.Manifest{}, Files: []string{"absent.tar.gz"}}
+			},
+			wantErr: "promote: hashing absent.tar.gz",
+		},
+		{
+			name: "the checksum file cannot be replaced",
+			prepare: func(t *testing.T) *release.Result {
+				t.Helper()
+				dir := t.TempDir()
+				if err := os.Mkdir(filepath.Join(dir, build.ChecksumFile), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				return &release.Result{Dir: dir, Manifest: &manifest.Manifest{}}
+			},
+			wantErr: "promote: writing " + build.ChecksumFile,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := rewriteManifest(tc.prepare(t))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("rewriteManifest error = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestManifestDigestNamesAMissingManifest(t *testing.T) {
+	t.Parallel()
+
+	_, err := manifestDigest(&release.Result{Dir: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "promote: hashing the manifest") {
+		t.Errorf("manifestDigest error = %v, want it to name the manifest", err)
+	}
+}
+
+func TestFindReleaseNamesTheListingItCouldNotRead(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+
+	_, err := findRelease(context.Background(), Options{Client: client}, "v1.0.0")
+	if err == nil || !strings.Contains(err.Error(), "promote: listing releases") {
+		t.Errorf("findRelease error = %v, want it to name the listing", err)
 	}
 }
