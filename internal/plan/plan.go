@@ -38,6 +38,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/semver"
+	"github.com/danielriddell21/letsgo/internal/sumdb"
 )
 
 // ConfigFile is the optional configuration file letsgo reads.
@@ -45,6 +46,9 @@ const ConfigFile = "letsgo.mod"
 
 // pluginConfigDir is where a plugin's own config lives, beside ConfigFile.
 const pluginConfigDir = ".letsgo"
+
+// disabledByConfig is the detail of a check its feature switched off.
+const disabledByConfig = "disabled by config"
 
 // Options control how a plan is resolved.
 type Options struct {
@@ -826,6 +830,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 
 	if opts.Publish {
 		p.checkForge(ctx, opts)
+		p.checkSumdb()
 	}
 	if opts.Analyse {
 		p.checkVulnerabilities(ctx, opts)
@@ -962,7 +967,7 @@ func ReleaseToken(override, tokenOverride string) (token, source string) {
 // That is checkable, actionable, and rare enough to be worth stopping for.
 func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 	if !p.Features.On("vulncheck") {
-		p.add("vulnerabilities", Skip, "disabled by config")
+		p.add("vulnerabilities", Skip, disabledByConfig)
 		return
 	}
 
@@ -1013,7 +1018,7 @@ const (
 // found by other people.
 func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 	if !p.Features.On(apiGate) {
-		p.add(apiCompatibility, Skip, "disabled by config")
+		p.add(apiCompatibility, Skip, disabledByConfig)
 		return
 	}
 	// Nothing importable is a fact about the module, not a gap in the release,
@@ -2266,4 +2271,32 @@ func summarise(targets []gobuild.Target) string {
 		names[i] = t.String()
 	}
 	return strings.Join(names, ", ")
+}
+
+// sumdbCheck is the check name checkSumdb reports under, and sumdbGate the
+// feature behind it.
+const (
+	sumdbCheck = "sumdb"
+	sumdbGate  = "sumdb"
+)
+
+// checkSumdb records why the sum.golang.org cross-check will not run, so a
+// required sumdb turns that into a Fail. Nothing is added when it will run:
+// the check itself happens during release, after the module proxy has been
+// primed and before any asset is attached.
+func (p *Plan) checkSumdb() {
+	switch {
+	case !p.Features.On(sumdbGate):
+		p.add(sumdbCheck, Skip, disabledByConfig)
+	case p.Snapshot || p.Tag == "":
+		p.skip(sumdbCheck, sumdbGate, "not a tagged release")
+	case p.Config.ModuleDir != "":
+		p.skip(sumdbCheck, sumdbGate, "the module is not at the repository root")
+	case !p.Features.On("proxy-warm"):
+		p.skip(sumdbCheck, sumdbGate, "proxy-warm is disabled, so sum.golang.org has no record to compare")
+	default:
+		if skip, reason := sumdb.PrivateModule(p.Module.Path); skip {
+			p.skip(sumdbCheck, sumdbGate, "private module (%s)", reason)
+		}
+	}
 }

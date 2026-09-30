@@ -18,6 +18,7 @@ var catalogue = map[string]struct {
 	"module-path":    {Integrity, false, false},
 	"vulncheck":      {Gate, true, true},
 	"api-gate":       {Gate, true, true},
+	"sumdb":          {Gate, true, true},
 	"budget":         {Gate, false, false},
 	"sbom":           {Output, true, true},
 	"install-script": {Output, true, true},
