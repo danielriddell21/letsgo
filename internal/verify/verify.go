@@ -35,6 +35,10 @@ import (
 // the reverse import would cycle.
 const auditFileName = "audit.json"
 
+// planFileName is internal/release.PlanFileName, duplicated for the same
+// reason as auditFileName.
+const planFileName = "letsgo.plan.json"
+
 // Status is the outcome of one check.
 type Status string
 
@@ -262,6 +266,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		len(m.Artifacts), m.Builder.Tool, m.Builder.Go)
 	reportFeatures(result, m)
 	reportAudit(ctx, o, result, release)
+	reportPlan(ctx, o, result, release, m)
 
 	comparePublished(result, release, m)
 	checkProvenance(ctx, o, result, m)
@@ -454,6 +459,33 @@ func reportAudit(ctx context.Context, o Options, result *Result, release *github
 		ids[i] = f.ID
 	}
 	result.add("audit", Pass, "affected by %s (as of %s)", strings.Join(ids, ", "), last.Vulndb)
+}
+
+// reportPlan prints the plan record a release was applied from and checks the
+// attached plan is the one it names (PA-12). A release made without a plan has
+// nothing to report.
+func reportPlan(ctx context.Context, o Options, result *Result, release *github.Release, m *manifest.Manifest) {
+	if m.Plan == nil {
+		return
+	}
+	what := fmt.Sprintf("applied from plan %s (made %s by letsgo %s)",
+		short(m.Plan.SHA256), m.Plan.CreatedAt, m.Plan.LetsgoVersion)
+	asset, ok := release.Asset(planFileName)
+	if !ok {
+		result.add("plan", Fail, "%s, but %s is not attached", what, planFileName)
+		return
+	}
+	data, err := o.Client.DownloadAsset(ctx, o.Repo, asset.ID)
+	if err != nil {
+		result.add("plan", Warn, "%s; could not read %s: %v", what, planFileName, err)
+		return
+	}
+	sum := sha256.Sum256(data)
+	if got := hex.EncodeToString(sum[:]); got != m.Plan.SHA256 {
+		result.add("plan", Fail, "%s, but the attached %s is %s", what, planFileName, short(got))
+		return
+	}
+	result.add("plan", Pass, "%s", what)
 }
 
 func short(digest string) string {
