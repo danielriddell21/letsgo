@@ -15,6 +15,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	plandiff "github.com/danielriddell21/letsgo/plan"
+	"github.com/danielriddell21/letsgo/plugin"
 )
 
 // fakeTap is a tap that remembers which paths were written to it, without
@@ -41,6 +42,19 @@ func (failingTap) ReadFile(context.Context, github.Repo, string) (*github.File, 
 
 func (failingTap) WriteFile(context.Context, github.Repo, github.FileInput) error {
 	return errors.New("tap unreachable")
+}
+
+// writeFailingTap is a tap that reads fine and refuses to write one path.
+type writeFailingTap struct {
+	fakeTap
+	path string
+}
+
+func (w *writeFailingTap) WriteFile(ctx context.Context, repo github.Repo, in github.FileInput) error {
+	if in.Path == w.path {
+		return errors.New("tap refused the write")
+	}
+	return w.fakeTap.WriteFile(ctx, repo, in)
 }
 
 func releasePlan() *plan.Plan {
@@ -70,6 +84,7 @@ func artifact(archive, goos, goarch, sum string, binaries ...string) build.Artif
 // A prerelease's formula would overwrite the stable formula that `brew
 // install foo` relies on, so publishTap must write @next only.
 func TestPublishTapSkipsAPrerelease(t *testing.T) {
+	t.Parallel()
 	p := releasePlan()
 	p.Version, p.Tag = "1.3.0-rc.1", "v1.3.0-rc.1"
 	p.Tap = github.Repo{Owner: "you", Name: "homebrew-tap"}
@@ -88,6 +103,7 @@ func TestPublishTapSkipsAPrerelease(t *testing.T) {
 // A stable release must still write its formula normally, plus @next: the
 // prerelease guard must not over-suppress the tap.
 func TestPublishTapWritesAFormulaForAStableRelease(t *testing.T) {
+	t.Parallel()
 	p := releasePlan()
 	p.Tap = github.Repo{Owner: "you", Name: "homebrew-tap"}
 
@@ -105,6 +121,7 @@ func TestPublishTapWritesAFormulaForAStableRelease(t *testing.T) {
 // `release --draft` must hold the tap back exactly as `draft = true` in the
 // config does: a formula pointing at a draft's assets resolves to a 404.
 func TestDraftFlagHoldsTheTapBack(t *testing.T) {
+	t.Parallel()
 	p := releasePlan()
 	p.Tap = github.Repo{Owner: "you", Name: "homebrew-tap"}
 	result := built(artifact("foo_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"))
@@ -121,6 +138,7 @@ func TestDraftFlagHoldsTheTapBack(t *testing.T) {
 }
 
 func TestDraftFlagHoldsTheImagesBack(t *testing.T) {
+	t.Parallel()
 	p := releasePlan()
 	result := &release.Result{Images: []release.ImageBuild{{}}}
 
@@ -132,7 +150,38 @@ func TestDraftFlagHoldsTheImagesBack(t *testing.T) {
 	}
 }
 
+func TestPublishTapNamesTheFileItCouldNotWrite(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"the formula", "Formula/foo.rb", "publishing formula foo"},
+		{"the next formula", "Formula/foo@next.rb", "publishing formula foo@next"},
+		{"a tap file", "Casks/foo.rb", "publishing Casks/foo.rb"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := releasePlan()
+			p.Tap = github.Repo{Owner: "you", Name: "homebrew-tap"}
+			result := built(artifact("foo_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"))
+			result.TapFiles = []plugin.TapFile{{Path: "Casks/foo.rb", Content: "cask"}}
+			tap := &writeFailingTap{path: tt.path}
+
+			err := publishTap(t.Context(), io.Discard, p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil)
+
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("err = %v, want it to contain %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestFormulasGroupsByArchive(t *testing.T) {
+	t.Parallel()
 	// Two archives produce two formulas: a formula names one archive per
 	// platform, so alpha and beta cannot share one.
 	result := built(
@@ -165,6 +214,7 @@ func TestFormulasGroupsByArchive(t *testing.T) {
 // desc and license come from the repository rather than from config, and are
 // omitted when it has none: inventing either is worse than leaving them out.
 func TestFormulasTakeMetadataFromTheRepository(t *testing.T) {
+	t.Parallel()
 	result := built(artifact("foo_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "", "foo"))
 
 	without := formulas(releasePlan(), result, github.Repo{Owner: "you", Name: "foo"}, nil)
@@ -191,6 +241,7 @@ func TestFormulasTakeMetadataFromTheRepository(t *testing.T) {
 // collection whose commands include a name Homebrew core already uses would
 // write a formula that shadows it.
 func TestFormulasInstallEveryBinaryInTheArchive(t *testing.T) {
+	t.Parallel()
 	result := built(
 		artifact("toolshed_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "a1", "crabs", "duck", "fish"),
 		artifact("toolshed_1.2.3_darwin_arm64.tar.gz", "darwin", "arm64", "a2", "crabs", "duck", "fish"),
@@ -221,6 +272,7 @@ func TestFormulasInstallEveryBinaryInTheArchive(t *testing.T) {
 // usually belongs in a cask. Writing it a formula anyway would put a package
 // in the tap that the repository never asked for.
 func TestFormulasLeaveOutAVariant(t *testing.T) {
+	t.Parallel()
 	p := releasePlan()
 	p.Groups = []plan.Group{
 		{Name: "foo"},
@@ -260,6 +312,7 @@ func TestFormulasLeaveOutAVariant(t *testing.T) {
 // Caveats come from the config rather than the repository, because they say
 // what the program needs of the machine — which no API knows.
 func TestFormulasCarryTheConfiguredCaveats(t *testing.T) {
+	t.Parallel()
 	p := releasePlan()
 	p.Config.BrewCaveats = "needs a display"
 
@@ -298,6 +351,7 @@ func observeTap(t *testing.T, existing map[string][]byte, writes map[string][]by
 }
 
 func TestTapObserverReportsAddChangeAndKeep(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name     string
 		existing map[string][]byte
@@ -316,7 +370,18 @@ func TestTapObserverReportsAddChangeAndKeep(t *testing.T) {
 	}
 }
 
+func TestTapObserverNamesTheFileItCouldNotRead(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewTapObserver(failingTap{}).ReadFile(t.Context(), github.Repo{}, "Formula/foo.rb")
+
+	if err == nil || !strings.Contains(err.Error(), "reading Formula/foo.rb from the tap") {
+		t.Errorf("err = %v, want it to name the file", err)
+	}
+}
+
 func TestTapObserverRefusesAWriteWithoutARead(t *testing.T) {
+	t.Parallel()
 	tap := NewTapObserver(publish.NewRecorder(nil))
 	err := tap.WriteFile(t.Context(), github.Repo{}, github.FileInput{Path: "x"})
 	if err == nil || !strings.Contains(err.Error(), "without being read") {
@@ -325,6 +390,7 @@ func TestTapObserverRefusesAWriteWithoutARead(t *testing.T) {
 }
 
 func TestBlobFingerprintMatchesGit(t *testing.T) {
+	t.Parallel()
 	// `printf 'hello\n' | git hash-object --stdin`
 	want := "blob:ce013625030ba8dba906f756967f9e9ca394464a"
 	if got := BlobFingerprint([]byte("hello\n")); got != want {

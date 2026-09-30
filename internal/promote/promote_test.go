@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/promote"
+	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 )
@@ -681,5 +683,46 @@ func TestRunRefusalConditions(t *testing.T) {
 
 			assertForgeCalls(t, forge, 0, 0)
 		})
+	}
+}
+
+func TestRunNamesTheNotesItCouldNotBuild(t *testing.T) {
+	dir := demoRepo(t, "v1.3.0-rc.1")
+	forge := seededForge(t, dir, "v1.3.0-rc.1")
+
+	boom := errors.New("boom")
+	_, err := runPromoteWith(t, forge.client(), "v1.3.0-rc.1", dir, t.TempDir(), func(o *promote.Options) {
+		o.ExtraNotes = func(context.Context, *plan.Plan, string, *manifest.Manifest, []byte) (string, error) {
+			return "", boom
+		}
+	})
+	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "promote: building the notes") {
+		t.Errorf("err = %v, want it to wrap %v and name the notes", err, boom)
+	}
+}
+
+func TestRunReportsTheStepPublicationStoppedAt(t *testing.T) {
+	dir := demoRepo(t, "v1.3.0-rc.1")
+	forge := seededForge(t, dir, "v1.3.0-rc.1")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/releases") {
+			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		forge.route(w, r)
+	}))
+	t.Cleanup(server.Close)
+	client := github.New("token")
+	client.SetEndpoints(server.URL, server.URL)
+
+	_, err := runPromote(t, client, "v1.3.0-rc.1", dir)
+
+	var stopped *publication.StepError
+	if !errors.As(err, &stopped) || stopped.Step != publication.StepRelease {
+		t.Fatalf("err = %v, want a publication.StepError at the release step", err)
+	}
+	if !strings.Contains(err.Error(), "promote: ") {
+		t.Errorf("err = %v, want it to name promote", err)
 	}
 }

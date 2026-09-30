@@ -61,7 +61,7 @@ func publishTap(ctx context.Context, out io.Writer, p *plan.Plan, result *releas
 		if !prerelease {
 			published, err := brew.Publish(ctx, api, p.Tap, formula)
 			if err != nil {
-				return err
+				return fmt.Errorf("publishing formula %s: %w", formula.Name, err)
 			}
 			fmt.Fprintf(out, "  %s %s in %s\n", published.Status, published.Path, p.Tap)
 		}
@@ -70,7 +70,7 @@ func publishTap(ctx context.Context, out io.Writer, p *plan.Plan, result *releas
 		next.Name = brew.NextName(formula.Name)
 		published, err := brew.PublishNext(ctx, api, p.Tap, next)
 		if err != nil {
-			return err
+			return fmt.Errorf("publishing formula %s: %w", next.Name, err)
 		}
 		fmt.Fprintf(out, "  %s %s in %s\n", published.Status, published.Path, p.Tap)
 	}
@@ -86,7 +86,7 @@ func publishTap(ctx context.Context, out io.Writer, p *plan.Plan, result *releas
 		published, err := brew.PublishFile(ctx, api, p.Tap, f.Path, []byte(f.Content),
 			fmt.Sprintf("%s %s", p.Project, p.Version))
 		if err != nil {
-			return err
+			return fmt.Errorf("publishing %s: %w", f.Path, err)
 		}
 		fmt.Fprintf(out, "  %s %s in %s\n", published.Status, published.Path, p.Tap)
 	}
@@ -194,7 +194,7 @@ type observedFile struct {
 func (t *TapObserver) ReadFile(ctx context.Context, repo github.Repo, path string) (*github.File, error) {
 	file, err := t.api.ReadFile(ctx, repo, path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading %s from the tap: %w", path, err)
 	}
 	// Publishing a file may read it more than once, to decide and then to
 	// write; it is one target however often it is looked at.
