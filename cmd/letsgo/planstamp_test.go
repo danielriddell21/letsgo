@@ -102,3 +102,28 @@ func TestStampAppliedReportsAnUnwritableRelease(t *testing.T) {
 		t.Error("stampApplied succeeded with nowhere to write")
 	}
 }
+
+func TestHoldAndStampRefusesARebuildThatIsNotThePlan(t *testing.T) {
+	result := stampFixture(t)
+	file := &plandiff.File{Tag: "v1.0.0", Actions: writingManifest(plandiff.Add)}
+
+	if _, err := holdAndStamp(file, resolvedPlan("v2.0.0", "abc"), result); err == nil {
+		t.Error("holdAndStamp accepted a rebuild of another tag")
+	}
+	if result.Manifest.Plan != nil {
+		t.Errorf("a refused rebuild was stamped: %+v", result.Manifest.Plan)
+	}
+}
+
+func TestHoldAndStampStampsARebuildThatMatchesThePlan(t *testing.T) {
+	result, digest := rebuiltIn(t, `{"version":"1.3.0"}`)
+	result.Manifest = &manifest.Manifest{Project: "demo"}
+	result.Files = []string{manifest.FileName, build.ChecksumFile}
+	file := planFileFor("v1.3.0", "abc", `{"version":"1.3.0"}`, digest)
+	file.Actions = writingManifest(plandiff.Add)
+
+	got, err := holdAndStamp(file, resolvedPlan("v1.3.0", "abc"), result)
+	if err != nil || got == nil || result.Manifest.Plan == nil {
+		t.Fatalf("holdAndStamp = %v, %v; want the release stamped", got, err)
+	}
+}
