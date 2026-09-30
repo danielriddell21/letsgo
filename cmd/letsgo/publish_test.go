@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -15,21 +14,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 )
-
-// fakeTap is a tap that remembers which paths were written to it, without
-// caring what was sent.
-type fakeTap struct {
-	writes []string
-}
-
-func (f *fakeTap) ReadFile(_ context.Context, _ github.Repo, _ string) (*github.File, error) {
-	return nil, nil
-}
-
-func (f *fakeTap) WriteFile(_ context.Context, _ github.Repo, in github.FileInput) error {
-	f.writes = append(f.writes, in.Path)
-	return nil
-}
 
 func releasePlan() *plan.Plan {
 	return &plan.Plan{

@@ -1,6 +1,13 @@
 package publication
 
 import (
+	"context"
+	"errors"
+	"io"
+	"slices"
+	"strings"
+	"testing"
+
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
@@ -10,8 +17,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	plandiff "github.com/danielriddell21/letsgo/plan"
-	"slices"
-	"testing"
 )
 
 func TestTag(t *testing.T) {
@@ -22,6 +27,144 @@ func TestTag(t *testing.T) {
 	// call being rehearsed.
 	if got := Tag(&plan.Plan{Version: "1.2.3-next+abc"}); got != "v1.2.3-next+abc" {
 		t.Errorf("releaseTag = %q", got)
+	}
+}
+
+// fakeForge is a forge holding no releases that hands out one on request.
+type fakeForge struct {
+	created []github.ReleaseInput
+	err     error
+}
+
+func (f *fakeForge) ReleaseByTag(context.Context, github.Repo, string) (*github.Release, error) {
+	return nil, nil
+}
+
+func (f *fakeForge) CreateRelease(_ context.Context, _ github.Repo, in github.ReleaseInput) (*github.Release, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.created = append(f.created, in)
+	return &github.Release{ID: 7, TagName: in.TagName}, nil
+}
+
+func (f *fakeForge) UpdateRelease(context.Context, github.Repo, int64, github.ReleaseInput) (*github.Release, error) {
+	return nil, nil
+}
+
+func (f *fakeForge) Assets(context.Context, github.Repo, int64) ([]github.Asset, error) {
+	return nil, nil
+}
+
+func (f *fakeForge) DeleteAsset(context.Context, github.Repo, int64) error { return nil }
+
+func (f *fakeForge) UploadAsset(context.Context, github.Repo, int64, string, int64, io.Reader) (*github.Asset, error) {
+	return &github.Asset{}, nil
+}
+
+func publishFixture(t *testing.T) (Options, *fakeForge, *fakeTap) {
+	t.Helper()
+	forge, tap := &fakeForge{}, &fakeTap{}
+	o := diffFixture(t)
+	o.Forge, o.Tap = forge, tap
+	o.Snapshot = true
+	return o, forge, tap
+}
+
+func TestPublishCreatesTheReleaseThenWritesTheTap(t *testing.T) {
+	o, forge, tap := publishFixture(t)
+	var out strings.Builder
+	o.Out = &out
+
+	result, err := Publish(t.Context(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Forge == nil || !result.Forge.Created {
+		t.Errorf("Forge = %+v, want a created release", result.Forge)
+	}
+	if len(forge.created) != 1 || forge.created[0].TagName != "v1.2.3" {
+		t.Errorf("created = %+v, want one release for v1.2.3", forge.created)
+	}
+	if want := []string{"Formula/foo.rb", "Formula/foo@next.rb"}; !slices.Equal(tap.writes, want) {
+		t.Errorf("tap writes = %v, want %v", tap.writes, want)
+	}
+
+	// The tap names assets that exist only once the release is attached.
+	report, formula := strings.Index(out.String(), "uploaded 0, skipped 0"), strings.Index(out.String(), "Formula/foo.rb")
+	if report < 0 || formula < report {
+		t.Errorf("the release was not reported before the tap:\n%s", out.String())
+	}
+}
+
+func TestPublishStopsBeforeTheTapWhenTheForgeFails(t *testing.T) {
+	o, forge, tap := publishFixture(t)
+	forge.err = errors.New("forbidden")
+
+	if _, err := Publish(t.Context(), o); err == nil {
+		t.Fatal("a failed release went on to publish")
+	}
+	if len(tap.writes) != 0 {
+		t.Errorf("tap writes = %v after a failed release, want none", tap.writes)
+	}
+}
+
+func TestPublishHoldsBackTheTapForADraft(t *testing.T) {
+	o, forge, tap := publishFixture(t)
+	o.Plan.Config.Draft = true
+
+	if _, err := Publish(t.Context(), o); err != nil {
+		t.Fatal(err)
+	}
+	if len(forge.created) != 1 || !forge.created[0].Draft {
+		t.Errorf("created = %+v, want one draft", forge.created)
+	}
+	if len(tap.writes) != 0 {
+		t.Errorf("a draft wrote to the tap: %v", tap.writes)
+	}
+}
+
+func TestReportPublished(t *testing.T) {
+	var out strings.Builder
+	reportPublished(&out, &publish.Result{
+		Uploaded: []string{"a"}, Skipped: []string{"b", "c"}, Replaced: []string{"d"}, NotesRefused: true,
+	})
+
+	for _, want := range []string{"description could not be updated", "uploaded 1, skipped 2, replaced 1"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("report lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestDownstreamStopsWhenTheTapFails(t *testing.T) {
+	o, _, _ := publishFixture(t)
+	o.Tap = failingTap{}
+
+	if err := Downstream(t.Context(), o); err == nil {
+		t.Error("a tap that could not be read did not stop the publication")
+	}
+}
+
+func TestDownstreamPushesNothingForAnEmptyTapAndImageSet(t *testing.T) {
+	o, _, tap := publishFixture(t)
+	o.Plan.Tap = github.Repo{}
+
+	if err := Downstream(t.Context(), o); err != nil {
+		t.Fatal(err)
+	}
+	if len(tap.writes) != 0 {
+		t.Errorf("tap writes = %v with no tap configured", tap.writes)
+	}
+}
+
+func TestOptionsOutDiscardsWhenNil(t *testing.T) {
+	if got := (Options{}).out(); got != io.Discard {
+		t.Errorf("out() = %v, want io.Discard", got)
+	}
+	var b strings.Builder
+	if got := (Options{Out: &b}).out(); got != &b {
+		t.Error("out() did not return the writer it was given")
 	}
 }
 

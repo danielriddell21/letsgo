@@ -2,6 +2,11 @@ package publication
 
 import (
 	"context"
+	"errors"
+	"io"
+	"strings"
+	"testing"
+
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
@@ -10,9 +15,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	plandiff "github.com/danielriddell21/letsgo/plan"
-	"io"
-	"strings"
-	"testing"
 )
 
 // fakeTap is a tap that remembers which paths were written to it, without
@@ -28,6 +30,17 @@ func (f *fakeTap) ReadFile(_ context.Context, _ github.Repo, _ string) (*github.
 func (f *fakeTap) WriteFile(_ context.Context, _ github.Repo, in github.FileInput) error {
 	f.writes = append(f.writes, in.Path)
 	return nil
+}
+
+// failingTap is a tap that cannot be read.
+type failingTap struct{}
+
+func (failingTap) ReadFile(context.Context, github.Repo, string) (*github.File, error) {
+	return nil, errors.New("tap unreachable")
+}
+
+func (failingTap) WriteFile(context.Context, github.Repo, github.FileInput) error {
+	return errors.New("tap unreachable")
 }
 
 func releasePlan() *plan.Plan {
