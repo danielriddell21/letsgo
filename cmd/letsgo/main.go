@@ -537,6 +537,10 @@ func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error
 		return err
 	}
 
+	// After the plan is held to its file, which records the config's draft and
+	// not a flag given at apply time.
+	applyDraftFlag(p, a.draft)
+
 	// The tap gets its own client, so that the credential which can write to
 	// another repository need not be one that can also write to this one. They
 	// are the same client when no tap token is configured, which is what makes

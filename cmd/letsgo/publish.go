@@ -49,6 +49,15 @@ func releaseClientFor(client *github.Client, releaseToken, token string) *github
 	return splitClientFor(client, value, token)
 }
 
+// applyDraftFlag folds `release --draft` into the plan, so the tap and image
+// publishers, which read the plan, hold back for it the same way they do for
+// `draft = true` in the config.
+func applyDraftFlag(p *plan.Plan, draft bool) {
+	if draft {
+		p.Config.Draft = true
+	}
+}
+
 // publishTap writes a formula to the configured Homebrew tap, one per command
 // the module builds, plus that formula's @next: a stable release writes both,
 // a prerelease writes @next only.

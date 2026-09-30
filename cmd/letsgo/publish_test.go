@@ -88,6 +88,50 @@ func TestPublishTapWritesAFormulaForAStableRelease(t *testing.T) {
 	}
 }
 
+// `release --draft` must hold the tap back exactly as `draft = true` in the
+// config does: a formula pointing at a draft's assets resolves to a 404.
+func TestDraftFlagHoldsTheTapBack(t *testing.T) {
+	p := releasePlan()
+	p.Tap = github.Repo{Owner: "you", Name: "homebrew-tap"}
+	result := built(artifact("foo_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"))
+	tap := &fakeTap{}
+
+	applyDraftFlag(p, true)
+
+	if err := publishTap(context.Background(), p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(tap.writes) != 0 {
+		t.Errorf("a draft release wrote to the tap: %v", tap.writes)
+	}
+}
+
+func TestDraftFlagHoldsTheImagesBack(t *testing.T) {
+	p := releasePlan()
+	result := &release.Result{Images: []release.ImageBuild{{}}}
+
+	applyDraftFlag(p, true)
+
+	if !p.Config.Draft {
+		t.Fatal("the --draft flag did not reach the plan that publishTap and publishImages read")
+	}
+	// Reaches the draft guard before any registry call; a push would fail here.
+	if err := publishImages(context.Background(), p, result, "", false); err != nil {
+		t.Fatalf("a draft release tried to push its images: %v", err)
+	}
+}
+
+func TestNoDraftFlagLeavesAConfiguredDraftAlone(t *testing.T) {
+	p := releasePlan()
+	p.Config.Draft = true
+
+	applyDraftFlag(p, false)
+
+	if !p.Config.Draft {
+		t.Error("an absent --draft flag cleared draft = true from the config")
+	}
+}
+
 func TestFormulasGroupsByArchive(t *testing.T) {
 	// Two archives produce two formulas: a formula names one archive per
 	// platform, so alpha and beta cannot share one.
