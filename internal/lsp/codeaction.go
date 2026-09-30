@@ -101,6 +101,9 @@ func (s *Server) handleCodeAction(raw json.RawMessage) (any, error) {
 	var p struct {
 		TextDocument TextDocumentIdentifier `json:"textDocument"`
 		Range        Range                  `json:"range"`
+		Context      struct {
+			Diagnostics []Diagnostic `json:"diagnostics"`
+		} `json:"context"`
 	}
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("lsp: %w", err)
@@ -108,7 +111,11 @@ func (s *Server) handleCodeAction(raw json.RawMessage) (any, error) {
 
 	actions := []CodeAction{}
 	doc, ok := s.docs[p.TextDocument.URI]
-	if !ok || !s.updatable(p.TextDocument.URI) {
+	if !ok {
+		return actions, nil
+	}
+	actions = append(actions, didYouMeanActions(p.TextDocument.URI, doc.text, p.Context.Diagnostics)...)
+	if !s.updatable(p.TextDocument.URI) {
 		return actions, nil
 	}
 

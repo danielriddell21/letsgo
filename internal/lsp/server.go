@@ -143,11 +143,11 @@ func (s *Server) handleInitialize() (any, error) {
 		DocumentFormattingProvider: true,
 		DocumentSymbolProvider:     true,
 	}
-	if !s.opts.Restricted && s.opts.ResolvePin != nil {
-		caps.CodeActionProvider = &codeActionOptions{
-			CodeActionKinds: []string{codeActionQuickFix},
-			ResolveProvider: true,
-		}
+	// Did-you-mean fixes need no lookup, so code actions are always on; only
+	// the update-pin action resolves lazily, and only with a resolver.
+	caps.CodeActionProvider = &codeActionOptions{
+		CodeActionKinds: []string{codeActionQuickFix},
+		ResolveProvider: !s.opts.Restricted && s.opts.ResolvePin != nil,
 	}
 	return initializeResult{Capabilities: caps}, nil
 }
