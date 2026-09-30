@@ -77,58 +77,13 @@ letsgo verify v1.3.0   # rebuild it and check it against what was published
 
 ## Configuration
 
-`letsgo.mod` is only needed to depart from what letsgo derives. Optional
-behaviours are switched off with `disable` and made mandatory with `require`;
-`letsgo features` lists every name each directive accepts. Integrity features
-(the reproducible build, source archive, manifest, checksums) cannot be
-disabled, and every departure is recorded in the manifest and shown by
-`letsgo verify`.
-
-```
-disable sbom proxy-warm
-require vulncheck api-gate
-```
-
-A `require`d feature that cannot run fails the plan instead of skipping.
-
-Plugin configuration lives in `.letsgo/<plugin>.mod` (a legacy root-level
-`<command>.mod` is still read, with a warning). Machine settings that must not
-change what a release is — the Go and git to use, the build cache, the plugin
-store, the module proxy, a `token-command` credential helper — go in a global
-`config.mod` under the user config directory (or `$LETSGO_CONFIG`). It is
-checked separately, so a release directive there is an error rather than a
-silent difference between your laptop and CI.
-
-```
-update-check weekly
-```
-
-`update-check daily|weekly` is opt-in and off by default. When set, an
-interactive command prints one line to stderr once a newer stable release
-exists (``letsgo v1.4.0 is available (you have v1.3.0): run `letsgo update` ``).
-It never updates anything and makes at most one request per interval, which
-is remembered in the cache directory (so it follows `cache <dir>` and does
-not run with `cache off`). Network failures are silent, and so is everything
-in CI (`CI` set), when stderr is not a terminal, with `--json`, and for `lsp`,
-`update` and `version`.
-
-Plugins are installed into a content-addressed store keyed by the digest
-`letsgo.mod` pins, so different repositories can pin different versions on one
-machine. `letsgo plugin install` with no name installs every pin.
-
-## After a release
-
-The release body ends with a collapsed "what shipped" section comparing the
-manifest against the previous release: size changes, dependency bumps and
-toolchain changes (`disable diff-notes` removes it). `letsgo diff` renders the
-same comparison for any two releases.
-
-Before any asset is attached, letsgo primes the module proxy and checks that
-`sum.golang.org` agrees with the source archive it built (`disable sumdb` skips
-this; `require sumdb` makes an unreachable database fatal). Later, `letsgo audit`
-re-runs `govulncheck` against a published release's own source and records the
-result in `audit.json` on that release, which `letsgo verify` prints. An
-immutable release cannot take the extra asset, so it is skipped with a note.
+`letsgo.mod` is only needed to depart from what letsgo derives — optional
+behaviours switched off with `disable`, made mandatory with `require`, plugins
+pinned by digest, a Homebrew tap or container image turned on. Machine
+settings that must not change what a release is — the Go and git to use, the
+build cache, an opt-in `update-check` notice — go in a separate global
+`config.mod` instead. See [Configuration][], [Features][] and
+[Global config][] in the wiki.
 
 ## In GitHub Actions
 
@@ -144,10 +99,8 @@ immutable release cannot take the extra asset, so it is skipped with a note.
 
 Go is a prerequisite rather than something the action installs: the Go version
 changes the bytes you ship, so choosing it belongs to the workflow that knows
-which one the project releases with. The action installs the latest letsgo by
-default; pin `version:` to a tag when the release has to be reproducible.
-
-[action]: https://github.com/danielriddell21/letsgo-action
+which one the project releases with. See [GitHub Action][] for inputs,
+outputs, permissions and approval-gated releases.
 
 ## Agreeing a release before making it
 
@@ -157,71 +110,22 @@ letsgo apply release.plan        # rebuild, refuse unless it matches the plan, t
 ```
 
 The plan holds digests, not bytes. `apply` rebuilds and compares the manifest
-before any write, and stops naming the fields that differ, so a changed
-toolchain or dependency between the two steps is caught. `letsgo plan --diff
---exit-code` exits 2 when a release would change anything, for a scheduled
-drift check.
+before any write, so a changed toolchain or dependency between the two steps is
+caught before anything is published. See [Plan and apply][] for the plan
+format, yank plans and an approval-gated release in CI.
 
-`letsgo apply` with no file makes that plan itself, shows it, and asks
-`Apply? [y/N]` before publishing exactly what it showed. With no terminal to
-ask on it needs `-auto-approve`, and otherwise stops before building anything.
+## After a release
 
-A retraction is planned the same way: `letsgo plan -yank v1.3.0 -out y.plan`
-lists the release marking, the `go.mod` directive and the tap rollbacks, and
-`letsgo apply y.plan` does exactly those, or stops if the forge or `go.mod` has
-moved since.
-
-`letsgo plan --format md` writes the diff as Markdown for a job summary: a
-heading, the changes in a `diff` block with `+`, `-` and `!` in column 0 so
-GitHub colours them, and a footer counting what is added, changed, removed and
-left alone. Only the Markdown goes to standard output, so
-`letsgo plan --format md >> "$GITHUB_STEP_SUMMARY"` needs no filtering; the
-rest of the report goes to standard error. The saved plan file's types are the
-public `github.com/danielriddell21/letsgo/plan` package, for tools that read
-one.
-
-## Promoting a prerelease
-
-`letsgo promote v1.3.0-rc.1` rebuilds an RC at its own commit and publishes it
-as `v1.3.0`: the RC release stays, restored to a prerelease, and the new
-release records which RC it was promoted from. Nothing about the RC's tag,
-assets or notes changes.
-
-Flipping an RC from pre-release to release in the GitHub UI fires
-`release: released`, which a workflow can turn into a promotion:
-
-```yaml
-on:
-  release:
-    types: [released]
-
-jobs:
-  promote:
-    # released also fires for ordinary stable releases; only a prerelease tag promotes.
-    if: contains(github.event.release.tag_name, '-')
-    runs-on: ubuntu-latest
-    permissions: { contents: write, id-token: write, attestations: write }
-    steps:
-      - uses: actions/checkout@v7
-        with: { ref: '${{ github.event.release.tag_name }}', fetch-tags: true }
-      - uses: actions/setup-go@v7
-        with: { go-version-file: go.mod }
-      - uses: danielriddell21/letsgo-action@v1
-        with:
-          command: promote
-          args: ${{ github.event.release.tag_name }}
-```
-
-Editing the release with the default `GITHUB_TOKEN` doesn't start workflows;
-use an App token if the flip should trigger this one automatically. Either
-way a re-trigger is a no-op: promote refuses once `v1.3.0` already exists.
+The release body ends with a collapsed "what shipped" section comparing the
+manifest against the previous release, `letsgo audit` re-checks a shipped
+release against today's vulnerability database, and `letsgo promote` turns a
+prerelease into the stable release it was rehearsing. See [What shipped][],
+[Audit][] and [Prereleases][].
 
 ## Self-update
 
 Any binary released with letsgo gets verified self-update for the cost of an
-import. The release manifest records each archive's digest and the digest of
-the binary inside it, so the updater checks what it downloaded twice and
-refuses anything that does not match:
+import:
 
 ```go
 update, err := selfupdate.Check(ctx, selfupdate.Options{
@@ -235,13 +139,25 @@ return update.Apply(ctx)
 ```
 
 Nothing is written until `Apply`, so a program can offer the update rather than
-take it. `letsgo update` is the same package, pointed at letsgo.
+take it. `letsgo update` is the same package, pointed at letsgo — see
+[Self-update][].
 
 ## Documentation
 
-Full documentation lives in the [letsgo wiki](https://github.com/danielriddell21/letsgo/wiki) —
-the commands, the config format, the reproducibility guarantee, publishing to
-Homebrew and container registries, [plugins][], the [GitHub Action][action],
-migrating from GoReleaser, and the design rationale behind all of it.
+Full documentation lives in the [letsgo wiki][wiki]: every command, monorepo
+releases, global config, editor support, publishing to Homebrew and container
+registries, [plugins][], the [GitHub Action][action], migrating from
+GoReleaser, and the design rationale behind all of it.
 
+[wiki]: https://github.com/danielriddell21/letsgo/wiki
+[action]: https://github.com/danielriddell21/letsgo-action
 [plugins]: https://github.com/danielriddell21/letsgo/wiki/Plugins
+[Configuration]: https://github.com/danielriddell21/letsgo/wiki/Configuration
+[Features]: https://github.com/danielriddell21/letsgo/wiki/Features
+[Global config]: https://github.com/danielriddell21/letsgo/wiki/Global-Config
+[GitHub Action]: https://github.com/danielriddell21/letsgo/wiki/GitHub-Action
+[Plan and apply]: https://github.com/danielriddell21/letsgo/wiki/Plan-Apply
+[What shipped]: https://github.com/danielriddell21/letsgo/wiki/What-Shipped
+[Audit]: https://github.com/danielriddell21/letsgo/wiki/Audit
+[Prereleases]: https://github.com/danielriddell21/letsgo/wiki/Prereleases
+[Self-update]: https://github.com/danielriddell21/letsgo/wiki/Self-update
