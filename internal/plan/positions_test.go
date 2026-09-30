@@ -64,3 +64,36 @@ func checkNames(p *plan.Plan) string {
 	}
 	return strings.Join(names, ", ")
 }
+
+// A plugin that lives in the checkout can be changed by the checkout, so the
+// plan says so; the pin's digest is the only thing keeping it honest.
+func TestRelativePluginPathWarns(t *testing.T) {
+	digest := strings.Repeat("a", 64)
+
+	for _, tt := range []struct {
+		command string
+		warns   bool
+	}{
+		{"./tools/mine", true},
+		{"tools/mine", true},
+		{"letsgo-mine", false},
+		{"/usr/local/bin/letsgo-mine", false},
+	} {
+		t.Run(tt.command, func(t *testing.T) {
+			p := resolveWithMod(t, "build linux/amd64\nplugin ldflags "+tt.command+" v1.0.0 sha256:"+digest+"\n")
+
+			var warned *plan.Check
+			for i, c := range p.Checks {
+				if c.Name == "plugins" && c.Status == plan.Warn && strings.Contains(c.Detail, "inside the repository") {
+					warned = &p.Checks[i]
+				}
+			}
+			if got := warned != nil; got != tt.warns {
+				t.Fatalf("warned = %v, want %v; checks: %s", got, tt.warns, checkNames(p))
+			}
+			if warned != nil && (warned.Pos == nil || warned.Pos.Line != 2) {
+				t.Errorf("warning pos = %+v, want line 2", warned.Pos)
+			}
+		})
+	}
+}
