@@ -1,9 +1,16 @@
 # ADR-0003: Plugin logic moves into letsgo; plugins stay as separate pinned binaries
 
-- Status: accepted
+- Status: accepted, partially amended by [ADR-0023](0023-plugins-share-cores-wire-contract.md)
 - Date: 2026-09-24
 - Issue: [#25](https://github.com/danielriddell21/letsgo/issues/25)
 - HLD: [hld/integrated-plugins.md](../hld/integrated-plugins.md)
+
+> The first bullet under Decision below — exporting `letsgo/plugins/{multi,env,cask}`
+> so each plugin's own logic moves into core — did not happen and per
+> [ADR-0023](0023-plugins-share-cores-wire-contract.md) now won't: plugins keep
+> their logic in letsgo-plugins and call core's exported helpers directly.
+> Everything else here (the `letsgo/plugin` SDK, plugins remaining separate
+> pinned binaries, core's first-party catalogue) still stands.
 
 ## Context
 
