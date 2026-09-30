@@ -81,6 +81,13 @@ func (t *tapObserver) ReadFile(ctx context.Context, repo github.Repo, path strin
 	if err != nil {
 		return nil, err
 	}
+	// Publishing a file may read it more than once, to decide and then to
+	// write; it is one target however often it is looked at.
+	for _, earlier := range t.read {
+		if earlier.path == path {
+			return file, nil
+		}
+	}
 	seen := &observedFile{path: path}
 	if file != nil {
 		seen.observed = blobFingerprint(file.Content)
