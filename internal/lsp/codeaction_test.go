@@ -185,3 +185,71 @@ func TestCodeActionResolveLeavesAStaleOrForeignActionAlone(t *testing.T) {
 		}
 	}
 }
+
+func didYouMeanActions(t *testing.T, c *client, uri string, diagnostics []map[string]any) []lsp.CodeAction {
+	t.Helper()
+	raw := c.request("textDocument/codeAction", map[string]any{
+		"textDocument": map[string]any{"uri": uri},
+		"range":        map[string]any{"start": map[string]any{"line": 0, "character": 0}, "end": map[string]any{"line": 0, "character": 5}},
+		"context":      map[string]any{"diagnostics": diagnostics},
+	})
+	var actions []lsp.CodeAction
+	if err := json.Unmarshal(raw, &actions); err != nil {
+		t.Fatal(err)
+	}
+	return actions
+}
+
+func TestCodeActionFixesAMisspelledDirectiveEvenWhenRestricted(t *testing.T) {
+	c, uri := pinEditor(t, lsp.Options{Restricted: true}, "letsgo.mod", "bulid linux/amd64\n")
+
+	actions := didYouMeanActions(t, c, uri, []map[string]any{diagnosticAt(0, 0, `unknown directive "bulid"; did you mean "build"?`)})
+	if len(actions) != 1 || actions[0].Title != "Change bulid to build" || actions[0].Edit == nil {
+		t.Fatalf("actions = %+v, want one did-you-mean fix", actions)
+	}
+	want := lsp.TextEdit{
+		Range:   lsp.Range{Start: lsp.Position{Line: 0, Character: 0}, End: lsp.Position{Line: 0, Character: 5}},
+		NewText: "build",
+	}
+	if edits := actions[0].Edit.Changes[uri]; len(edits) != 1 || edits[0] != want {
+		t.Errorf("edits = %+v, want [%+v]", edits, want)
+	}
+}
+
+func TestCodeActionFixesAMisspelledFeatureName(t *testing.T) {
+	c, uri := pinEditor(t, lsp.Options{}, "letsgo.mod", "disable chnagelog\n")
+
+	actions := didYouMeanActions(t, c, uri, []map[string]any{diagnosticAt(0, 8, `unknown feature "chnagelog"; did you mean "changelog"?`)})
+	if len(actions) != 1 || actions[0].Edit == nil {
+		t.Fatalf("actions = %+v, want one fix", actions)
+	}
+	edit := actions[0].Edit.Changes[uri][0]
+	if edit.Range.Start.Character != 8 || edit.Range.End.Character != 17 || edit.NewText != "changelog" {
+		t.Errorf("edit = %+v", edit)
+	}
+}
+
+func TestCodeActionIgnoresDiagnosticsWithoutASuggestion(t *testing.T) {
+	c, uri := pinEditor(t, lsp.Options{}, "letsgo.mod", "bulid linux/amd64\n")
+
+	for name, d := range map[string]map[string]any{
+		"no suggestion": diagnosticAt(0, 0, "something else"),
+		"line gone":     diagnosticAt(9, 0, `unknown directive "bulid"; did you mean "build"?`),
+		"text changed":  diagnosticAt(0, 0, `unknown directive "zzz"; did you mean "build"?`),
+	} {
+		if actions := didYouMeanActions(t, c, uri, []map[string]any{d}); len(actions) != 0 {
+			t.Errorf("%s: actions = %+v, want none", name, actions)
+		}
+	}
+}
+
+// diagnosticAt is a client-supplied diagnostic starting at line, col.
+func diagnosticAt(line, col int, message string) map[string]any {
+	return map[string]any{
+		"range": map[string]any{
+			"start": map[string]any{"line": line, "character": col},
+			"end":   map[string]any{"line": line, "character": col + 1},
+		},
+		"message": message,
+	}
+}
