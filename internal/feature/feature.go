@@ -103,6 +103,10 @@ var All = []Feature{
 		Summary: "an incompatible API change needs a major version bump",
 	},
 	{
+		Name: "sumdb", Kind: Gate, Default: true, Disable: true, Require: true,
+		Summary: "sum.golang.org must agree with the source archive before assets are published",
+	},
+	{
 		Name: "budget", Kind: Gate, Default: false, Enable: "budget",
 		Summary: "an artifact over its configured size fails the release",
 	},
@@ -126,7 +130,7 @@ var All = []Feature{
 
 	{
 		Name: "proxy-warm", Kind: Publish, Default: true, Disable: true,
-		Summary: "proxy.golang.org is primed after publishing",
+		Summary: "proxy.golang.org is primed before the release is published",
 	},
 	{
 		Name: "brew", Kind: Publish, Default: false, Enable: "brew",

@@ -356,6 +356,12 @@ func runRelease(args []string) error {
 		forge, tapAPI = recorder, recorder
 	}
 
+	// Before anything is attached: a disagreement with sum.golang.org must
+	// stop the release, not annotate one that is already public.
+	if err := warmProxyAndCheckSumdb(ctx, p, dir, result, *snapshot, *draft || p.Config.Draft); err != nil {
+		return err
+	}
+
 	published, err := publish.Run(ctx, publish.Options{
 		Client: forge,
 		Repo:   repo,
@@ -388,10 +394,6 @@ func runRelease(args []string) error {
 	}
 
 	if err := publishImages(ctx, p, result, tokenValue, *snapshot); err != nil {
-		return err
-	}
-
-	if err := warmProxyAndCheckSumdb(ctx, p, dir, result, *snapshot, published.Release.Draft); err != nil {
 		return err
 	}
 
@@ -500,19 +502,17 @@ func warmProxy(ctx context.Context, p *plan.Plan) {
 }
 
 // warmProxyAndCheckSumdb primes the module proxy, then cross-checks
-// sum.golang.org and the proxy against the published source archive — on
-// every non-snapshot, non-draft, non-scoped release. The sumdb check still
-// runs with proxy-warm disabled, so it can report its own skip reason
-// (SD-7) rather than going silent along with the warm.
+// sum.golang.org and the proxy against the built source archive — on every
+// non-snapshot, non-draft, non-scoped release, before any asset is attached.
+// The tag is already pushed, which is all the proxy needs.
 func warmProxyAndCheckSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.Result, snapshot, draft bool) error {
 	if snapshot || draft || p.Config.ModuleDir != "" {
 		return nil
 	}
-	proxyWarmOn := p.Features.On("proxy-warm")
-	if proxyWarmOn {
+	if p.Features.On("proxy-warm") {
 		warmProxy(ctx, p)
 	}
-	return checkSumdb(ctx, p, dir, result, !proxyWarmOn)
+	return checkSumdb(ctx, p, dir, result)
 }
 
 func runVerify(args []string) error {

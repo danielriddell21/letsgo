@@ -38,6 +38,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/semver"
+	"github.com/danielriddell21/letsgo/internal/sumdb"
 )
 
 // ConfigFile is the optional configuration file letsgo reads.
@@ -826,6 +827,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 
 	if opts.Publish {
 		p.checkForge(ctx, opts)
+		p.checkSumdb()
 	}
 	if opts.Analyse {
 		p.checkVulnerabilities(ctx, opts)
@@ -2260,4 +2262,32 @@ func summarise(targets []gobuild.Target) string {
 		names[i] = t.String()
 	}
 	return strings.Join(names, ", ")
+}
+
+// sumdbCheck is the check name checkSumdb reports under, and sumdbGate the
+// feature behind it.
+const (
+	sumdbCheck = "sumdb"
+	sumdbGate  = "sumdb"
+)
+
+// checkSumdb records why the sum.golang.org cross-check will not run, so a
+// required sumdb turns that into a Fail. Nothing is added when it will run:
+// the check itself happens during release, after the module proxy has been
+// primed and before any asset is attached.
+func (p *Plan) checkSumdb() {
+	switch {
+	case !p.Features.On(sumdbGate):
+		p.add(sumdbCheck, Skip, "disabled by config")
+	case p.Snapshot || p.Tag == "":
+		p.skip(sumdbCheck, sumdbGate, "not a tagged release")
+	case p.Config.ModuleDir != "":
+		p.skip(sumdbCheck, sumdbGate, "the module is not at the repository root")
+	case !p.Features.On("proxy-warm"):
+		p.skip(sumdbCheck, sumdbGate, "proxy-warm is disabled, so sum.golang.org has no record to compare")
+	default:
+		if skip, reason := sumdb.PrivateModule(p.Module.Path); skip {
+			p.skip(sumdbCheck, sumdbGate, "private module (%s)", reason)
+		}
+	}
 }

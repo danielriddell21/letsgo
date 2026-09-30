@@ -174,3 +174,47 @@ func TestInstallScriptHasNoCheckWithoutRequire(t *testing.T) {
 		}
 	}
 }
+
+// The sumdb cross-check happens during release, so the plan only speaks up
+// when it will not run: a Skip, or a Fail once sumdb is required.
+func TestSumdbCheckReportsWhyItWillNotRun(t *testing.T) {
+	tests := []struct {
+		name   string
+		config string
+		env    string
+		want   plan.Status
+	}{
+		{"disabled", "disable sumdb\n", "", plan.Skip},
+		{"proxy warm off", "disable proxy-warm\n", "", plan.Skip},
+		{"proxy warm off but required", "disable proxy-warm\nrequire sumdb\n", "", plan.Fail},
+		{"private module", "", "github.com/you/*", plan.Skip},
+		{"private module but required", "require sumdb\n", "github.com/you/*", plan.Fail},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GOPRIVATE", tt.env)
+			t.Setenv("GONOSUMDB", "")
+			t.Setenv("GONOSUMCHECK", "")
+			r := minimalRepo(t, tt.config)
+			p := r.resolve(plan.Options{Publish: true})
+
+			if got := check(t, p, "sumdb"); got.Status != tt.want {
+				t.Errorf("sumdb = %+v, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSumdbCheckIsSilentWhenItWillRun(t *testing.T) {
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GONOSUMDB", "")
+	t.Setenv("GONOSUMCHECK", "")
+	r := minimalRepo(t, "")
+	p := r.resolve(plan.Options{Publish: true})
+
+	for _, c := range p.Checks {
+		if c.Name == "sumdb" {
+			t.Fatalf("unexpected sumdb check: %+v", c)
+		}
+	}
+}

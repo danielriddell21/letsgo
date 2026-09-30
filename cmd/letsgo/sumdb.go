@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/release"
@@ -12,16 +13,22 @@ import (
 
 // checkSumdb cross-checks the just-published release's source archive
 // against sum.golang.org and the module proxy (SD-1 through SD-5), unless
-// skipped for a private module or a disabled proxy warm (SD-7).
+// skipped for a private module, a disabled proxy warm (SD-7) or `disable
+// sumdb`.
 //
-// Best effort like warmProxy, except a mismatch is an alarm rather than a
-// warning: the release is already public, so this exits non-zero to catch
-// attention (in CI, most likely) rather than silently continuing.
-func checkSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.Result, proxyWarmDisabled bool) error {
-	if proxyWarmDisabled {
+// A gate: a mismatch fails the release before any asset is attached. Not
+// being able to check is only a warning, unless `require sumdb` says a
+// release nobody could check must not go out.
+func checkSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.Result) error {
+	if !p.Features.On("sumdb") {
+		fmt.Println("  · skipped sum.golang.org check: disabled by config")
+		return nil
+	}
+	if !p.Features.On("proxy-warm") {
 		fmt.Println("  · skipped sum.golang.org check: proxy warm is disabled")
 		return nil
 	}
+	required := slices.Contains(p.Required, "sumdb")
 	if skip, reason := sumdb.PrivateModule(p.Module.Path); skip {
 		fmt.Printf("  · skipped sum.golang.org check: private module (%s)\n", reason)
 		return nil
@@ -31,6 +38,9 @@ func checkSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.R
 
 	r, err := sumdb.Check(ctx, sumdb.DefaultURL, p.Proxy, p.Module.Path, p.Version, archivePath)
 	if err != nil {
+		if required {
+			return fmt.Errorf("sumdb: could not check sum.golang.org: %w", err)
+		}
 		fmt.Printf("  ! could not check sum.golang.org: %v\n", err)
 		return nil
 	}
@@ -39,6 +49,9 @@ func checkSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.R
 		fmt.Printf("  ! sum.golang.org has no record for %s@%s yet\n", p.Module.Path, p.Version)
 		fmt.Printf("    check again in a few minutes, or manually: curl %s/lookup/%s@%s\n",
 			sumdb.DefaultURL, p.Module.Path, p.Version)
+		if required {
+			return fmt.Errorf("sumdb: no record for %s yet", p.Tag)
+		}
 		return nil
 	}
 
@@ -57,6 +70,6 @@ func checkSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.R
 	for _, name := range r.Missing {
 		fmt.Printf("    missing: %s\n", name)
 	}
-	fmt.Printf("    consider `letsgo yank %s`\n", p.Tag)
-	return fmt.Errorf("sumdb: %s does not match the published source archive", p.Tag)
+	fmt.Println("    nothing was published; the tag is pushed and the proxy holds it")
+	return fmt.Errorf("sumdb: %s does not match the built source archive", p.Tag)
 }
