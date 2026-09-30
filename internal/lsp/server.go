@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 )
 
 // Options configure a Server.
@@ -41,6 +42,7 @@ type Server struct {
 	conn         *conn
 	docs         map[string]*document
 	shuttingDown bool
+	canRename    bool // the client said a workspace edit may rename files
 }
 
 // NewServer builds a Server reading requests from r and writing responses
@@ -107,7 +109,7 @@ func (s *Server) dispatch(ctx context.Context, req request) error {
 func (s *Server) handle(ctx context.Context, req request) (any, error) {
 	switch req.Method {
 	case "initialize":
-		return s.handleInitialize()
+		return s.handleInitialize(req.Params)
 	case "initialized":
 		return nil, nil
 	case "shutdown":
@@ -139,7 +141,20 @@ func (s *Server) handle(ctx context.Context, req request) (any, error) {
 	}
 }
 
-func (s *Server) handleInitialize() (any, error) {
+func (s *Server) handleInitialize(raw json.RawMessage) (any, error) {
+	var p struct {
+		Capabilities struct {
+			Workspace struct {
+				WorkspaceEdit struct {
+					ResourceOperations []string `json:"resourceOperations"`
+				} `json:"workspaceEdit"`
+			} `json:"workspace"`
+		} `json:"capabilities"`
+	}
+	// Params a client sends malformed just mean it offered no capabilities.
+	_ = json.Unmarshal(raw, &p)
+	s.canRename = slices.Contains(p.Capabilities.Workspace.WorkspaceEdit.ResourceOperations, "rename")
+
 	caps := serverCapabilities{
 		TextDocumentSync:           textDocumentSyncKindFull,
 		CompletionProvider:         &struct{}{},

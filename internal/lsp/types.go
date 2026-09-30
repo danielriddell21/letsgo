@@ -160,8 +160,11 @@ type Command struct {
 	Arguments []any  `json:"arguments,omitempty"`
 }
 
+// WorkspaceEdit is either text edits by document (Changes) or, for an edit
+// that also moves files, an ordered list of operations (DocumentChanges).
 type WorkspaceEdit struct {
-	Changes map[string][]TextEdit `json:"changes"`
+	Changes         map[string][]TextEdit `json:"changes,omitempty"`
+	DocumentChanges []any                 `json:"documentChanges,omitempty"`
 }
 
 type showMessageParams struct {
