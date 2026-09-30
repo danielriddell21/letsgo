@@ -205,17 +205,7 @@ func ensureRelease(ctx context.Context, o Options, result *Result, logf func(str
 	}
 
 	input := o.Release
-	if o.Notes == NotesAppend {
-		switch {
-		case strings.TrimSpace(o.Release.Body) == "":
-			// Nothing was generated: appending nothing must leave the
-			// existing description exactly as it is, not blank it.
-			input.Body = existing.Body
-		case strings.TrimSpace(existing.Body) != "":
-			input.Body = strings.TrimRight(existing.Body, "\n") + "\n\n" + o.Release.Body
-			result.AppendedNotes = true
-		}
-	}
+	input.Body, result.AppendedNotes = notesFor(existing, o)
 
 	updated, err := o.Client.UpdateRelease(ctx, o.Repo, existing.ID, input)
 	switch {
@@ -237,6 +227,24 @@ func ensureRelease(ctx context.Context, o Options, result *Result, logf func(str
 		return err
 	}
 	return nil
+}
+
+// notesFor is the description an existing release ends up with, and whether
+// the generated notes were added after ones already there.
+func notesFor(existing *github.Release, o Options) (body string, appended bool) {
+	body = o.Release.Body
+	if o.Notes != NotesAppend {
+		return body, false
+	}
+	switch {
+	case strings.TrimSpace(o.Release.Body) == "":
+		// Nothing was generated: appending nothing must leave the existing
+		// description exactly as it is, not blank it.
+		return existing.Body, false
+	case strings.TrimSpace(existing.Body) != "":
+		return strings.TrimRight(existing.Body, "\n") + "\n\n" + o.Release.Body, true
+	}
+	return body, false
 }
 
 func upload(ctx context.Context, o Options, releaseID int64, name, path string, size int64) error {

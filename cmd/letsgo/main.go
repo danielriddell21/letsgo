@@ -44,7 +44,7 @@ var version = "dev"
 const usage = `letsgo builds and publishes Go releases.
 
 usage:
-  letsgo plan [--explain] [--json] [--publish]  resolve and check a release without performing one
+  letsgo plan [--explain] [--json] [--publish] [--diff]  resolve and check a release without performing one
   letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
   letsgo release [--draft] [-o dir]      build and publish, resumably
   letsgo release --snapshot              rehearse a release without publishing
@@ -200,20 +200,27 @@ func runPlan(args []string) error {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)
 	explain := fs.Bool("explain", false, "show where each resolved value came from")
 	jsonOutput := fs.Bool("json", false, "print the plan as JSON")
+	diff := fs.Bool("diff", false, "also build, read the forge, and show what a release would change there")
 	snapshot := fs.Bool("snapshot", false, "plan an untagged working version")
 	allowDirty := fs.Bool("allow-dirty", false, "permit an unclean worktree")
 	publishGates := fs.Bool("publish", false, "also check the gates a release needs: a forge, and a token that may write to it")
 	analyse := fs.Bool("analyse", false, "also run the slower analysis gates, as a release does")
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	tapToken := fs.String("tap-token", "", tapTokenUsage)
+	releaseToken := fs.String("release-token", "", releaseTokenUsage)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 
+	if *diff && *jsonOutput {
+		return errors.New("letsgo: --diff has no JSON form yet")
+	}
+
+	ctx := context.Background()
 	started := time.Now()
-	p, err := plan.Resolve(context.Background(), plan.Options{
+	p, err := plan.Resolve(ctx, plan.Options{
 		Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty,
-		Publish: *publishGates, Token: *token, TapToken: *tapToken, Analyse: *analyse,
+		Publish: *publishGates, Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken, Analyse: *analyse,
 	})
 	if err != nil {
 		return err
@@ -237,6 +244,13 @@ func runPlan(args []string) error {
 	if !p.OK() {
 		fmt.Printf("\n  plan failed in %s · nothing was built\n", elapsed)
 		return errPlanFailed
+	}
+	if *diff {
+		if err := planDiff(ctx, p, *token, *tapToken, *releaseToken); err != nil {
+			return err
+		}
+		fmt.Printf("\n  plan ok in %s · run `letsgo release` to apply it\n", took(started))
+		return nil
 	}
 	fmt.Printf("\n  plan ok in %s · run `letsgo build` to produce artifacts\n", elapsed)
 	return nil
@@ -371,26 +385,13 @@ func runRelease(args []string) error {
 		return err
 	}
 
-	published, err := publish.Run(ctx, publish.Options{
-		Client: forge,
-		Repo:   repo,
-		Dir:    dir,
-		Files:  result.Files,
-		Sums:   sumsFrom(result),
-		Notes:  notesMode(*appendNotes, p.Features.On("changelog")),
-		Release: github.ReleaseInput{
-			TagName:         releaseTag(p),
-			Name:            releaseTitle(p),
-			Body:            notes,
-			Draft:           *draft || p.Config.Draft,
-			Prerelease:      isPrerelease(p),
-			MakeLatest:      isLatest(p),
-			TargetCommitish: p.Git.Commit,
-		},
+	published, err := publish.Run(ctx, releaseOptions(p, releaseRun{
+		Forge: forge, Repo: repo, Dir: dir, Result: result, Notes: notes,
+		Draft: *draft || p.Config.Draft, Append: *appendNotes,
 		Logf: func(format string, args ...any) {
 			fmt.Printf("  "+format+"\n", args...)
 		},
-	})
+	}))
 	if err != nil {
 		return err
 	}
@@ -413,6 +414,42 @@ func runRelease(args []string) error {
 
 	fmt.Printf("\n  released in %s\n  %s\n", took(started), published.Release.HTMLURL)
 	return nil
+}
+
+// releaseRun is everything publishing a release depends on beyond the plan.
+type releaseRun struct {
+	Forge  publish.Forge
+	Repo   github.Repo
+	Dir    string
+	Result *release.Result
+	Notes  string
+	Draft  bool
+	Append bool
+	Logf   func(format string, args ...any)
+}
+
+// releaseOptions is the publication of a release, decided once so that what
+// `letsgo release` does and what `letsgo plan --diff` predicts it will do
+// cannot drift apart.
+func releaseOptions(p *plan.Plan, r releaseRun) publish.Options {
+	return publish.Options{
+		Client: r.Forge,
+		Repo:   r.Repo,
+		Dir:    r.Dir,
+		Files:  r.Result.Files,
+		Sums:   sumsFrom(r.Result),
+		Notes:  notesMode(r.Append, p.Features.On("changelog")),
+		Release: github.ReleaseInput{
+			TagName:         releaseTag(p),
+			Name:            releaseTitle(p),
+			Body:            r.Notes,
+			Draft:           r.Draft,
+			Prerelease:      isPrerelease(p),
+			MakeLatest:      isLatest(p),
+			TargetCommitish: p.Git.Commit,
+		},
+		Logf: r.Logf,
+	}
 }
 
 // planBuildOptions describes the resolve-report-build sequence both `letsgo
