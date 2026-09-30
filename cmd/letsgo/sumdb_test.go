@@ -76,7 +76,7 @@ func TestCheckSumdbTreatsAnUnreachableDatabaseAsAWarningUnlessRequired(t *testin
 // A snapshot, a draft and a `module <dir>` release never reach the network:
 // there is nothing public to compare against.
 func TestWarmProxyAndCheckSumdbSkipsWhatIsNotPublic(t *testing.T) {
-	p := &plan.Plan{Features: feature.Resolve([]string{"proxy-warm", "sumdb"})}
+	p := &plan.Plan{Config: &config.Config{}, Features: feature.Resolve([]string{"proxy-warm", "sumdb"})}
 	scoped := &plan.Plan{Config: &config.Config{ModuleDir: "web"}}
 
 	tests := map[string]struct {
