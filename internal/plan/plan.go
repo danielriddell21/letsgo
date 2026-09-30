@@ -1016,6 +1016,12 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 		p.add(apiCompatibility, Skip, "disabled by config")
 		return
 	}
+	// Nothing importable is a fact about the module, not a gap in the release,
+	// so it stays a Skip even when the gate is required.
+	if importable, err := gate.Importable(ctx, p.Module.Dir); err == nil && !importable {
+		p.add(apiCompatibility, Skip, "%v", gate.ErrNothingExported)
+		return
+	}
 	if p.Tag == "" {
 		p.skip(apiCompatibility, apiGate, "not a tagged release")
 		return
