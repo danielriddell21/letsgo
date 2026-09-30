@@ -175,12 +175,91 @@ func TestExitCodeTellsDriftFromFailure(t *testing.T) {
 	}
 }
 
-func TestRunApplyNeedsAPlanFile(t *testing.T) {
-	if err := runApply(nil); err == nil || !strings.Contains(err.Error(), "plan file") {
-		t.Errorf("runApply() = %v, want an error asking for a plan file", err)
-	}
+func TestRunApplyRejectsWhatItCannotApply(t *testing.T) {
 	if err := runApply([]string{filepath.Join(t.TempDir(), "absent")}); err == nil {
 		t.Error("runApply accepted a missing file")
+	}
+	if err := runApply([]string{"a.plan", "b.plan"}); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Errorf("runApply with two files = %v, want usage", err)
+	}
+}
+
+// answeringStdin makes standard input a terminal that answers with reply.
+func answeringStdin(t *testing.T, reply string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString(reply); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	stdin, terminal := os.Stdin, stdinIsTerminal
+	t.Cleanup(func() { os.Stdin, stdinIsTerminal = stdin, terminal; r.Close() })
+	os.Stdin, stdinIsTerminal = r, func() bool { return true }
+}
+
+func TestApplyWithNoFileNeedsATerminalOrAutoApprove(t *testing.T) {
+	terminal := stdinIsTerminal
+	t.Cleanup(func() { stdinIsTerminal = terminal })
+	stdinIsTerminal = func() bool { return false }
+
+	// Nothing is planned, let alone built: the question is settled first.
+	t.Chdir(t.TempDir())
+	out := captureStdout(t, func() {
+		err := runApply(nil)
+		if err == nil || !strings.Contains(err.Error(), "-auto-approve") {
+			t.Errorf("runApply() = %v, want a request for -auto-approve", err)
+		}
+	})
+	if out != "" {
+		t.Errorf("apply printed before refusing:\n%s", out)
+	}
+}
+
+func TestApplyWithNoFileShowsThePlanAndStopsOnNo(t *testing.T) {
+	writableForge(t)
+	t.Chdir(moduleFixture(t))
+	answeringStdin(t, "n\n")
+
+	var err error
+	out := captureStdout(t, func() { err = runApply(nil) })
+	if err != nil {
+		t.Fatalf("runApply() = %v\n%s", err, out)
+	}
+	for _, want := range []string{"+ release", "to add", "Apply? [y/N]", "nothing was published"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "applying ") {
+		t.Errorf("a declined apply went on to apply:\n%s", out)
+	}
+}
+
+func TestApplyWithNoFileAppliesThePlanItShowedOnYes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args  []string
+		reply string
+	}{
+		"yes at the prompt": {nil, "y\n"},
+		"auto-approve":      {[]string{"-auto-approve"}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			writableForge(t)
+			t.Chdir(moduleFixture(t))
+			answeringStdin(t, tc.reply)
+
+			out := captureStdout(t, func() { _ = runApply(tc.args) })
+			if !strings.Contains(out, "applying ") || !strings.Contains(out, "for v1.2.3") {
+				t.Errorf("the shown plan was not applied:\n%s", out)
+			}
+			if strings.Contains(out, "saved to") {
+				t.Errorf("apply talks about a plan file the user never asked for:\n%s", out)
+			}
+		})
 	}
 }
 
@@ -243,7 +322,27 @@ func TestFinishDiffReportsAnUnwritablePlanPath(t *testing.T) {
 // emptyForge is a forge with nothing on it: every release lookup is a 404.
 func emptyForge(t *testing.T) {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	serveForge(t, false)
+}
+
+// writableForge is emptyForge that also says the token may write to the
+// repository, which is what a plan that publishes checks first.
+func writableForge(t *testing.T) {
+	t.Helper()
+	endpoint := serveForge(t, true)
+	previous := forgeAPIEndpoint
+	t.Cleanup(func() { forgeAPIEndpoint = previous })
+	forgeAPIEndpoint = endpoint
+	t.Setenv("GITHUB_TOKEN", "test-token")
+}
+
+func serveForge(t *testing.T, writable bool) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writable && r.Method == http.MethodGet && r.URL.Path == "/repos/you/demo" {
+			_, _ = w.Write([]byte(`{"permissions":{"push":true}}`))
+			return
+		}
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"message":"Not Found"}`))
 	}))
@@ -256,6 +355,7 @@ func emptyForge(t *testing.T) {
 		client.SetEndpoints(srv.URL, srv.URL)
 		return client
 	}
+	return srv.URL
 }
 
 func TestPlanOutSavesAPlanThatAnApplyWouldCheck(t *testing.T) {
@@ -312,6 +412,22 @@ func TestApplyStopsWhenThePlanCannotBeResolved(t *testing.T) {
 	}
 	if !strings.Contains(out, "applying "+path) {
 		t.Errorf("output does not say what is being applied:\n%s", out)
+	}
+}
+
+func TestApplyWithNoFileStopsWhenThePlanFails(t *testing.T) {
+	emptyForge(t)
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+	t.Chdir(moduleFixture(t))
+
+	var err error
+	out := captureStdout(t, func() { err = runApply([]string{"-auto-approve"}) })
+	if !errors.Is(err, errPlanFailed) {
+		t.Errorf("runApply -auto-approve = %v, want the failed plan\n%s", err, out)
+	}
+	if strings.Contains(out, "applying ") {
+		t.Errorf("a failed plan was applied:\n%s", out)
 	}
 }
 

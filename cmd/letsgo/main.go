@@ -47,7 +47,7 @@ usage:
   letsgo plan [--explain] [--json] [--publish] [--diff [--exit-code]] [--format md] [-out file]  resolve and check a release without performing one
   letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
   letsgo release [--draft] [-o dir]      build and publish, resumably
-  letsgo apply <file> [-o dir]          publish a release exactly as a saved plan agreed it
+  letsgo apply [file] [-auto-approve]   publish a release as a saved plan agreed it; with no file, plan it, show it and ask
   letsgo release --snapshot              rehearse a release without publishing
   letsgo verify [tag] [--json] [--words]  rebuild a published release and compare it
   letsgo doctor [--json]                 diagnose tools and repository state, read-only
@@ -375,18 +375,30 @@ func runRelease(args []string) error {
 
 // runApply publishes a release exactly as a saved plan agreed it: the same
 // commit, rebuilt to the same manifest, or nothing at all.
+//
+// With no file it makes the plan itself, shows it, and asks before applying
+// it, so a local apply is as considered as one from a plan made earlier.
 func runApply(args []string) error {
 	fs := flag.NewFlagSet("apply", flag.ExitOnError)
 	var a releaseArgs
 	a.bindCredentials(fs)
+	autoApprove := fs.Bool("auto-approve", false, "with no plan file, apply the plan without asking first")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
-		return errors.New("letsgo: apply needs a plan file; make one with `letsgo plan -out`")
+	if fs.NArg() > 1 {
+		return errUsage("letsgo apply [plan file] [-auto-approve]")
 	}
 
-	file, err := plandiff.Read(fs.Arg(0))
+	if fs.NArg() == 0 {
+		return applyFresh(context.Background(), a, *autoApprove)
+	}
+	return applyPlanFile(a, fs.Arg(0))
+}
+
+// applyPlanFile applies the plan saved at path.
+func applyPlanFile(a releaseArgs, path string) error {
+	file, err := plandiff.Read(path)
 	if err != nil {
 		return fmt.Errorf("letsgo: %w", err)
 	}
@@ -394,12 +406,95 @@ func runApply(args []string) error {
 	if err != nil {
 		return fmt.Errorf("letsgo: %w", err)
 	}
-	fmt.Printf("  applying %s (%s) for %s\n", fs.Arg(0), short12(strings.TrimPrefix(digest, "sha256:")), file.Tag)
+	fmt.Printf("  applying %s (%s) for %s\n", path, short12(strings.TrimPrefix(digest, "sha256:")), file.Tag)
 
 	if file.Kind == plandiff.FileKindYank {
 		return applyYank(context.Background(), file, diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken})
 	}
 	return doRelease(context.Background(), a, file)
+}
+
+// stdinIsTerminal reports whether there is someone to ask. It is a variable so
+// a test can be that someone.
+var stdinIsTerminal = func() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+// applyFresh plans a release, shows the plan, and applies exactly that plan
+// once it is agreed.
+//
+// The agreement is either a yes at the prompt or -auto-approve. With neither
+// possible the command stops before it has built anything, because a question
+// nobody can answer is not consent.
+func applyFresh(ctx context.Context, a releaseArgs, autoApprove bool) error {
+	if !autoApprove && !stdinIsTerminal() {
+		return errors.New("letsgo: apply with no plan file asks before it publishes, and there is no terminal to ask on; pass -auto-approve, or save a plan with `letsgo plan -out` and apply that")
+	}
+
+	dir, err := os.MkdirTemp("", "letsgo-apply-")
+	if err != nil {
+		return fmt.Errorf("letsgo: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	path := filepath.Join(dir, "release.plan")
+
+	changed, err := planForApply(ctx, a, path)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	if !autoApprove {
+		fmt.Print("\n  Apply? [y/N] ")
+		if !readYes() {
+			fmt.Println("\n  nothing was published")
+			return nil
+		}
+	}
+	fmt.Println()
+	return applyPlanFile(a, path)
+}
+
+// forgeAPIEndpoint overrides the forge API host for the gates a plan checks
+// before it reads the forge. Empty means the real one; a test points it at a
+// fake.
+var forgeAPIEndpoint string
+
+// planForApply resolves and diffs a release as `letsgo plan -out` does, shows
+// it, and saves it at path. It reports whether there is anything to apply.
+func planForApply(ctx context.Context, a releaseArgs, path string) (bool, error) {
+	started := time.Now()
+	tokens := diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken}
+	p, err := plan.Resolve(ctx, plan.Options{
+		Dir: ".", Publish: true, Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken,
+		Analyse: true, AllowVulnerable: a.allowVulnerable, AllowBreaking: a.allowBreaking,
+		APIEndpoint: forgeAPIEndpoint,
+	})
+	if err != nil {
+		return false, err
+	}
+	p.Report(os.Stdout, false)
+	if !p.OK() {
+		fmt.Printf("\n  plan failed in %s · nothing was built\n", took(started))
+		return false, errPlanFailed
+	}
+
+	d, err := planDiff(ctx, p, tokens)
+	if err != nil {
+		return false, err
+	}
+	if err := finishPlan(d.Actions, nil, diffRun{Started: started}); err != nil {
+		return false, err
+	}
+	if !plandiff.HasChanges(d.Actions) {
+		return false, nil
+	}
+	if _, err := savePlan(p, d, path); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // doRelease builds and publishes a release. applied, when set, is the plan the
