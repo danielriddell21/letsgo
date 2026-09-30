@@ -62,14 +62,29 @@ func main() {
 // this file, not copied from the shape another package's already has.
 func moduleFixture(t *testing.T) string {
 	t.Helper()
+	return moduleFixtureWith(t, "", nil)
+}
+
+// moduleFixtureWith is moduleFixture with directives appended to its
+// letsgo.mod and extra files committed beside it.
+func moduleFixtureWith(t *testing.T, config string, extra map[string]string) string {
+	t.Helper()
 	dir := t.TempDir()
 
-	for name, content := range map[string]string{
+	files := map[string]string{
 		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
 		"main.go":    demoMainGo,
-		"letsgo.mod": "build " + gobuild.Host().String() + "\n",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		"letsgo.mod": "build " + gobuild.Host().String() + "\n" + config,
+	}
+	for name, content := range extra {
+		files[name] = content
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

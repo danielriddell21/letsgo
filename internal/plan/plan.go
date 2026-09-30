@@ -823,6 +823,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	p.resolveFiles(ctx)
 	p.resolveArtifacts(ctx)
 	p.checkInstallScriptRequired()
+	p.checkNotesRequired()
 
 	p.resolveTap()
 	p.resolveImage(ctx)
@@ -2122,6 +2123,20 @@ func filesUnder(tracked []string, dir string) []string {
 		}
 	}
 	return found
+}
+
+// checkNotesRequired makes a required notes section's absence a Fail. Both
+// sections follow the changelog, so `disable changelog` leaves them unwritten;
+// a release that required one asked for exactly that not to happen.
+func (p *Plan) checkNotesRequired() {
+	if p.Features.On("changelog") {
+		return
+	}
+	for _, name := range []string{"diff-notes", "randomart"} {
+		if p.required(name) && p.Features.On(name) {
+			p.addAt(p.posOf("require "+name), name, Fail, "required, but changelog is disabled, so no release notes are written")
+		}
+	}
 }
 
 // installScript is the check name checkInstallScriptRequired reports under.

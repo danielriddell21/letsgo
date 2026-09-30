@@ -1414,8 +1414,13 @@ func extraNotes(
 		}
 		notes += shipped
 	}
-	if p.Features.On("randomart") && len(manifestSum) > 0 {
-		notes += fingerprint(p.Tag, manifestSum)
+	if p.Features.On("randomart") {
+		switch {
+		case len(manifestSum) > 0:
+			notes += fingerprint(p.Tag, manifestSum)
+		case slices.Contains(p.Required, "randomart"):
+			return "", errors.New("randomart is required, but there is no manifest digest to fingerprint")
+		}
 	}
 	return notes, nil
 }
