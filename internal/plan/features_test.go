@@ -228,3 +228,29 @@ func TestSumdbCheckIsSilentWhenItWillRun(t *testing.T) {
 		}
 	}
 }
+
+// Both notes sections follow the changelog, so disabling it leaves a required
+// one unwritten: a Skip that `require` promised would not happen.
+func TestRequiredNotesSectionFailsWhenChangelogIsDisabled(t *testing.T) {
+	for _, name := range []string{"diff-notes", "randomart"} {
+		t.Run(name, func(t *testing.T) {
+			r := minimalRepo(t, "disable changelog\nrequire "+name+"\n")
+			p := r.resolve(plan.Options{})
+
+			if got := check(t, p, name); got.Status != plan.Fail {
+				t.Errorf("%s = %+v, want Fail", name, got)
+			}
+		})
+	}
+}
+
+func TestRequiredNotesSectionPassesWithTheChangelog(t *testing.T) {
+	r := minimalRepo(t, "require diff-notes randomart\n")
+	p := r.resolve(plan.Options{})
+
+	for _, c := range p.Checks {
+		if c.Name == "diff-notes" || c.Name == "randomart" {
+			t.Errorf("unexpected check: %+v", c)
+		}
+	}
+}

@@ -44,7 +44,7 @@ features` command, and the manifest `features` record.
 | FT-8 | `verify` MUST print the `features` line when the field is present. | 8 |
 | FT-9 | `--no-proxy-warm` MUST behave as `disable proxy-warm` for one run, and be recorded the same way. | 9 |
 | FT-10 | Each module's `letsgo.mod` MUST set features independently. | 10 |
-| FT-11 | Every catalogue entry MUST be checked by at least one code path (enforced by a test). | — |
+| FT-11 | Every catalogue entry MUST be checked by at least one code path (enforced by a test that walks the catalogue and exercises each entry's behaviour). | — |
 | FT-12 | Plugins MUST NOT be able to change any feature's state. | — |
 
 ## Errors and edge cases
