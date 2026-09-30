@@ -34,6 +34,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/receipt"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/verify"
+	plandiff "github.com/danielriddell21/letsgo/plan"
 )
 
 // version is replaced at link time. It is declared exactly the way letsgo
@@ -44,9 +45,10 @@ var version = "dev"
 const usage = `letsgo builds and publishes Go releases.
 
 usage:
-  letsgo plan [--explain] [--json] [--publish] [--diff]  resolve and check a release without performing one
+  letsgo plan [--explain] [--json] [--publish] [--diff [--exit-code]] [-out file]  resolve and check a release without performing one
   letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
   letsgo release [--draft] [-o dir]      build and publish, resumably
+  letsgo apply <file> [-o dir]          publish a release exactly as a saved plan agreed it
   letsgo release --snapshot              rehearse a release without publishing
   letsgo verify [tag] [--json] [--words]  rebuild a published release and compare it
   letsgo doctor [--json]                 diagnose tools and repository state, read-only
@@ -76,6 +78,7 @@ var commands = map[string]func([]string) error{
 	"plan":     runPlan,
 	"build":    runBuild,
 	"release":  runRelease,
+	"apply":    runApply,
 	"verify":   runVerify,
 	"doctor":   runDoctor,
 	"audit":    runAudit,
@@ -114,9 +117,22 @@ func main() {
 	}
 
 	if err := run(args); err != nil {
+		if code := exitCode(err); code != 1 {
+			os.Exit(code)
+		}
 		fmt.Fprintln(os.Stderr, "letsgo:", err)
 		os.Exit(1)
 	}
+}
+
+// exitCode is the status a failed command exits with. A plan that has changes
+// is not a failure, and is told apart from one so that a script can act on
+// drift without treating it as an error.
+func exitCode(err error) int {
+	if errors.Is(err, errPlanChanges) {
+		return 2
+	}
+	return 1
 }
 
 func runVersion([]string) error {
@@ -201,6 +217,10 @@ func runPlan(args []string) error {
 	explain := fs.Bool("explain", false, "show where each resolved value came from")
 	jsonOutput := fs.Bool("json", false, "print the plan as JSON")
 	diff := fs.Bool("diff", false, "also build, read the forge, and show what a release would change there")
+	planOut := fs.String("out", "", "save the plan to `file` for `letsgo apply` (implies --diff)")
+	exitCode := fs.Bool("exit-code", false, "with --diff, exit 2 when the plan has changes, for drift detection")
+	allowVulnerable := fs.Bool("allow-vulnerable", false, "plan to publish despite reachable vulnerabilities, recording which were accepted")
+	allowBreaking := fs.Bool("allow-breaking", false, "plan to publish an incompatible API change without a major version bump")
 	snapshot := fs.Bool("snapshot", false, "plan an untagged working version")
 	allowDirty := fs.Bool("allow-dirty", false, "permit an unclean worktree")
 	publishGates := fs.Bool("publish", false, "also check the gates a release needs: a forge, and a token that may write to it")
@@ -212,15 +232,22 @@ func runPlan(args []string) error {
 		return err
 	}
 
-	if *diff && *jsonOutput {
-		return errors.New("letsgo: --diff has no JSON form yet")
+	saving := *planOut != ""
+	diffing := *diff || saving
+	if diffing && *jsonOutput {
+		return errors.New("letsgo: --diff and -out have no JSON form yet")
+	}
+	if *exitCode && !diffing {
+		return errors.New("letsgo: --exit-code needs --diff")
 	}
 
 	ctx := context.Background()
 	started := time.Now()
 	p, err := plan.Resolve(ctx, plan.Options{
 		Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty,
-		Publish: *publishGates, Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken, Analyse: *analyse,
+		Publish: *publishGates, Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken,
+		// A diff predicts a release, whose manifest records the gates it ran.
+		Analyse: *analyse || diffing, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
 	})
 	if err != nil {
 		return err
@@ -245,12 +272,11 @@ func runPlan(args []string) error {
 		fmt.Printf("\n  plan failed in %s · nothing was built\n", elapsed)
 		return errPlanFailed
 	}
-	if *diff {
-		if err := planDiff(ctx, p, *token, *tapToken, *releaseToken); err != nil {
-			return err
-		}
-		fmt.Printf("\n  plan ok in %s · run `letsgo release` to apply it\n", took(started))
-		return nil
+	if diffing {
+		return diffAndSave(ctx, p, diffRun{
+			Tokens: diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken},
+			Out:    *planOut, ExitCode: *exitCode, Started: started,
+		})
 	}
 	fmt.Printf("\n  plan ok in %s · run `letsgo build` to produce artifacts\n", elapsed)
 	return nil
@@ -297,39 +323,82 @@ func runBuild(args []string) error {
 	return nil
 }
 
+// releaseArgs is everything `letsgo release` and `letsgo apply` take on the
+// command line.
+type releaseArgs struct {
+	draft, skipWarm, snapshot, appendNotes, allowVulnerable, allowBreaking bool
+	token, tapToken, releaseToken, out                                     string
+}
+
+// bindCredentials declares the flags every release-shaped command shares.
+func (a *releaseArgs) bindCredentials(fs *flag.FlagSet) {
+	fs.StringVar(&a.token, "token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
+	fs.StringVar(&a.tapToken, "tap-token", "", tapTokenUsage)
+	fs.StringVar(&a.releaseToken, "release-token", "", releaseTokenUsage)
+	fs.StringVar(&a.out, "o", "dist", "output directory")
+	fs.BoolVar(&a.skipWarm, "no-proxy-warm", false, "skip priming the Go module proxy")
+	fs.BoolVar(&a.allowVulnerable, "allow-vulnerable", false, "publish despite reachable vulnerabilities, recording which were accepted")
+	fs.BoolVar(&a.allowBreaking, "allow-breaking", false, "publish an incompatible API change without a major version bump")
+}
+
 func runRelease(args []string) error {
 	fs := flag.NewFlagSet("release", flag.ExitOnError)
-	draft := fs.Bool("draft", false, "create the release without publishing it")
-	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
-	tapToken := fs.String("tap-token", "", tapTokenUsage)
-	releaseToken := fs.String("release-token", "", releaseTokenUsage)
-	out := fs.String("o", "dist", "output directory")
-	skipWarm := fs.Bool("no-proxy-warm", false, "skip priming the Go module proxy")
-	snapshot := fs.Bool("snapshot", false, "rehearse the release without publishing anything")
-	appendNotes := fs.Bool("append-notes", false, "add the changelog after an existing release description instead of replacing it")
-	allowVulnerable := fs.Bool("allow-vulnerable", false, "publish despite reachable vulnerabilities, recording which were accepted")
-	allowBreaking := fs.Bool("allow-breaking", false, "publish an incompatible API change without a major version bump")
+	var a releaseArgs
+	a.bindCredentials(fs)
+	fs.BoolVar(&a.draft, "draft", false, "create the release without publishing it")
+	fs.BoolVar(&a.snapshot, "snapshot", false, "rehearse the release without publishing anything")
+	fs.BoolVar(&a.appendNotes, "append-notes", false, "add the changelog after an existing release description instead of replacing it")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	return doRelease(context.Background(), a, nil)
+}
 
-	ctx := context.Background()
+// runApply publishes a release exactly as a saved plan agreed it: the same
+// commit, rebuilt to the same manifest, or nothing at all.
+func runApply(args []string) error {
+	fs := flag.NewFlagSet("apply", flag.ExitOnError)
+	var a releaseArgs
+	a.bindCredentials(fs)
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("letsgo: apply needs a plan file; make one with `letsgo plan -out`")
+	}
+
+	file, err := plandiff.Read(fs.Arg(0))
+	if err != nil {
+		return fmt.Errorf("letsgo: %w", err)
+	}
+	digest, err := file.Digest()
+	if err != nil {
+		return fmt.Errorf("letsgo: %w", err)
+	}
+	fmt.Printf("  applying %s (%s) for %s\n", fs.Arg(0), short12(strings.TrimPrefix(digest, "sha256:")), file.Tag)
+
+	return doRelease(context.Background(), a, agreedPlan(file))
+}
+
+// doRelease builds and publishes a release. agreed, when set, is asked once
+// the release is built and before anything is published, and stops it by
+// returning an error.
+func doRelease(ctx context.Context, a releaseArgs, agreed func(*plan.Plan, *release.Result) error) error {
 	started := time.Now()
 
-	tokenValue, _ := plan.Token(*token)
-	client := github.New(tokenValue)
-	client.UserAgent = "letsgo/" + version
+	tokenValue, _ := plan.Token(a.token)
+	client := newForgeClient(tokenValue)
 
 	// A rehearsal needs no forge and no token, so the gates that check for
 	// them are not run. The repository's description and licence are read
 	// regardless — a tap-files plugin's cask needs them exactly as a formula
 	// does, and a rehearsal has to reach every decision a real run reaches.
 	p, dir, result, info, err := planAndBuild(ctx, planBuildOptions{
-		Out: *out,
+		Out: a.out,
 		Plan: plan.Options{
-			Dir: ".", Publish: !*snapshot, Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken,
-			Snapshot: *snapshot, Analyse: true, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
-			DisableProxyWarm: *skipWarm,
+			Dir: ".", Publish: !a.snapshot, Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken,
+			Snapshot: a.snapshot, Analyse: true, AllowVulnerable: a.allowVulnerable, AllowBreaking: a.allowBreaking,
+			DisableProxyWarm: a.skipWarm,
 		},
 		FailureNote: "nothing was built or published",
 		Started:     started,
@@ -345,16 +414,23 @@ func runRelease(args []string) error {
 	}
 	fmt.Printf("\n  built %d files\n", len(result.Files))
 
+	if agreed != nil {
+		if err := agreed(p, result); err != nil {
+			return err
+		}
+		fmt.Println("  the rebuild matches the plan")
+	}
+
 	// The tap gets its own client, so that the credential which can write to
 	// another repository need not be one that can also write to this one. They
 	// are the same client when no tap token is configured, which is what makes
 	// the split opt-in rather than a migration.
-	tapClient := tapClientFor(client, *tapToken, *token)
+	tapClient := tapClientFor(client, a.tapToken, a.token)
 
 	// The release itself gets its own client the same way, so it can be
 	// published under the same bot identity as the tap commit instead of
 	// whatever token ran the workflow.
-	releaseClient := releaseClientFor(client, *releaseToken, *token)
+	releaseClient := releaseClientFor(client, a.releaseToken, a.token)
 
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 
@@ -373,7 +449,7 @@ func runRelease(args []string) error {
 		forge  publish.Forge = releaseClient
 		tapAPI brew.FileAPI  = tapClient
 	)
-	if *snapshot {
+	if a.snapshot {
 		fmt.Println("\n  rehearsal: the calls below would be made, and are not")
 		recorder := publish.NewRecorder(os.Stdout)
 		forge, tapAPI = recorder, recorder
@@ -381,13 +457,13 @@ func runRelease(args []string) error {
 
 	// Before anything is attached: a disagreement with sum.golang.org must
 	// stop the release, not annotate one that is already public.
-	if err := warmProxyAndCheckSumdb(ctx, p, dir, result, *snapshot, *draft || p.Config.Draft); err != nil {
+	if err := warmProxyAndCheckSumdb(ctx, p, dir, result, a.snapshot, a.draft || p.Config.Draft); err != nil {
 		return err
 	}
 
 	published, err := publish.Run(ctx, releaseOptions(p, releaseRun{
 		Forge: forge, Repo: repo, Dir: dir, Result: result, Notes: notes,
-		Draft: *draft || p.Config.Draft, Append: *appendNotes,
+		Draft: a.draft || p.Config.Draft, Append: a.appendNotes,
 		Logf: func(format string, args ...any) {
 			fmt.Printf("  "+format+"\n", args...)
 		},
@@ -403,11 +479,11 @@ func runRelease(args []string) error {
 		return err
 	}
 
-	if err := publishImages(ctx, p, result, tokenValue, *snapshot); err != nil {
+	if err := publishImages(ctx, p, result, tokenValue, a.snapshot); err != nil {
 		return err
 	}
 
-	if *snapshot {
+	if a.snapshot {
 		fmt.Printf("\n  rehearsed in %s \u00b7 nothing was published\n  artifacts: %s\n", took(started), dir)
 		return nil
 	}
