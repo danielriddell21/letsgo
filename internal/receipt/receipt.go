@@ -7,11 +7,13 @@
 package receipt
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/danielriddell21/letsgo/internal/receipt/code128"
 	"github.com/danielriddell21/letsgo/internal/verify"
 )
 
@@ -21,6 +23,16 @@ const (
 	width = 40
 
 	shop = "SHIP IT & SAVE"
+
+	// skipped is how anything verification did not establish reads.
+	skipped = "— SKIPPED"
+
+	// barcodeChars is how many hex characters of the manifest digest the
+	// barcode carries: the most a Code 128 symbol of this width can hold.
+	barcodeChars = 4
+
+	// refWords is how many words of the digest the reference line speaks.
+	refWords = 4
 )
 
 // Render draws r as a receipt printed at now.
@@ -65,6 +77,9 @@ func Render(r *verify.Result, now time.Time) string {
 	if r.OK() {
 		line(pair("TOTAL", "BIT-FOR-BIT ✓"))
 		line("odds of an accidental match: 1 in 2²⁵⁶")
+		for _, l := range fingerprint(r) {
+			line(l)
+		}
 	} else {
 		line(pair("TOTAL", "VOID"))
 		const stamp = "VOID — DO NOT ACCEPT"
@@ -79,6 +94,34 @@ func Render(r *verify.Result, now time.Time) string {
 	return b.String()
 }
 
+// fingerprint is the barcode and reference printed under a match: the start of
+// the manifest digest as bars, as hex, and as words to read aloud.
+//
+// A barcode this narrow holds only a few characters, so it carries the first
+// of them and the hex beneath it says which. The reference is the same digest
+// spoken. It is empty when there is no digest to show.
+func fingerprint(r *verify.Result) []string {
+	if len(r.ManifestSum) == 0 {
+		return nil
+	}
+
+	short := hex.EncodeToString(r.ManifestSum)[:barcodeChars]
+	bars, err := code128.Render(short, 2)
+	if err != nil {
+		return nil
+	}
+
+	out := []string{""}
+	for _, row := range strings.Split(bars, "\n") {
+		out = append(out, centre(row, width))
+	}
+	out = append(out, centre(short+" (manifest)", width))
+	if words := r.Words(); len(words) >= refWords {
+		out = append(out, shorten("REF: "+strings.Join(words[:refWords], " "), width))
+	}
+	return out
+}
+
 // itemStatus is how an artifact's outcome reads on the receipt.
 func itemStatus(s verify.Status) string {
 	switch s {
@@ -87,7 +130,7 @@ func itemStatus(s verify.Status) string {
 	case verify.Fail:
 		return "✗ MISMATCH"
 	default:
-		return "— SKIPPED"
+		return skipped
 	}
 }
 
@@ -96,7 +139,7 @@ func itemStatus(s verify.Status) string {
 func checkLabel(r *verify.Result, name, pass, warn string) string {
 	c, ok := find(r, name)
 	if !ok {
-		return "— SKIPPED"
+		return skipped
 	}
 	switch c.Status {
 	case verify.Pass:
@@ -106,7 +149,7 @@ func checkLabel(r *verify.Result, name, pass, warn string) string {
 	case verify.Warn:
 		return "! " + warn
 	default:
-		return "— SKIPPED"
+		return skipped
 	}
 }
 

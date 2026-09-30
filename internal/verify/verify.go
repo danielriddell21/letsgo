@@ -109,9 +109,9 @@ type Result struct {
 	// comparisons make it, and Artifacts is settled from them.
 	published, rebuilt map[string]Status
 
-	// manifestSum is the sha256 of the published letsgo.json, which the
+	// ManifestSum is the sha256 of the published letsgo.json, which the
 	// fingerprint drawn after a pass is made from.
-	manifestSum []byte
+	ManifestSum []byte
 
 	// SourceFrom describes where the rebuilt source came from, because it
 	// changes what the result means: a local checkout ties the binaries to the
@@ -199,10 +199,10 @@ func (r *Result) add(name string, status Status, format string, args ...any) {
 // unless verification passed: nobody should read out a hash that did not
 // verify.
 func (r *Result) Words() []string {
-	if !r.OK() || len(r.manifestSum) == 0 {
+	if !r.OK() || len(r.ManifestSum) == 0 {
 		return nil
 	}
-	return pgpwords.Encode(r.manifestSum)
+	return pgpwords.Encode(r.ManifestSum)
 }
 
 // ReportWords writes the manifest digest as numbered rows of PGP words, when
@@ -231,9 +231,9 @@ func (r *Result) Report(w io.Writer) {
 		}
 	}
 
-	if r.OK() && len(r.manifestSum) > 0 {
+	if r.OK() && len(r.ManifestSum) > 0 {
 		fmt.Fprintf(w, "\n%s\nsha256:%s\n",
-			randomart.Render(r.manifestSum, randomart.Title(r.Tag)), hex.EncodeToString(r.manifestSum))
+			randomart.Render(r.ManifestSum, randomart.Title(r.Tag)), hex.EncodeToString(r.ManifestSum))
 	}
 }
 
@@ -257,7 +257,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		return nil, err
 	}
 	result.Manifest = m
-	result.manifestSum = sum
+	result.ManifestSum = sum
 	result.add("manifest", Pass, "letsgo.json describes %d artifacts, built by %s with %s",
 		len(m.Artifacts), m.Builder.Tool, m.Builder.Go)
 	reportFeatures(result, m)
