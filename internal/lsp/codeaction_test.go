@@ -253,3 +253,11 @@ func diagnosticAt(line, col int, message string) map[string]any {
 		"message": message,
 	}
 }
+
+func TestCodeActionOffersNothingForAnUnopenedDocument(t *testing.T) {
+	c, uri := pinEditor(t, lsp.Options{}, "letsgo.mod", "bulid linux/amd64\n")
+
+	if actions := didYouMeanActions(t, c, uri+"x", nil); len(actions) != 0 {
+		t.Errorf("actions = %+v, want none", actions)
+	}
+}
