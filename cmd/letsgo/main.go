@@ -1198,6 +1198,21 @@ func releaseNotes(
 		return "", err
 	}
 	notes := changelog.Build(previous, p.Tag, commits).WithAPIChanges(p.APIChanges).Markdown()
+	extra, err := extraNotes(ctx, p, client, repo, previous, current, manifestSum)
+	if err != nil {
+		return "", err
+	}
+	return notes + extra, nil
+}
+
+// extraNotes are the sections that follow the changelog: what shipped against
+// the previous release, then the manifest's fingerprint. `letsgo release` and
+// `letsgo promote` both append them, so either reads the same.
+func extraNotes(
+	ctx context.Context, p *plan.Plan, client *github.Client, repo github.Repo, previous string,
+	current *manifest.Manifest, manifestSum []byte,
+) (string, error) {
+	var notes string
 	if p.Features.On("diff-notes") {
 		shipped, err := whatShipped(ctx, client, repo, previous, current, p.Required)
 		if err != nil {

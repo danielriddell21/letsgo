@@ -1,6 +1,7 @@
 package promote_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -433,12 +434,18 @@ func TestRunRefusesAMismatchedRebuild(t *testing.T) {
 // the fixture every test in this file rebuilds from.
 func demoRepo(t *testing.T, rcTag string) string {
 	t.Helper()
+	return demoRepoWith(t, rcTag, "")
+}
+
+// demoRepoWith is demoRepo with extra letsgo.mod directives.
+func demoRepoWith(t *testing.T, rcTag, extraMod string) string {
+	t.Helper()
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{
 		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
 		"main.go":    mainGo,
 		"README.md":  "# demo\n",
-		"letsgo.mod": "build " + gobuild.Host().String() + "\n",
+		"letsgo.mod": "build " + gobuild.Host().String() + "\n" + extraMod,
 	})
 	gitInit(t, dir, rcTag)
 	return dir
@@ -455,11 +462,85 @@ func runPromote(t *testing.T, client *github.Client, rcTag, dir string) (*promot
 // so a test can exercise a WorkDir that isn't already absolute.
 func runPromoteWithWorkDir(t *testing.T, client *github.Client, rcTag, dir, workDir string) (*promote.Result, error) {
 	t.Helper()
-	return promote.Run(context.Background(), promote.Options{
+	return runPromoteWith(t, client, rcTag, dir, workDir, nil)
+}
+
+// runPromoteWith is runPromoteWithWorkDir with a last word on the options.
+func runPromoteWith(t *testing.T, client *github.Client, rcTag, dir, workDir string, tweak func(*promote.Options)) (*promote.Result, error) {
+	t.Helper()
+	o := promote.Options{
 		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
 		RCTag: rcTag, Dir: dir, ModuleDir: dir,
 		ToolVersion: "test", WorkDir: workDir, Logf: t.Logf,
+	}
+	if tweak != nil {
+		tweak(&o)
+	}
+	return promote.Run(context.Background(), o)
+}
+
+// seededForge is a forge holding the RC built from dir.
+func seededForge(t *testing.T, dir, rcTag string) *fakeForge {
+	t.Helper()
+	rc := buildRC(t, dir)
+	forge := newFakeForge(t, "you/demo")
+	forge.seedRC(rcTag, mustRead(t, filepath.Join(rc.Dir, manifest.FileName)))
+	return forge
+}
+
+// A promoted release reads like any other: the sections `letsgo release`
+// appends after the changelog follow it, and the fingerprint they carry
+// names the manifest that is actually published, promoted_from included.
+func TestRunAppendsTheExtraNotes(t *testing.T) {
+	dir := demoRepo(t, "v1.3.0-rc.1")
+	forge := seededForge(t, dir, "v1.3.0-rc.1")
+
+	var gotSum []byte
+	var gotPrevious string
+	result, err := runPromoteWith(t, forge.client(), "v1.3.0-rc.1", dir, t.TempDir(), func(o *promote.Options) {
+		o.ExtraNotes = func(_ context.Context, _ *plan.Plan, previous string, current *manifest.Manifest, sum []byte) (string, error) {
+			gotPrevious, gotSum = previous, sum
+			if current.PromotedFrom == nil {
+				t.Error("the manifest handed over was not stamped with promoted_from")
+			}
+			return "\nEXTRA\n", nil
+		}
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.HasSuffix(forge.lastCreate.Body, "\nEXTRA\n") {
+		t.Errorf("body = %q, want the extra notes last", forge.lastCreate.Body)
+	}
+	published := sha256.Sum256(mustRead(t, filepath.Join(result.Build.Dir, manifest.FileName)))
+	if !bytes.Equal(gotSum, published[:]) {
+		t.Errorf("the sum handed over is not the published manifest's: %x vs %x", gotSum, published)
+	}
+	if gotPrevious != "" {
+		t.Errorf("previous = %q, want none for a first stable release", gotPrevious)
+	}
+}
+
+// disable changelog means no generated notes: the description is left alone,
+// not blanked, exactly as it is for `letsgo release`.
+func TestRunWritesNoNotesWhenTheChangelogIsDisabled(t *testing.T) {
+	dir := demoRepoWith(t, "v1.3.0-rc.1", "disable changelog\n")
+	forge := seededForge(t, dir, "v1.3.0-rc.1")
+
+	called := false
+	_, err := runPromoteWith(t, forge.client(), "v1.3.0-rc.1", dir, t.TempDir(), func(o *promote.Options) {
+		o.ExtraNotes = func(context.Context, *plan.Plan, string, *manifest.Manifest, []byte) (string, error) {
+			called = true
+			return "x", nil
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forge.lastCreate.Body != "" || called {
+		t.Errorf("body = %q, extra notes called = %v, want neither", forge.lastCreate.Body, called)
+	}
 }
 
 // The rebuild step runs `go build` with its working directory set to the
