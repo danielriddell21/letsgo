@@ -274,6 +274,7 @@ func TestFormulasCarryTheConfiguredCaveats(t *testing.T) {
 		t.Errorf("Caveats = %q", got[0].Caveats)
 	}
 }
+
 func observeTap(t *testing.T, existing map[string][]byte, writes map[string][]byte) []plandiff.Action {
 	t.Helper()
 	recorder := publish.NewRecorder(nil)
