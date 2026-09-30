@@ -26,6 +26,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -46,7 +47,7 @@ usage:
   letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
   letsgo release [--draft] [-o dir]      build and publish, resumably
   letsgo release --snapshot              rehearse a release without publishing
-  letsgo verify [tag] [--json]           rebuild a published release and compare it
+  letsgo verify [tag] [--json] [--words]  rebuild a published release and compare it
   letsgo doctor [--json]                 diagnose tools and repository state, read-only
   letsgo audit [<tag>]                   re-check published releases against today's vulnerability database
   letsgo diff <from> [to] [--format text|md|json]  compare two releases: size, dependencies, API
@@ -529,6 +530,7 @@ func runVerify(args []string) error {
 	noRebuild := fs.Bool("no-rebuild", false, "compare published assets against the manifest without rebuilding")
 	work := fs.String("work", "", "scratch directory (default: a temporary one)")
 	jsonOutput := fs.Bool("json", false, "print the report as JSON")
+	words := fs.Bool("words", false, "also print the manifest digest as words, for reading aloud")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -559,6 +561,9 @@ func runVerify(args []string) error {
 		fmt.Println(string(data))
 	} else {
 		result.Report(os.Stdout)
+		if *words {
+			result.ReportWords(os.Stdout)
+		}
 	}
 
 	if !result.OK() {
@@ -1102,8 +1107,8 @@ func fileSum(path string) ([]byte, error) {
 // manifest. It is release notes only: the manifest cannot contain it, since
 // the manifest is what it is made from.
 func fingerprint(tag string, sum []byte) string {
-	return fmt.Sprintf("\n<details><summary>Manifest fingerprint</summary>\n\n```\n%s\n```\n\n`sha256:%s`\n\n</details>\n",
-		randomart.Render(sum, randomart.Title(tag)), hex.EncodeToString(sum))
+	return fmt.Sprintf("\n<details><summary>Manifest fingerprint</summary>\n\n```\n%s\n```\n\n`sha256:%s`\n\n```\n%s```\n\n</details>\n",
+		randomart.Render(sum, randomart.Title(tag)), hex.EncodeToString(sum), pgpwords.Rows(pgpwords.Encode(sum)))
 }
 
 // releaseNotes builds the changelog for everything since the previous tag,

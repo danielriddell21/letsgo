@@ -24,6 +24,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -1048,6 +1049,10 @@ func TestReleaseNotesEndWithTheManifestFingerprint(t *testing.T) {
 		if !strings.Contains(notes, want) {
 			t.Errorf("notes = %q, want %q", notes, want)
 		}
+	}
+	// PW-6: the words in the body are the ones `verify --words` prints.
+	if want := pgpwords.Rows(pgpwords.Encode(sum[:])); !strings.Contains(notes, want) {
+		t.Errorf("notes = %q, want the words %q", notes, want)
 	}
 	if strings.Index(notes, "second release") > strings.Index(notes, "Manifest fingerprint") {
 		t.Errorf("notes = %q, want the fingerprint after the changelog", notes)

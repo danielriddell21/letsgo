@@ -25,6 +25,7 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/randomart"
 )
@@ -120,10 +121,11 @@ type Result struct {
 // schema-versioned, so a consumer can tell which shape it's reading before
 // the fields under it ever change.
 type jsonResult struct {
-	Schema     int     `json:"schema"`
-	Tag        string  `json:"tag"`
-	SourceFrom string  `json:"sourceFrom,omitempty"`
-	Checks     []Check `json:"checks"`
+	Schema        int      `json:"schema"`
+	Tag           string   `json:"tag"`
+	SourceFrom    string   `json:"sourceFrom,omitempty"`
+	Checks        []Check  `json:"checks"`
+	ManifestWords []string `json:"manifest_words,omitempty"`
 }
 
 // JSON renders the report for machine consumers (`letsgo verify --json`).
@@ -133,6 +135,8 @@ func (r *Result) JSON() ([]byte, error) {
 		Tag:        r.Tag,
 		SourceFrom: r.SourceFrom,
 		Checks:     r.Checks,
+
+		ManifestWords: r.Words(),
 	}, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("verify: %w", err)
@@ -152,6 +156,26 @@ func (r *Result) OK() bool {
 
 func (r *Result) add(name string, status Status, format string, args ...any) {
 	r.Checks = append(r.Checks, Check{Name: name, Status: status, Detail: fmt.Sprintf(format, args...)})
+}
+
+// Words is the manifest digest as PGP words, for reading aloud. It is nil
+// unless verification passed: nobody should read out a hash that did not
+// verify.
+func (r *Result) Words() []string {
+	if !r.OK() || len(r.manifestSum) == 0 {
+		return nil
+	}
+	return pgpwords.Encode(r.manifestSum)
+}
+
+// ReportWords writes the manifest digest as numbered rows of PGP words, when
+// there is a passing verification to read out.
+func (r *Result) ReportWords(w io.Writer) {
+	words := r.Words()
+	if words == nil {
+		return
+	}
+	fmt.Fprintf(w, "\n  manifest sha256, read aloud:\n%s", pgpwords.Rows(words))
 }
 
 // Report writes a human-readable summary.

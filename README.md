@@ -42,7 +42,7 @@ letsgo plan [--explain] [--json] [--publish]  resolve and check a release withou
 letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
 letsgo release [--draft] [-o dir]      build and publish, resumably
 letsgo release --snapshot              rehearse a release without publishing
-letsgo verify [tag] [--json]           rebuild a published release and compare it
+letsgo verify [tag] [--json] [--words]  rebuild a published release and compare it
 letsgo doctor [--json]                 diagnose tools and repository state, read-only
 letsgo audit [<tag>]                   re-check published releases against today's vulnerability database
 letsgo diff <from> [to] [--format text|md|json]  compare two releases: size, dependencies, API

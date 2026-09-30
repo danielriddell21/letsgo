@@ -19,6 +19,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/audit"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/randomart"
@@ -800,6 +801,60 @@ func TestVerifyPrintsNoFingerprintOnAFailure(t *testing.T) {
 	result.Report(&out)
 	if strings.Contains(out.String(), "[SHA256]") || strings.Contains(out.String(), "sha256:") {
 		t.Errorf("a failing report printed a fingerprint:\n%s", out.String())
+	}
+}
+
+// PW-3, PW-4, PW-6: a pass reads out all 32 bytes as words, the same way the
+// release notes do, and the JSON carries them too.
+func TestVerifyReadsTheManifestDigestAloudAfterAPass(t *testing.T) {
+	p := buildRelease(t)
+	result := run(t, p, verify.Options{Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true})
+
+	data, err := os.ReadFile(filepath.Join(p.dist, manifest.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	words := pgpwords.Encode(sum[:])
+
+	var out strings.Builder
+	result.ReportWords(&out)
+	want := "\n  manifest sha256, read aloud:\n" + pgpwords.Rows(words)
+	if out.String() != want {
+		t.Errorf("ReportWords = %q, want %q", out.String(), want)
+	}
+
+	if got := result.Words(); len(got) != 32 {
+		t.Errorf("Words has %d words, want 32", len(got))
+	}
+	js, err := result.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), `"manifest_words"`) || !strings.Contains(string(js), words[0]) {
+		t.Errorf("JSON = %s, want manifest_words", js)
+	}
+}
+
+// PW-5: nobody should read out a hash that did not verify.
+func TestVerifyReadsNoWordsOnAFailure(t *testing.T) {
+	p := buildRelease(t)
+	result := run(t, p, verify.Options{
+		Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		Client: p.serve(t, p.result.Artifacts[0].Archive),
+	})
+
+	var out strings.Builder
+	result.ReportWords(&out)
+	if out.Len() != 0 || result.Words() != nil {
+		t.Errorf("a failing verify read out %q, %v", out.String(), result.Words())
+	}
+	js, err := result.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(js), "manifest_words") {
+		t.Errorf("JSON = %s, want no manifest_words", js)
 	}
 }
 
