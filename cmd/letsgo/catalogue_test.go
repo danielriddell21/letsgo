@@ -155,7 +155,16 @@ var enableDirectives = map[string]struct {
 }{
 	"budget": {"budget " + gobuild.Host().String() + " 15MB\n", func(p *plan.Plan) bool { return len(p.Budgets) > 0 }},
 	"brew":   {"brew you/tap\n", func(p *plan.Plan) bool { return p.Tap.Name != "" }},
-	"image":  {"image\n", func(p *plan.Plan) bool { return p.Image != nil }},
+	"image":  {imageConfig(), func(p *plan.Plan) bool { return p.Image != nil }},
+}
+
+// imageConfig adds a linux target when the host is not one, since an image is
+// built for linux and the fixture builds for the host alone.
+func imageConfig() string {
+	if gobuild.Host().OS == "linux" {
+		return "image\n"
+	}
+	return "build linux/amd64\nimage\n"
 }
 
 func requireEnableActs(t *testing.T, f feature.Feature) {
