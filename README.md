@@ -44,7 +44,8 @@ letsgo release [--draft] [-o dir]      build and publish, resumably
 letsgo release --snapshot              rehearse a release without publishing
 letsgo verify [tag] [--json]           rebuild a published release and compare it
 letsgo doctor [--json]                 diagnose tools and repository state, read-only
-letsgo diff <from> [to]                compare two releases: size, dependencies, API
+letsgo audit [<tag>]                   re-check published releases against today's vulnerability database
+letsgo diff <from> [to] [--format text|md|json]  compare two releases: size, dependencies, API
 letsgo tag [--major|--minor|--patch|--pre|--json]  work out the next version and tag it
 letsgo promote <rc-tag>                rebuild a prerelease as a stable release
 letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
@@ -52,6 +53,7 @@ letsgo update [--check]                update letsgo itself, verified against it
 letsgo plugin install [<name>]         install a plugin, verified against its manifest (or every pin, with none)
 letsgo plugin list [--json]             the plugins this repository pins, and what is installed
 letsgo plugin prune                    remove store entries no pin in this repository references
+letsgo features [--json]               the feature catalogue: what can be disabled or required
 letsgo fmt [file|-]                    format letsgo.mod; - reads stdin, writes to stdout
 letsgo lsp [--restricted]              serve letsgo.mod over stdio JSON-RPC, for an editor
 letsgo version                         print the version (also --version)
@@ -70,6 +72,48 @@ letsgo plan            # no side effects; --explain shows where each value came 
 letsgo release         # idempotent, so a failed run resumes rather than restarts
 letsgo verify v1.3.0   # rebuild it and check it against what was published
 ```
+
+## Configuration
+
+`letsgo.mod` is only needed to depart from what letsgo derives. Optional
+behaviours are switched off with `disable` and made mandatory with `require`;
+`letsgo features` lists every name each directive accepts. Integrity features
+(the reproducible build, source archive, manifest, checksums) cannot be
+disabled, and every departure is recorded in the manifest and shown by
+`letsgo verify`.
+
+```
+disable sbom proxy-warm
+require vulncheck api-gate
+```
+
+A `require`d feature that cannot run fails the plan instead of skipping.
+
+Plugin configuration lives in `.letsgo/<plugin>.mod` (a legacy root-level
+`<command>.mod` is still read, with a warning). Machine settings that must not
+change what a release is — the Go and git to use, the build cache, the plugin
+store, the module proxy, a `token-command` credential helper — go in a global
+`config.mod` under the user config directory (or `$LETSGO_CONFIG`). It is
+checked separately, so a release directive there is an error rather than a
+silent difference between your laptop and CI.
+
+Plugins are installed into a content-addressed store keyed by the digest
+`letsgo.mod` pins, so different repositories can pin different versions on one
+machine. `letsgo plugin install` with no name installs every pin.
+
+## After a release
+
+The release body ends with a collapsed "what shipped" section comparing the
+manifest against the previous release: size changes, dependency bumps and
+toolchain changes (`disable diff-notes` removes it). `letsgo diff` renders the
+same comparison for any two releases.
+
+Before any asset is attached, letsgo primes the module proxy and checks that
+`sum.golang.org` agrees with the source archive it built (`disable sumdb` skips
+this; `require sumdb` makes an unreachable database fatal). Later, `letsgo audit`
+re-runs `govulncheck` against a published release's own source and records the
+result in `audit.json` on that release, which `letsgo verify` prints. An
+immutable release cannot take the extra asset, so it is skipped with a note.
 
 ## In GitHub Actions
 
