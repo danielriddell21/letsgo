@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
@@ -60,6 +62,12 @@ func releaseClientFor(client *github.Client, releaseToken, token string) *github
 // hook; passed in rather than read again so the description is asked for
 // once, not once per publisher.
 func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api brew.FileAPI, repo github.Repo, info *github.RepoInfo) error {
+	return publishTapTo(ctx, os.Stdout, p, result, api, repo, info)
+}
+
+// publishTapTo is publishTap reporting to out, so that `plan --diff` can run
+// the same decisions with the output set aside.
+func publishTapTo(ctx context.Context, out io.Writer, p *plan.Plan, result *release.Result, api brew.FileAPI, repo github.Repo, info *github.RepoInfo) error {
 	if p.Tap == (github.Repo{}) {
 		return nil
 	}
@@ -69,12 +77,12 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 	// produce a cask or formula that resolves to a 404 for everyone but its
 	// author.
 	if p.Config.Draft {
-		fmt.Println("  ! skipped the Homebrew tap: a draft release serves no public assets")
+		fmt.Fprintln(out, "  ! skipped the Homebrew tap: a draft release serves no public assets")
 		return nil
 	}
 
 	if names := variantNames(p); len(names) > 0 {
-		fmt.Printf("  ! no formula for variant %s: a variant's package is the repository's to choose\n",
+		fmt.Fprintf(out, "  ! no formula for variant %s: a variant's package is the repository's to choose\n",
 			strings.Join(names, ", "))
 	}
 
@@ -85,7 +93,7 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 	// the same rule: skipped for a prerelease, written for a stable release.
 	prerelease := isPrerelease(p)
 	if prerelease {
-		fmt.Println("  ! a prerelease must not overwrite the stable formula: writing @next only")
+		fmt.Fprintln(out, "  ! a prerelease must not overwrite the stable formula: writing @next only")
 	}
 
 	for _, formula := range formulas(p, result, repo, info) {
@@ -94,7 +102,7 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 			if err != nil {
 				return err
 			}
-			fmt.Printf("  %s %s in %s\n", published.Status, published.Path, p.Tap)
+			fmt.Fprintf(out, "  %s %s in %s\n", published.Status, published.Path, p.Tap)
 		}
 
 		next := formula
@@ -103,7 +111,7 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 		if err != nil {
 			return err
 		}
-		fmt.Printf("  %s %s in %s\n", published.Status, published.Path, p.Tap)
+		fmt.Fprintf(out, "  %s %s in %s\n", published.Status, published.Path, p.Tap)
 	}
 
 	if prerelease {
@@ -119,7 +127,7 @@ func publishTap(ctx context.Context, p *plan.Plan, result *release.Result, api b
 		if err != nil {
 			return err
 		}
-		fmt.Printf("  %s %s in %s\n", published.Status, published.Path, p.Tap)
+		fmt.Fprintf(out, "  %s %s in %s\n", published.Status, published.Path, p.Tap)
 	}
 	return nil
 }
