@@ -219,7 +219,7 @@ func TestHooksAreAClosedSet(t *testing.T) {
 func TestRunStripsTokensFromTheTapFilesHookEnv(t *testing.T) {
 	noStore(t)
 	dir, digest := fake(t, `
-if [ -n "$GITHUB_TOKEN$GH_TOKEN$LETSGO_TAP_TOKEN" ]; then
+if [ -n "$GITHUB_TOKEN$GH_TOKEN$LETSGO_TAP_TOKEN$LETSGO_RELEASE_TOKEN" ]; then
   echo "a token reached the plugin" >&2
   exit 1
 fi
@@ -228,6 +228,7 @@ echo '{"files":[]}'`)
 	t.Setenv("GITHUB_TOKEN", "secret")
 	t.Setenv("GH_TOKEN", "secret")
 	t.Setenv("LETSGO_TAP_TOKEN", "secret")
+	t.Setenv("LETSGO_RELEASE_TOKEN", "secret")
 
 	var out plugin.TapFilesOutput
 	err := plugin.Run(context.Background(),

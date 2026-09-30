@@ -107,7 +107,7 @@ func Run(ctx context.Context, p Plugin, dir string, input, output any) error {
 	// process's environment at all.
 	cmd.Env = os.Environ()
 	if p.Hook == HookTapFiles {
-		cmd.Env = withoutEnv(cmd.Env, "GITHUB_TOKEN", "GH_TOKEN", "LETSGO_TAP_TOKEN")
+		cmd.Env = withoutEnv(cmd.Env, "GITHUB_TOKEN", "GH_TOKEN", "LETSGO_TAP_TOKEN", "LETSGO_RELEASE_TOKEN")
 	}
 
 	var stdout, stderr bytes.Buffer
