@@ -82,12 +82,7 @@ func TestRelativePluginPathWarns(t *testing.T) {
 		t.Run(tt.command, func(t *testing.T) {
 			p := resolveWithMod(t, "build linux/amd64\nplugin ldflags "+tt.command+" v1.0.0 sha256:"+digest+"\n")
 
-			var warned *plan.Check
-			for i, c := range p.Checks {
-				if c.Name == "plugins" && c.Status == plan.Warn && strings.Contains(c.Detail, "inside the repository") {
-					warned = &p.Checks[i]
-				}
-			}
+			warned := repositoryPathWarning(p)
 			if got := warned != nil; got != tt.warns {
 				t.Fatalf("warned = %v, want %v; checks: %s", got, tt.warns, checkNames(p))
 			}
@@ -96,4 +91,13 @@ func TestRelativePluginPathWarns(t *testing.T) {
 			}
 		})
 	}
+}
+
+func repositoryPathWarning(p *plan.Plan) *plan.Check {
+	for i, c := range p.Checks {
+		if c.Name == "plugins" && c.Status == plan.Warn && strings.Contains(c.Detail, "inside the repository") {
+			return &p.Checks[i]
+		}
+	}
+	return nil
 }
