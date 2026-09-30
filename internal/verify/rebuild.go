@@ -205,12 +205,15 @@ func compareRebuilt(
 				// of the compiler is worth investigating yet.
 				problems = append(problems,
 					fmt.Sprintf("%s: %s", got.Target, strings.Join(differing, "; ")))
+				result.rebuilt[want.Name] = Fail
 			case got.ArchiveSHA256 != want.SHA256:
 				problems = append(problems, fmt.Sprintf(
 					"%s: binaries match but the archive does not (%s vs %s)",
 					got.Target, short(got.ArchiveSHA256), short(want.SHA256)))
+				result.rebuilt[want.Name] = Fail
 			default:
 				matched++
+				result.rebuilt[want.Name] = Pass
 			}
 		}
 	}
