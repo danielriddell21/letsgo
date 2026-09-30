@@ -211,19 +211,19 @@ func (p *Plan) resolvePlugins() {
 			for i, h := range plugin.Hooks {
 				hooks[i] = string(h)
 			}
-			p.add("plugins", Fail, "%q is not a hook; letsgo has %s",
+			p.addAt(p.posOf(pluginDirective+configured.Hook), "plugins", Fail, "%q is not a hook; letsgo has %s",
 				configured.Hook, strings.Join(hooks, " and "))
 			return
 		}
 		if known, ok := plugin.Lookup(configured.Command); ok {
 			switch {
 			case known.Hook == "":
-				p.add("plugins", Fail,
+				p.addAt(p.posOf(pluginDirective+configured.Hook), "plugins", Fail,
 					"%s does not answer a hook and cannot be pinned; run it directly after the release",
 					configured.Command)
 				return
 			case known.Hook != hook:
-				p.add("plugins", Fail, "%s answers the %s hook, not %s",
+				p.addAt(p.posOf(pluginDirective+configured.Hook), "plugins", Fail, "%s answers the %s hook, not %s",
 					configured.Command, known.Hook, hook)
 				return
 			}
@@ -255,11 +255,11 @@ func (p *Plan) checkPluginConfigFiles() {
 
 		switch {
 		case hasLegacy && hasModern:
-			p.add("plugins", Fail,
+			p.addAt(p.posOf(pluginDirective+configured.Hook), "plugins", Fail,
 				"%s has config at both %s and %s; remove the legacy file",
 				configured.Command, legacy, modern)
 		case hasLegacy:
-			p.add("plugins", Warn,
+			p.addAt(p.posOf(pluginDirective+configured.Hook), "plugins", Warn,
 				"%s reads its config from %s; move it to %s",
 				configured.Command, legacy, modern)
 		}
@@ -360,13 +360,13 @@ func (p *Plan) applyLayoutPlugin(ctx context.Context) {
 
 	var out plugin.ArchiveLayoutOutput
 	if err := plugin.Run(ctx, configured, p.RootDir, in, &out); err != nil {
-		p.add("plugins", Fail, "%v", err)
+		p.addAt(p.posOf(pluginDirective+string(configured.Hook)), "plugins", Fail, "%v", err)
 		return
 	}
 
 	groups, err := layoutGroups(out, p.Commands)
 	if err != nil {
-		p.add("plugins", Fail, "plugin %s: %v", configured.Command, err)
+		p.addAt(p.posOf(pluginDirective+string(configured.Hook)), "plugins", Fail, "plugin %s: %v", configured.Command, err)
 		return
 	}
 
@@ -411,13 +411,13 @@ func (p *Plan) applyLDFlagsPlugin(ctx context.Context) {
 
 	var out plugin.LDFlagsOutput
 	if err := plugin.Run(ctx, configured, p.RootDir, in, &out); err != nil {
-		p.add("plugins", Fail, "%v", err)
+		p.addAt(p.posOf(pluginDirective+string(configured.Hook)), "plugins", Fail, "%v", err)
 		return
 	}
 
 	symbols, err := injectedSymbols(out.LDFlags)
 	if err != nil {
-		p.add("plugins", Fail, "plugin %s: %v", configured.Command, err)
+		p.addAt(p.posOf(pluginDirective+string(configured.Hook)), "plugins", Fail, "plugin %s: %v", configured.Command, err)
 		return
 	}
 	if len(symbols) == 0 {
@@ -426,7 +426,7 @@ func (p *Plan) applyLDFlagsPlugin(ctx context.Context) {
 
 	p.LDFlags = append(p.LDFlags, out.LDFlags...)
 	p.note("injected values", strings.Join(symbols, ", "), configured.Command)
-	p.add("plugins", Warn,
+	p.addAt(p.posOf(pluginDirective+string(configured.Hook)), "plugins", Warn,
 		"%s compiled %d value(s) into the binary: %s\n"+
 			"  they are recoverable with `strings` and recorded in letsgo.json, so they are not secrets",
 		configured.Command, len(symbols), strings.Join(symbols, ", "))
@@ -720,6 +720,11 @@ func (p *Plan) addAt(pos *Pos, name string, status Status, format string, args .
 // configPos turns a directive's position within letsgo.mod into a Check's
 // Pos, nil when there is nothing to point at (no config file, or a
 // directive that recorded no position for this value).
+// posOf is configPos for the directive written under key (see config.Config.Pos).
+func (p *Plan) posOf(key string) *Pos {
+	return p.configPos(p.Config.Pos[key])
+}
+
 func (p *Plan) configPos(cp config.Position) *Pos {
 	if cp.Line == 0 || p.ConfigPath == "" {
 		return nil
@@ -1278,11 +1283,11 @@ func (p *Plan) resolveTap() {
 	}
 	tap, err := brew.ParseTap(p.Config.BrewTap)
 	if err != nil {
-		p.add("brew tap", Fail, "%v", err)
+		p.addAt(p.posOf("brew"), brewTap, Fail, "%v", err)
 		return
 	}
 	p.Tap = tap
-	p.note("brew tap", tap.String(), ConfigFile)
+	p.note(brewTap, tap.String(), ConfigFile)
 }
 
 // resolveImage works out where the container images go.
@@ -1298,7 +1303,7 @@ func (p *Plan) resolveImage(ctx context.Context) {
 	reference, source := p.Config.Image.Reference, ConfigFile
 	if reference == "" {
 		if !p.HasRepo {
-			p.add("image", Fail,
+			p.addAt(p.posOf("image"), "image", Fail,
 				"no 'origin' remote, so there is no default image name; write one after `image`")
 			return
 		}
@@ -1310,11 +1315,11 @@ func (p *Plan) resolveImage(ctx context.Context) {
 
 	ref, err := oci.ParseReference(reference)
 	if err != nil {
-		p.add("image", Fail, "%v", err)
+		p.addAt(p.posOf("image"), "image", Fail, "%v", err)
 		return
 	}
 	if ref.Tag != "" || ref.Digest != "" {
-		p.add("image", Fail,
+		p.addAt(p.posOf("image"), "image", Fail,
 			"%s carries a tag; the tag comes from the release, so name the repository only", reference)
 		return
 	}
@@ -1329,14 +1334,14 @@ func (p *Plan) resolveImage(ctx context.Context) {
 		}
 	}
 	if len(target.Platforms) == 0 {
-		p.add("image", Fail, "an image was asked for but no linux target is built")
+		p.addAt(p.posOf("image"), "image", Fail, "an image was asked for but no linux target is built")
 		return
 	}
 
 	if base := p.Config.Image.Base; base != "" {
 		parsed, err := oci.ParseReference(base)
 		if err != nil {
-			p.add("image", Fail, "image base: %v", err)
+			p.addAt(p.posOf("image"), "image", Fail, "image base: %v", err)
 			return
 		}
 		target.Base = parsed
@@ -1416,21 +1421,21 @@ func (p *Plan) checkTap(ctx context.Context, client *github.Client, source strin
 	access, err := client.CheckAccess(ctx, p.Tap)
 	switch {
 	case err != nil:
-		p.add("brew tap", Fail, "%v", err)
+		p.add(brewTap, Fail, "%v", err)
 	case access.Archived:
-		p.add("brew tap", Fail, "%s is archived and cannot receive a formula", p.Tap)
+		p.add(brewTap, Fail, "%s is archived and cannot receive a formula", p.Tap)
 	case access.CanPush:
-		p.add("brew tap", Pass, "%s can receive the formula, with %s", p.Tap, source)
+		p.add(brewTap, Pass, "%s can receive the formula, with %s", p.Tap, source)
 	case underActions():
 		// Same limitation as the release token: an installation token's
 		// permissions are not described by the repository endpoint, and a
 		// tap in another repository needs a token this one cannot inspect.
-		p.add("brew tap", Warn,
+		p.add(brewTap, Warn,
 			"whether %s can write to %s cannot be confirmed from inside Actions\n"+
 				"  a workflow token cannot write to another repository; set %s to an App token scoped to the tap",
 			source, p.Tap, TapTokenEnvVars[0])
 	default:
-		p.add("brew tap", Fail, "%s cannot write to %s", source, p.Tap)
+		p.add(brewTap, Fail, "%s cannot write to %s", source, p.Tap)
 	}
 }
 
@@ -1536,7 +1541,7 @@ func (p *Plan) resolveModule() {
 	dir := filepath.Join(p.RootDir, filepath.FromSlash(p.Config.ModuleDir))
 	module, err := discover.FindModule(dir)
 	if err != nil {
-		p.add("module", Fail, "module %s: %v", p.Config.ModuleDir, err)
+		p.addAt(p.posOf("module"), "module", Fail, "module %s: %v", p.Config.ModuleDir, err)
 		return
 	}
 
@@ -1544,7 +1549,7 @@ func (p *Plan) resolveModule() {
 	// to an ancestor's. That is a silent no-op rather than the nested module
 	// that was asked for, and worth saying.
 	if module.Dir != dir {
-		p.add("module", Fail, "module %s: no go.mod in that directory", p.Config.ModuleDir)
+		p.addAt(p.posOf("module"), "module", Fail, "module %s: no go.mod in that directory", p.Config.ModuleDir)
 		return
 	}
 
@@ -1692,7 +1697,7 @@ func (p *Plan) resolveTargets(ctx context.Context) {
 	if len(p.Config.Targets) > 0 {
 		targets, err := gobuild.ParseTargets(p.Config.Targets)
 		if err != nil {
-			p.add("targets", Fail, "%v", err)
+			p.addAt(p.posOf("build"), "targets", Fail, "%v", err)
 			return
 		}
 		p.Targets = targets
@@ -1703,7 +1708,7 @@ func (p *Plan) resolveTargets(ctx context.Context) {
 	}
 
 	if err := gobuild.Validate(ctx, "", p.Targets); err != nil {
-		p.add("targets", Fail, "%v", err)
+		p.addAt(p.posOf("build"), "targets", Fail, "%v", err)
 		return
 	}
 	p.add("targets", Pass, "%d targets, all buildable by this toolchain", len(p.Targets))
@@ -1722,7 +1727,7 @@ func (p *Plan) resolveTags() {
 	}
 	for _, tag := range p.Config.Tags {
 		if !validTag(tag) {
-			p.add("tags", Fail, "%q is not a build tag", tag)
+			p.addAt(p.posOf("tags"), "tags", Fail, "%q is not a build tag", tag)
 			return
 		}
 	}
@@ -1913,7 +1918,7 @@ func (p *Plan) resolveVersionSymbols() {
 	}
 
 	if len(problems) > 0 {
-		p.add(versionInjection, Fail, "%s", strings.Join(problems, "\n"))
+		p.addAt(p.posOf("version"), versionInjection, Fail, "%s", strings.Join(problems, "\n"))
 		return
 	}
 	p.add(versionInjection, Pass, "%d symbol(s) verified before injection", checked)
@@ -2015,7 +2020,7 @@ func (p *Plan) resolveFiles(ctx context.Context) {
 	if len(p.Config.ArchiveFiles) > 0 {
 		files, err := p.expandArchiveFiles(ctx, p.Config.ArchiveFiles)
 		if err != nil {
-			p.add(archiveFiles, Fail, "%v", err)
+			p.addAt(p.posOf("archive"), archiveFiles, Fail, "%v", err)
 			return
 		}
 		p.Files = files
@@ -2096,7 +2101,14 @@ func filesUnder(tracked []string, dir string) []string {
 }
 
 // installScript is the check name checkInstallScriptRequired reports under.
-const installScript = "install script"
+const (
+	installScript = "install script"
+
+	// The names a check and its directive go by in the config.
+	pluginDirective      = "plugin "
+	requireInstallScript = "require install-script"
+	brewTap              = "brew tap"
+)
 
 // checkInstallScriptRequired makes install.sh's absence a Fail rather than
 // silent, for a repository that required it.
@@ -2112,11 +2124,11 @@ func (p *Plan) checkInstallScriptRequired() {
 
 	switch {
 	case p.Tag == "":
-		p.add(installScript, Fail, "required, but there is no tag to build one for")
+		p.addAt(p.posOf(requireInstallScript), installScript, Fail, "required, but there is no tag to build one for")
 	case !p.HasRepo || p.Repo.Host != "github.com":
-		p.add(installScript, Fail, "required, but the repository is not on GitHub")
+		p.addAt(p.posOf(requireInstallScript), installScript, Fail, "required, but the repository is not on GitHub")
 	case len(installablePlatforms(p.Targets)) == 0:
-		p.add(installScript, Fail, "required, but no built target is one install.sh supports")
+		p.addAt(p.posOf(requireInstallScript), installScript, Fail, "required, but no built target is one install.sh supports")
 	default:
 		p.add(installScript, Pass, "will be generated")
 	}

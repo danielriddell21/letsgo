@@ -412,3 +412,26 @@ func TestBrewDirectiveRejects(t *testing.T) {
 		}
 	}
 }
+
+// A check raised against a directive needs its line, so decoding records where
+// each one was first written, with one key per subject for those that repeat.
+func TestDecodeRecordsDirectivePositions(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("0", 64)
+	cfg := decode(t, "module web\ntags a\ntags b\nplugin ldflags letsgo-x v1 "+digest+"\ndisable sbom\nrequire install-script\n")
+
+	want := map[string]int{
+		"module":                 1,
+		"tags":                   2,
+		"plugin ldflags":         4,
+		"disable sbom":           5,
+		"require install-script": 6,
+	}
+	for key, line := range want {
+		if got := cfg.Pos[key].Line; got != line {
+			t.Errorf("Pos[%q].Line = %d, want %d", key, got, line)
+		}
+	}
+	if _, ok := cfg.Pos["image"]; ok {
+		t.Error("Pos has an entry for a directive that was never written")
+	}
+}

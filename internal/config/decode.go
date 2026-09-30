@@ -67,6 +67,12 @@ type Config struct {
 	// merely naming the target.
 	BudgetPos map[string]Position
 
+	// Pos is where each directive was first written, keyed by its name, so a
+	// check raised against what a directive asked for can point at its line.
+	// A directive that repeats per subject has a key per subject — "plugin
+	// <hook>", "disable <feature>", "require <feature>".
+	Pos map[string]Position
+
 	// Image describes the container image to publish. Nil means none: a
 	// release that creates a package in a registry should be something the
 	// repository asked for.
@@ -247,6 +253,18 @@ var handlers = map[string]func(cfg *Config, file string, line *Line) error{
 	"require": applyRequire,
 }
 
+// mark records where a directive was written. The first occurrence wins: a
+// repeated list directive is still one thing to point at, and the first line
+// is where a reader starts looking.
+func (c *Config) mark(key string, pos Position) {
+	if c.Pos == nil {
+		c.Pos = map[string]Position{}
+	}
+	if _, ok := c.Pos[key]; !ok {
+		c.Pos[key] = pos
+	}
+}
+
 // Decode interprets a parsed file.
 func Decode(f *File) (*Config, error) {
 	cfg := &Config{Budgets: map[string]string{}, BudgetPos: map[string]Position{}}
@@ -274,6 +292,7 @@ func decodeBlock(cfg *Config, file string, seen map[string]Position, b *Block) e
 	if err := checkKnown(file, b.Keyword, b.P); err != nil {
 		return err
 	}
+	cfg.mark(b.Keyword, b.P)
 
 	// A variant is the one block a file may have several of, because having
 	// two products from one source is the whole point of it.
@@ -298,6 +317,7 @@ func decodeLine(cfg *Config, file string, seen map[string]Position, line *Line) 
 	if err := checkKnown(file, line.Keyword, line.P); err != nil {
 		return err
 	}
+	cfg.mark(line.Keyword, line.P)
 	// Repeating a scalar directive is ambiguous: one of the two values would
 	// silently win. Repeating a list directive is not.
 	if isScalar(line.Keyword) {
@@ -513,6 +533,7 @@ func applyPlugin(cfg *Config, file string, line *Line) error {
 		return errAt(file, line.P, "plugin %s: %q is not a sha256 digest", command, digest)
 	}
 
+	cfg.mark("plugin "+hook, line.P)
 	cfg.Plugins = append(cfg.Plugins, Plugin{
 		Hook: hook, Command: command, Version: version, Digest: digest,
 	})
@@ -815,6 +836,7 @@ func applyDisable(cfg *Config, file string, line *Line) error {
 		if containsString(cfg.Required, name) {
 			return errAt(file, line.P, "%s cannot be both disabled and required", name)
 		}
+		cfg.mark("disable "+name, line.P)
 		if !containsString(cfg.Disabled, name) {
 			cfg.Disabled = append(cfg.Disabled, name)
 		}
@@ -841,6 +863,7 @@ func applyRequire(cfg *Config, file string, line *Line) error {
 		if containsString(cfg.Disabled, name) {
 			return errAt(file, line.P, "%s cannot be both disabled and required", name)
 		}
+		cfg.mark("require "+name, line.P)
 		if !containsString(cfg.Required, name) {
 			cfg.Required = append(cfg.Required, name)
 		}
