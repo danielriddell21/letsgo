@@ -67,7 +67,7 @@ Serves `letsgo.mod`, the global `config.mod` and `.letsgo/*.mod` (#27).
 | formatting | `File.Format` |
 | completion | directive names (`known`); `build` targets (`go tool dist list`, cached); hooks (`plugin.Hooks`); `disable`/`require` names (#26); `release` keys; for `plugin` lines, first-party names from the catalogue (#25) |
 | hover | directive docs; on a `plugin` line, installed/pinned/mismatch with paths; on a target, whether the toolchain can build it (neither in `--restricted`) |
-| code actions | did-you-mean fixes (the existing `nearestKeyword`); **update pin** (runs `plugin install`, rewrites version + digest); **install pinned plugins**; move `letsgo-env.mod` → `.letsgo/env.mod` (#27); a global-only directive in `letsgo.mod` or vice versa → move it |
+| code actions | did-you-mean fixes (the existing `nearestKeyword`); **update pin** (runs `plugin install`, rewrites version + digest); **install pinned plugins** (offered for a missing or mismatched pin, and for all of them at once; a `workspace/executeCommand` the server runs, since an LSP client can't fetch a release itself); move `letsgo-env.mod` → `.letsgo/env.mod` (#27); a global-only directive in `letsgo.mod` or vice versa → move it |
 | document symbols | directives and blocks, for the outline |
 | semantic tokens | not needed — a TextMate grammar covers the syntax, which is go.mod's |
 

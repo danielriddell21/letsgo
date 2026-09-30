@@ -27,7 +27,7 @@ language server, and the `letsgo-vscode` extension.
 | ED-3 | Completion MUST offer directive names, build targets, hooks, feature names and first-party plugins. | 3 |
 | ED-4 | Hover over a directive MUST show its documentation. Outside a restricted workspace, hover over a plugin pin MUST show whether it is installed, on PATH with a matching digest, missing or mismatched, and hover over a build target MUST show whether the go toolchain can build it. | 4 |
 | ED-5 | Formatting MUST equal `letsgo fmt` output byte for byte. | 5 |
-| ED-6 | The "update pin" code action MUST rewrite the version and digest of a pin line. | 6 |
+| ED-6 | The "update pin" code action MUST rewrite the version and digest of a pin line. Outside a restricted workspace, a pin that is missing or mismatched MUST also offer to install the pinned release, which MUST NOT change the pin. | 6 |
 | ED-7 | The panel MUST show, per module, the resolved values, gates, artifacts, features and plugins from `plan --json`. | 7 |
 | ED-8 | The status bar MUST show the version and the number of gate failures. | 8 |
 | ED-9 | "Tag next version" MUST show the proposed level and reason, then create the tag only on confirmation. | 9 |

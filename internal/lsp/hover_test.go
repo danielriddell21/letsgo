@@ -6,12 +6,10 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/lsp"
-	"github.com/danielriddell21/letsgo/internal/pluginstore"
 )
 
 func TestHoverShowsLiveStateOnlyWhenNotRestricted(t *testing.T) {
-	t.Setenv(pluginstore.StoreEnvOverride, t.TempDir())
-	t.Setenv("PATH", t.TempDir())
+	lsp.IsolatePlugins(t)
 
 	tests := []struct {
 		name string
