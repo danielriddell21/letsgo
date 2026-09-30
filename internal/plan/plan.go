@@ -249,7 +249,8 @@ func (p *Plan) resolvePlugins() {
 // relativePath reports whether a plugin command names a file relative to the
 // working directory rather than a program on PATH or at an absolute path.
 func relativePath(command string) bool {
-	return !filepath.IsAbs(command) && strings.ContainsAny(command, `/\`)
+	rooted := filepath.IsAbs(command) || strings.HasPrefix(command, "/") || strings.HasPrefix(command, `\`)
+	return !rooted && strings.ContainsAny(command, `/\`)
 }
 
 // checkPluginConfigFiles looks for a configured plugin's own config at the
