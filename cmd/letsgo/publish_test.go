@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -85,6 +87,84 @@ func TestPublishTapWritesAFormulaForAStableRelease(t *testing.T) {
 	}
 	if len(tap.writes) != 2 || tap.writes[0] != "Formula/foo.rb" || tap.writes[1] != "Formula/foo@next.rb" {
 		t.Errorf("writes = %v, want [Formula/foo.rb Formula/foo@next.rb]", tap.writes)
+	}
+}
+
+// `release --draft` must hold the tap back exactly as `draft = true` in the
+// config does: a formula pointing at a draft's assets resolves to a 404.
+func TestDraftFlagHoldsTheTapBack(t *testing.T) {
+	p := releasePlan()
+	p.Tap = github.Repo{Owner: "you", Name: "homebrew-tap"}
+	result := built(artifact("foo_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"))
+	tap := &fakeTap{}
+
+	applyDraftFlag(p, true)
+
+	if err := publishTap(context.Background(), p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(tap.writes) != 0 {
+		t.Errorf("a draft release wrote to the tap: %v", tap.writes)
+	}
+}
+
+func TestDraftFlagHoldsTheImagesBack(t *testing.T) {
+	p := releasePlan()
+	result := &release.Result{Images: []release.ImageBuild{{}}}
+
+	applyDraftFlag(p, true)
+
+	if !p.Config.Draft {
+		t.Fatal("the --draft flag did not reach the plan that publishTap and publishImages read")
+	}
+	// Reaches the draft guard before any registry call; a push would fail here.
+	if err := publishImages(context.Background(), p, result, "", false); err != nil {
+		t.Fatalf("a draft release tried to push its images: %v", err)
+	}
+}
+
+// The flag has to survive the trip from the command line to the publishers:
+// this drives a rehearsed release rather than the helpers it is made of.
+func TestReleaseDraftFlagReachesTheTap(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		args        []string
+		wantSkipped bool
+	}{
+		{"with --draft", []string{"-draft"}, true},
+		{"without --draft", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			emptyForge(t)
+			// A formula needs a macOS or Linux build to install; a Windows
+			// host has neither, so it is given one.
+			config := "brew you/homebrew-tap\n"
+			if runtime.GOOS == "windows" {
+				config = "build linux/amd64\n" + config
+			}
+			t.Chdir(moduleFixtureWith(t, config, nil))
+
+			args := append([]string{"-snapshot", "-o", filepath.Join(t.TempDir(), "dist")}, tc.args...)
+			var err error
+			out := captureStdout(t, func() { err = runRelease(args) })
+			if err != nil {
+				t.Fatalf("runRelease = %v\n%s", err, out)
+			}
+			if got := strings.Contains(out, "skipped the Homebrew tap"); got != tc.wantSkipped {
+				t.Errorf("tap skipped = %v, want %v\n%s", got, tc.wantSkipped, out)
+			}
+		})
+	}
+}
+
+func TestNoDraftFlagLeavesAConfiguredDraftAlone(t *testing.T) {
+	p := releasePlan()
+	p.Config.Draft = true
+
+	applyDraftFlag(p, false)
+
+	if !p.Config.Draft {
+		t.Error("an absent --draft flag cleared draft = true from the config")
 	}
 }
 
