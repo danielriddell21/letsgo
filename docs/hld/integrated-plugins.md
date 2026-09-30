@@ -1,6 +1,12 @@
 # HLD: thin plugin mains, plugin-aware core
 
-Status: implemented.
+Status: partially implemented. The SDK (`letsgo/plugin`), `letsgo/manifest`,
+the `internal/plugin.Known` catalogue and the `tap-files` hook exist and are
+in use. `letsgo/plugins/{multi,env,cask}` — one pure function per plugin —
+was never split out of letsgo-plugins, and `plugin.ReadConfig` honouring
+`ConfigDir` doesn't exist, so the drift this proposal set out to end (private
+manifest reader, mismatched `base()`, unescaped download URL) is still there.
+Tracked in [#150](https://github.com/danielriddell21/letsgo/issues/150).
 
 | | |
 |---|---|
