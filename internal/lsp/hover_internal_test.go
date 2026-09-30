@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -12,9 +13,13 @@ import (
 )
 
 // pinnedTool installs content as an executable named name into dir and returns
-// its digest, which is what a pin line would carry.
+// its digest, which is what a pin line would carry. On Windows the file gets
+// an .exe suffix, without which PATH lookup would not find it.
 func pinnedTool(t *testing.T, dir, name, content string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
 	path := filepath.Join(dir, name)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
