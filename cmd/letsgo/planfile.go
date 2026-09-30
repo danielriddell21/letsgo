@@ -13,8 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/release"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
@@ -123,6 +125,87 @@ func agreedPlan(file *plandiff.File) func(*plan.Plan, *release.Result) error {
 		}
 		return nil
 	}
+}
+
+// freshAgainst reads the forge as it is now and holds it to the plan: every
+// target must be where the plan found it or where it would leave it, or the
+// plan is stale and nothing is written. What it returns is the set of writes the
+// apply may make.
+func freshAgainst(ctx context.Context, p *plan.Plan, file *plandiff.File, t forgeTargets) (*plannedWrites, error) {
+	current, err := diffForge(ctx, p, t)
+	if err != nil {
+		return nil, err
+	}
+	if err := staleness(file.Actions, current); err != nil {
+		return nil, err
+	}
+	for _, name := range alreadyDone(file.Actions, current) {
+		fmt.Printf("  = %s is already as planned; skipped\n", name)
+	}
+	return newPlannedWrites(file.Actions), nil
+}
+
+// guardApply holds the forge to the plan and returns the clients an apply
+// publishes through, which refuse anything the plan did not list. A release
+// with no plan publishes through the clients as they are.
+func guardApply(ctx context.Context, p *plan.Plan, file *plandiff.File, t forgeTargets) (publish.Forge, brew.FileAPI, error) {
+	if file == nil {
+		return t.Forge, t.Tap, nil
+	}
+	writes, err := freshAgainst(ctx, p, file, t)
+	if err != nil {
+		return nil, nil, err
+	}
+	return guardedForge{Forge: t.Forge, tag: releaseTag(p), writes: writes},
+		guardedTap{FileAPI: t.Tap, writes: writes}, nil
+}
+
+// staleness is the error for a plan whose targets have changed since it was
+// made, naming each one.
+func staleness(saved, current []plandiff.Action) error {
+	drifted := plandiff.Drifted(saved, current)
+	if len(drifted) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "letsgo: the plan is stale: %d target(s) changed since it was made; nothing was published", len(drifted))
+	for _, d := range drifted {
+		b.WriteString("\n    " + d.String())
+	}
+	b.WriteString("\n  make a new plan with `letsgo plan -out`")
+	return errors.New(b.String())
+}
+
+// alreadyDone names the targets the plan would change that an earlier apply
+// has already brought to their planned state.
+func alreadyDone(saved, current []plandiff.Action) []string {
+	now := make(map[string]plandiff.Action, len(current))
+	for _, a := range current {
+		now[string(a.Kind)+"\x00"+a.Target] = a
+	}
+	var out []string
+	for _, a := range saved {
+		if a.Op == plandiff.Keep {
+			continue
+		}
+		if c, ok := now[string(a.Kind)+"\x00"+a.Target]; ok && c.Op == plandiff.Keep {
+			out = append(out, string(a.Kind)+" "+a.Target)
+		}
+	}
+	return out
+}
+
+// holdToPlan stops an apply whose rebuild is not the release its plan agreed.
+// A release with no plan has nothing to hold it to.
+func holdToPlan(file *plandiff.File, p *plan.Plan, result *release.Result) error {
+	if file == nil {
+		return nil
+	}
+	if err := agreedPlan(file)(p, result); err != nil {
+		return err
+	}
+	fmt.Println("  the rebuild matches the plan")
+	return nil
 }
 
 // refusal is the error for a rebuild that did not reproduce the plan, naming

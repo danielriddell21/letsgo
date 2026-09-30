@@ -35,8 +35,14 @@ carry for apply to refuse before any write.
 - `apply` with no file is an error until the prompt of the HLD lands.
 - A plan made by a different letsgo, toolchain or dependency set is refused
   by the digest, not by a separate version check.
-- Until stale checks land, apply publishes every action as `release` would,
-  not only those in the plan. Partial re-apply is the next slice.
+- Apply reads the forge again after the rebuild matches. A target that is
+  neither where the plan found it nor where it would leave it makes the plan
+  stale ([ADR-0017](0017-stale-plan-by-observed-state.md)): apply names
+  each one and writes nothing. A target already at its planned state is
+  skipped, so re-applying after a partial failure needs no new plan.
+- Apply writes through a guard that refuses any release, asset or tap write the
+  plan did not list. Container image tags are covered by the staleness check
+  alone.
 
 ## Alternatives considered
 
