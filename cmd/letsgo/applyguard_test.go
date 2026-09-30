@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -72,14 +73,14 @@ func TestGuardedForgeRefusesWhatThePlanDoesNotList(t *testing.T) {
 func second[T any](_ T, err error) error { return err }
 
 func TestFreshAgainstAcceptsAForgeThatHasNotMoved(t *testing.T) {
-	p, targets := diffFixture(t)
-	saved, err := diffForge(t.Context(), p, targets)
+	targets := diffFixture(t)
+	saved, err := publication.Observe(t.Context(), targets)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	file := &plandiff.File{Actions: saved}
-	writes, err := freshAgainst(t.Context(), p, file, targets)
+	writes, err := freshAgainst(t.Context(), file, targets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,8 +90,8 @@ func TestFreshAgainstAcceptsAForgeThatHasNotMoved(t *testing.T) {
 }
 
 func TestFreshAgainstRefusesAHandEditedTapFile(t *testing.T) {
-	p, targets := diffFixture(t)
-	saved, err := diffForge(t.Context(), p, targets)
+	targets := diffFixture(t)
+	saved, err := publication.Observe(t.Context(), targets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,15 +99,15 @@ func TestFreshAgainstRefusesAHandEditedTapFile(t *testing.T) {
 	// Between the plan and the apply, someone edits the formula by hand.
 	targets.Tap.(*publish.Recorder).Files = map[string][]byte{"Formula/foo.rb": []byte("by hand")}
 
-	_, err = freshAgainst(t.Context(), p, &plandiff.File{Actions: saved}, targets)
+	_, err = freshAgainst(t.Context(), &plandiff.File{Actions: saved}, targets)
 	if err == nil || !strings.Contains(err.Error(), "stale") || !strings.Contains(err.Error(), "Formula/foo.rb") {
 		t.Errorf("err = %v, want a stale plan naming Formula/foo.rb", err)
 	}
 }
 
 func TestFreshAgainstResumesAnApplyThatStoppedHalfway(t *testing.T) {
-	p, targets := diffFixture(t)
-	saved, err := diffForge(t.Context(), p, targets)
+	targets := diffFixture(t)
+	saved, err := publication.Observe(t.Context(), targets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +115,7 @@ func TestFreshAgainstResumesAnApplyThatStoppedHalfway(t *testing.T) {
 	// The earlier apply created the release and wrote the formula, then stopped.
 	recorder := targets.Forge.(*publish.Recorder)
 	recorder.Existing = &github.Release{ID: 1, TagName: "v1.2.3"}
-	done, err := diffForge(t.Context(), p, targets)
+	done, err := publication.Observe(t.Context(), targets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +124,7 @@ func TestFreshAgainstResumesAnApplyThatStoppedHalfway(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if _, err := freshAgainst(t.Context(), p, &plandiff.File{Actions: saved}, targets); err != nil {
+		if _, err := freshAgainst(t.Context(), &plandiff.File{Actions: saved}, targets); err != nil {
 			t.Errorf("a half-finished apply was refused: %v", err)
 		}
 	})
@@ -146,13 +147,13 @@ func TestStalenessSaysHowToRecover(t *testing.T) {
 }
 
 func TestGuardApplyReturnsClientsThatHoldToThePlan(t *testing.T) {
-	p, targets := diffFixture(t)
-	saved, err := diffForge(t.Context(), p, targets)
+	targets := diffFixture(t)
+	saved, err := publication.Observe(t.Context(), targets)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	forge, tap, err := guardApply(t.Context(), p, &plandiff.File{Actions: saved}, targets)
+	forge, tap, err := guardApply(t.Context(), &plandiff.File{Actions: saved}, targets)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ func TestGuardApplyReturnsClientsThatHoldToThePlan(t *testing.T) {
 	}
 
 	targets.Tap.(*publish.Recorder).Files = map[string][]byte{"Formula/foo.rb": []byte("by hand")}
-	if _, _, err := guardApply(t.Context(), p, &plandiff.File{Actions: saved}, targets); err == nil {
+	if _, _, err := guardApply(t.Context(), &plandiff.File{Actions: saved}, targets); err == nil {
 		t.Error("a stale plan was guarded instead of refused")
 	}
 }

@@ -88,9 +88,6 @@ func TestStampAppliedRecordsAndAttachesThePlan(t *testing.T) {
 	if err != nil || !strings.Contains(string(sums), want+"  "+release.PlanFileName) {
 		t.Errorf("SHA256SUMS = %q (%v), want a line for the plan", sums, err)
 	}
-	if got := sumsFrom(result)[release.PlanFileName]; got != want {
-		t.Errorf("sumsFrom plan = %q, want %q", got, want)
-	}
 }
 
 func TestStampAppliedReportsAnUnwritableRelease(t *testing.T) {

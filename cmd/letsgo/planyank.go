@@ -11,6 +11,7 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/diff"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/yank"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -204,13 +205,13 @@ func (g guardedRelease) UpdateRelease(ctx context.Context, repo github.Repo, id 
 func observeYank(ctx context.Context, o yank.Options) ([]plandiff.Action, error) {
 	release := &releaseObserver{api: o.Client}
 	gomod := &goModObserver{}
-	var tap *tapObserver
+	var tap *publication.TapObserver
 
 	o.Client = release
 	o.ReadGoMod, o.WriteGoMod = gomod.read, gomod.write
 	o.Logf = nil
 	if o.TapAPI != nil {
-		tap = &tapObserver{api: o.TapAPI}
+		tap = publication.NewTapObserver(o.TapAPI)
 		o.TapAPI = tap
 	}
 	if _, err := yank.Run(ctx, o); err != nil {
@@ -222,7 +223,7 @@ func observeYank(ctx context.Context, o yank.Options) ([]plandiff.Action, error)
 		actions = append(actions, gomod.action(o.Prefix+"go.mod"))
 	}
 	if tap != nil {
-		actions = append(actions, tap.actions()...)
+		actions = append(actions, tap.Actions()...)
 	}
 	return actions, nil
 }
@@ -263,7 +264,7 @@ func (g *goModObserver) read(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err //nolint:wrapcheck // yank names the file
 	}
-	g.observed = blobFingerprint(data)
+	g.observed = publication.BlobFingerprint(data)
 	g.planned = g.observed
 	return data, nil
 }
@@ -272,7 +273,7 @@ func (g *goModObserver) write(_ string, data []byte) error {
 	if g.observed == "" {
 		return errors.New("letsgo: go.mod was written without being read first")
 	}
-	g.planned, g.written = blobFingerprint(data), true
+	g.planned, g.written = publication.BlobFingerprint(data), true
 	return nil
 }
 

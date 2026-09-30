@@ -17,6 +17,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/release"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -188,8 +189,8 @@ func agreedPlan(file *plandiff.File) func(*plan.Plan, *release.Result) error {
 // target must be where the plan found it or where it would leave it, or the
 // plan is stale and nothing is written. What it returns is the set of writes the
 // apply may make.
-func freshAgainst(ctx context.Context, p *plan.Plan, file *plandiff.File, t forgeTargets) (*plannedWrites, error) {
-	current, err := diffForge(ctx, p, t)
+func freshAgainst(ctx context.Context, file *plandiff.File, t publication.Options) (*plannedWrites, error) {
+	current, err := publication.Observe(ctx, t)
 	if err != nil {
 		return nil, err
 	}
@@ -205,15 +206,15 @@ func freshAgainst(ctx context.Context, p *plan.Plan, file *plandiff.File, t forg
 // guardApply holds the forge to the plan and returns the clients an apply
 // publishes through, which refuse anything the plan did not list. A release
 // with no plan publishes through the clients as they are.
-func guardApply(ctx context.Context, p *plan.Plan, file *plandiff.File, t forgeTargets) (publish.Forge, brew.FileAPI, error) {
+func guardApply(ctx context.Context, file *plandiff.File, t publication.Options) (publish.Forge, brew.FileAPI, error) {
 	if file == nil {
 		return t.Forge, t.Tap, nil
 	}
-	writes, err := freshAgainst(ctx, p, file, t)
+	writes, err := freshAgainst(ctx, file, t)
 	if err != nil {
 		return nil, nil, err
 	}
-	return guardedForge{Forge: t.Forge, tag: releaseTag(p), writes: writes},
+	return guardedForge{Forge: t.Forge, tag: publication.Tag(t.Plan), writes: writes},
 		guardedTap{FileAPI: t.Tap, writes: writes}, nil
 }
 
