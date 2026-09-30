@@ -205,8 +205,6 @@ binary: run it with a sample stdin and check the hook name is enforced.
 - The URL is built in core, so the escaping disagreement disappears. Whatever
   `DownloadURL` does with `services/api/v1.2.0` is what the cask gets.
 - `tag` is in the input, so the cask needs no prefix logic.
-- `letsgo-mono check` can use `plugin.Known` and the manifest package instead
-  of re-parsing either.
 
 ## Alternatives
 

@@ -162,7 +162,7 @@ func TestPlanAndBuildFailsWhenThePlanDoes(t *testing.T) {
 
 // scopedModuleFixture writes a repository with a nested module, versioned
 // under its own directory the way a monorepo tags it — the scenario
-// docs/design/monorepo.md exists for.
+// docs/hld/monorepo.md exists for.
 func scopedModuleFixture(t *testing.T) (repoDir, moduleDir string) {
 	t.Helper()
 	repoDir = t.TempDir()

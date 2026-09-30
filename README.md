@@ -47,12 +47,12 @@ letsgo verify [tag] [--json] [--words]  rebuild a published release and compare 
 letsgo doctor [--json]                 diagnose tools and repository state, read-only
 letsgo audit [<tag>]                   re-check published releases against today's vulnerability database
 letsgo diff <from> [to] [--format text|md|json]  compare two releases: size, dependencies, API
-letsgo tag [--major|--minor|--patch|--pre|--json]  work out the next version and tag it
 letsgo promote <rc-tag>                rebuild a prerelease as a stable release
 letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
+letsgo tag [--major|--minor|--patch|--pre|--json]  work out the next version and tag it
 letsgo update [--check]                update letsgo itself, verified against its manifest
 letsgo plugin install [<name>]         install a plugin, verified against its manifest (or every pin, with none)
-letsgo plugin list [--json]             the plugins this repository pins, and what is installed
+letsgo plugin list [--json]            the plugins this repository pins, and what is installed
 letsgo plugin prune                    remove store entries no pin in this repository references
 letsgo features [--json]               the feature catalogue: what can be disabled or required
 letsgo fmt [file|-]                    format letsgo.mod; - reads stdin, writes to stdout

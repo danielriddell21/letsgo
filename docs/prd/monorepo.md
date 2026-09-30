@@ -22,8 +22,8 @@ builds sibling modules from disk instead of their required versions.
 Running `letsgo` inside a nested module releases that module from its
 prefixed tag, with no config: the prefix is the module directory. The
 changelog, API gate, tag proposal, yank, verify, selfupdate and install.sh
-all respect the prefix. A companion, `letsgo-mono`, lists the modules, says
-which changed, emits a CI matrix, and tags modules in dependency order.
+all respect the prefix. Orchestration across
+modules (which changed, the CI matrix) is left to CI.
 
 ## User Stories
 
@@ -39,10 +39,7 @@ which changed, emits a CI matrix, and tags modules in dependency order.
 10. As a library author, I want `selfupdate` to accept a `TagPrefix`, so that my binary never updates into a sibling module's releases.
 11. As a user, I want the generated `install.sh` to download from the scoped release, so that install works for nested modules.
 12. As a maintainer, I want `yank` to retract the stripped version in the module's own `go.mod`, so that `go get` stops offering it.
-13. As a CI author, I want `letsgo-mono matrix` to output the modules that changed, so that one workflow releases only those.
-14. As a maintainer, I want `letsgo-mono changed` to tell me when a dependency module changed but its require hasn't been bumped, so that I release in the right order.
-15. As a maintainer, I want `letsgo-mono check` to flag duplicate project names and drifted plugin pins, so that cross-module problems are visible.
-16. As a user of the `module <dir>` directive, I want a warning that the root tag isn't a version of that module, so that I understand why the proxy warm fails.
+13. As a user of the `module <dir>` directive, I want a warning that the root tag isn't a version of that module, so that I understand why the proxy warm fails.
 
 ## Implementation Decisions
 
@@ -76,6 +73,4 @@ which changed, emits a CI matrix, and tags modules in dependency order.
 
 ## Further Notes
 
-- Open questions: should a release at the root with only prefixed tags on HEAD
-  refuse, or name the module to `cd` into? Should the release title use the
-  full directory or the project name?
+- Both open questions are settled; see "Decided" in the [HLD](../hld/monorepo.md).

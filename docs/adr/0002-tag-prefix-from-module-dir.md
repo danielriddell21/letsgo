@@ -28,7 +28,8 @@ versioned separately.
   warm and `retract` all work.
 - A shape B user must make each product its own module. The docs say so.
 - With `GOWORK=off`, a sibling module isn't rebuilt until its `require` is
-  bumped, so `letsgo-mono changed` reports that rather than guessing.
+  bumped. Bumping it is a commit with consequences, left to a person or to
+  Dependabot.
 
 ## Alternatives considered
 

@@ -602,7 +602,7 @@ func TestModuleDirectiveWarnsThatTheProxyCannotResolveIt(t *testing.T) {
 // A module Go already versions independently — one with its own go.mod,
 // nested in a monorepo — is scoped: its tag carries its own directory as a
 // prefix, and the version letsgo resolves is that tag with the prefix
-// stripped, exactly as docs/design/monorepo.md proposes.
+// stripped, exactly as docs/hld/monorepo.md proposes.
 func TestScopedRelease(t *testing.T) {
 	r := newRepo(t)
 	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
