@@ -17,7 +17,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/bump"
 	"github.com/danielriddell21/letsgo/internal/changelog"
@@ -377,13 +376,13 @@ func runApply(args []string) error {
 	}
 	fmt.Printf("  applying %s (%s) for %s\n", fs.Arg(0), short12(strings.TrimPrefix(digest, "sha256:")), file.Tag)
 
-	return doRelease(context.Background(), a, agreedPlan(file))
+	return doRelease(context.Background(), a, file)
 }
 
-// doRelease builds and publishes a release. agreed, when set, is asked once
-// the release is built and before anything is published, and stops it by
-// returning an error.
-func doRelease(ctx context.Context, a releaseArgs, agreed func(*plan.Plan, *release.Result) error) error {
+// doRelease builds and publishes a release. applied, when set, is the plan the
+// release must keep to: it is held to before anything is published, and only
+// what it lists is written.
+func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error {
 	started := time.Now()
 
 	tokenValue, _ := plan.Token(a.token)
@@ -414,11 +413,8 @@ func doRelease(ctx context.Context, a releaseArgs, agreed func(*plan.Plan, *rele
 	}
 	fmt.Printf("\n  built %d files\n", len(result.Files))
 
-	if agreed != nil {
-		if err := agreed(p, result); err != nil {
-			return err
-		}
-		fmt.Println("  the rebuild matches the plan")
+	if err := holdToPlan(applied, p, result); err != nil {
+		return err
 	}
 
 	// The tap gets its own client, so that the credential which can write to
@@ -445,10 +441,13 @@ func doRelease(ctx context.Context, a releaseArgs, agreed func(*plan.Plan, *rele
 
 	// Everything above this line is identical in a rehearsal. Only the thing
 	// that writes to the world is exchanged.
-	var (
-		forge  publish.Forge = releaseClient
-		tapAPI brew.FileAPI  = tapClient
-	)
+	forge, tapAPI, err := guardApply(ctx, p, applied, forgeTargets{
+		Forge: releaseClient, Tap: tapClient, Token: tokenValue, Repo: repo, Dir: dir,
+		Result: result, Notes: notes, Info: info,
+	})
+	if err != nil {
+		return err
+	}
 	if a.snapshot {
 		fmt.Println("\n  rehearsal: the calls below would be made, and are not")
 		recorder := publish.NewRecorder(os.Stdout)

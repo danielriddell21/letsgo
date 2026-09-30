@@ -1,6 +1,6 @@
 # ADR-0017: A plan is stale when its tag moved or a target is in an unplanned state
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-09-27
 - Issue: [#50](https://github.com/danielriddell21/letsgo/issues/50)
 - HLD: [hld/plan-apply.md](../hld/plan-apply.md)

@@ -50,7 +50,7 @@ Each HLD opens with its status. Implemented designs are kept as the record of wh
 | [0014](adr/0014-fingerprints-from-manifest-digest.md) | Fingerprints derive only from the manifest digest | proposed |
 | [0015](adr/0015-easter-eggs-render-verify-result.md) | Easter eggs render `verify.Result` | proposed |
 | [0016](adr/0016-plan-is-intent-apply-rebuilds.md) | A plan holds intent; apply rebuilds and compares | proposed |
-| [0017](adr/0017-stale-plan-by-observed-state.md) | Stale plan = tag moved or target in unplanned state | proposed |
+| [0017](adr/0017-stale-plan-by-observed-state.md) | Stale plan = tag moved or target in unplanned state | accepted |
 | [0018](adr/0018-native-summary-terraform-export.md) | Native job summary; Terraform export is the `letsgo-tfplan` companion | proposed |
 | [0019](adr/0019-plan-apply-enforcement-in-core.md) | Plan/apply enforcement in core; only presentation may be a plugin | proposed |
 | [0020](adr/0020-plan-file-and-apply-surface.md) | The plan file, `apply`, and drift detection | accepted |
