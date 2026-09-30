@@ -1542,11 +1542,11 @@ func (p *Plan) required(name string) bool {
 // in which case a Skip is exactly the outcome require promised would not
 // happen.
 func (p *Plan) skip(check, feature, format string, args ...any) {
-	status := Skip
 	if p.required(feature) {
-		status = Fail
+		p.addAt(p.posOf("require "+feature), check, Fail, format, args...)
+		return
 	}
-	p.add(check, status, format, args...)
+	p.add(check, Skip, format, args...)
 }
 
 // resolveModule settles which module is built.

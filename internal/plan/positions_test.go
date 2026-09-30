@@ -48,6 +48,40 @@ func TestFailingChecksPointAtTheirDirective(t *testing.T) {
 	}
 }
 
+// A Skip that `require` turned into a Fail points at the require line, and a
+// Skip nobody required stays without a position.
+func TestRequiredFeatureFailuresPointAtRequire(t *testing.T) {
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GONOSUMDB", "")
+	t.Setenv("GONOSUMCHECK", "")
+
+	r := minimalRepo(t, "require vulncheck\nrequire api-gate\nrequire sumdb\n")
+	p := r.resolve(plan.Options{Analyse: true, Publish: true, Snapshot: true})
+	want := filepath.Join(r.dir, "letsgo.mod")
+
+	for _, tt := range []struct {
+		check string
+		line  int
+	}{
+		{"vulnerabilities", 1},
+		{"api compatibility", 2},
+		{"sumdb", 3},
+	} {
+		c, ok := failing(p, tt.check)
+		if !ok {
+			t.Fatalf("no failing %q check; got %s", tt.check, checkNames(p))
+		}
+		if c.Pos == nil || c.Pos.File != want || c.Pos.Line != tt.line {
+			t.Errorf("%s pos = %+v, want %s:%d", tt.check, c.Pos, want, tt.line)
+		}
+	}
+
+	q := minimalRepo(t, "").resolve(plan.Options{Analyse: true})
+	if c := check(t, q, "vulnerabilities"); c.Status != plan.Skip || c.Pos != nil {
+		t.Errorf("unrequired vulnerabilities = %+v, want a Skip without a pos", c)
+	}
+}
+
 func failing(p *plan.Plan, name string) (plan.Check, bool) {
 	for _, c := range p.Checks {
 		if c.Name == name && c.Status == plan.Fail {
