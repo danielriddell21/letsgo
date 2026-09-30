@@ -16,10 +16,12 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
+	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/semver"
 	"github.com/danielriddell21/letsgo/internal/verify"
@@ -121,7 +123,8 @@ func (r *Result) Report(w io.Writer) {
 // It fetches the release, verifies its source archive against the manifest
 // (reusing verify's own path, so an audit and a verify never disagree about
 // what "the release's source" means), and runs the same reachability-aware
-// scan the release-time gate does. The new entry is appended to the
+// scan the release-time gate does, under each build configuration the
+// manifest records. The new entry is appended to the
 // release's audit.json unless it exactly matches the last recorded entry
 // (same vulndb date and findings), so a re-run against an unchanged
 // database costs nothing to repeat.
@@ -219,7 +222,7 @@ func auditRelease(ctx context.Context, o Options, release *github.Release) (*Res
 		return nil, fmt.Errorf("audit: %w", err)
 	}
 
-	report, err := gate.VulncheckReport(ctx, source)
+	report, err := gate.VulncheckReport(ctx, source, scansFor(m)...)
 	if err != nil {
 		return nil, err
 	}
@@ -250,6 +253,38 @@ func auditRelease(ctx context.Context, o Options, release *github.Release) (*Res
 	}
 	result.Recorded = true
 	return result, nil
+}
+
+// scansFor is the build configurations the release shipped, one per distinct
+// set of build tags and target (AU-4): reachability depends on which files
+// compile, so the source is scanned as each archive was built rather than as
+// the host would build it. A manifest that records no artifacts yields no
+// scans, which leaves govulncheck's own defaults.
+func scansFor(m *manifest.Manifest) []gate.Scan {
+	var scans []gate.Scan
+	seen := map[string]bool{}
+	for _, a := range m.Artifacts {
+		var tags []string
+		for _, flag := range a.Build.Flags {
+			if rest, ok := strings.CutPrefix(flag, "-tags="); ok && rest != "" {
+				tags = strings.Split(rest, ",")
+			}
+		}
+		var env []string
+		for _, key := range []string{"CGO_ENABLED", "GOARCH", "GOOS"} {
+			if v, ok := a.Build.Env[key]; ok {
+				env = append(env, key+"="+v)
+			}
+		}
+
+		key := strings.Join(tags, ",") + "|" + strings.Join(env, ",")
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		scans = append(scans, gate.Scan{Tags: tags, Env: env})
+	}
+	return scans
 }
 
 // loadRecord fetches a release's existing audit.json, or starts a fresh

@@ -230,6 +230,47 @@ func TestRunReportsACleanRelease(t *testing.T) {
 	}
 }
 
+// The scan runs under the release's own target, not the host's (AU-4).
+func TestRunScansUnderTheManifestsTargets(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake tool is a shell script")
+	}
+	dir := t.TempDir()
+	log := filepath.Join(dir, "calls")
+	script := "#!/bin/sh\necho \"$GOOS/$GOARCH cgo=$CGO_ENABLED\" >> " + log + "\ncat <<'EOF'\n" + cleanOutput + "\nEOF\n"
+	if err := os.WriteFile(filepath.Join(dir, "govulncheck"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	p := buildRelease(t)
+	client, _ := p.serve(t, "")
+	if _, err := audit.Run(context.Background(), audit.Options{
+		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
+		Tag: "v1.2.3", WorkDir: t.TempDir(),
+	}); err != nil {
+		t.Fatalf("audit.Run: %v", err)
+	}
+
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran := strings.Fields(strings.ReplaceAll(string(calls), " cgo=0", ""))
+	recorded := map[string]bool{}
+	for _, a := range p.result.Manifest.Artifacts {
+		recorded[a.OS+"/"+a.Arch] = true
+	}
+	if len(ran) != len(recorded) {
+		t.Fatalf("govulncheck ran %d times (%q), the manifest records %d targets", len(ran), ran, len(recorded))
+	}
+	for _, target := range ran {
+		if !recorded[target] {
+			t.Errorf("govulncheck ran for %s, which the manifest does not record", target)
+		}
+	}
+}
+
 func TestRunReportsAnAffectedRelease(t *testing.T) {
 	fakeGovulncheck(t, affectedOutput)
 	p := buildRelease(t)
