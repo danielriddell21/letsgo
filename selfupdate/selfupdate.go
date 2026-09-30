@@ -401,6 +401,20 @@ func isRetracted(body string) bool {
 // always lists releases rather than tags — a tag carries no draft or
 // retraction state, and both matter here.
 func channelRelease(ctx context.Context, o Options) (*release, error) {
+	best, err := bestRelease(ctx, o, func(v semver.Version) bool { return channelMatch(v, o.Channel) })
+	if err != nil {
+		return nil, err
+	}
+	if best == nil {
+		return nil, fmt.Errorf("selfupdate: %s has no releases on the %s channel", o.Repo, o.Channel)
+	}
+	return best, nil
+}
+
+// bestRelease is the highest-versioned release within o.Prefix's scope that
+// keep accepts, excluding drafts and yanked releases. It is nil when nothing
+// qualifies.
+func bestRelease(ctx context.Context, o Options, keep func(semver.Version) bool) (*release, error) {
 	releases, err := listReleases(ctx, o)
 	if err != nil {
 		return nil, err
@@ -420,18 +434,37 @@ func channelRelease(ctx context.Context, o Options) (*release, error) {
 			continue
 		}
 		v, ok := semver.Parse(rest)
-		if !ok || !channelMatch(v, o.Channel) {
+		if !ok || !keep(v) {
 			continue
 		}
 		if best == nil || semver.Compare(v, bestVersion) > 0 {
 			best, bestVersion = r, v
 		}
 	}
-
-	if best == nil {
-		return nil, fmt.Errorf("selfupdate: %s has no releases on the %s channel", o.Repo, o.Channel)
-	}
 	return best, nil
+}
+
+// Latest reports the newest stable release, without looking at what it
+// contains: no manifest is fetched and nothing is compared with
+// o.Current. It is for a program that only wants to know whether there is
+// something newer to mention, where Check would cost a second request and
+// fail on a release that has no build for this platform.
+//
+// Drafts, yanked releases and prereleases are never the answer. The version
+// is returned without a leading "v" or the module's scope prefix.
+func Latest(ctx context.Context, o Options) (string, error) {
+	if o.Repo == "" {
+		return "", fmt.Errorf("selfupdate: no repository given")
+	}
+	best, err := bestRelease(ctx, o, func(v semver.Version) bool { return !v.IsPrerelease() })
+	if err != nil {
+		return "", err
+	}
+	if best == nil {
+		return "", fmt.Errorf("selfupdate: %s has no stable releases", o.Repo)
+	}
+	rest, _ := (discover.Scope{Prefix: o.Prefix}).MatchesTag(best.TagName)
+	return strings.TrimPrefix(rest, "v"), nil
 }
 
 // channelMatch reports whether v is a candidate for channel: any stable

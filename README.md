@@ -99,6 +99,19 @@ store, the module proxy, a `token-command` credential helper — go in a global
 checked separately, so a release directive there is an error rather than a
 silent difference between your laptop and CI.
 
+```
+update-check weekly
+```
+
+`update-check daily|weekly` is opt-in and off by default. When set, an
+interactive command prints one line to stderr once a newer stable release
+exists (``letsgo v1.4.0 is available (you have v1.3.0): run `letsgo update` ``).
+It never updates anything and makes at most one request per interval, which
+is remembered in the cache directory (so it follows `cache <dir>` and does
+not run with `cache off`). Network failures are silent, and so is everything
+in CI (`CI` set), when stderr is not a terminal, with `--json`, and for `lsp`,
+`update` and `version`.
+
 Plugins are installed into a content-addressed store keyed by the digest
 `letsgo.mod` pins, so different repositories can pin different versions on one
 machine. `letsgo plugin install` with no name installs every pin.

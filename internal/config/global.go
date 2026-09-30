@@ -104,7 +104,7 @@ var globalDocs = map[string]string{ //nolint:gosec // hover text, not a credenti
 	"proxy":         "Overrides the module proxy warmed after a release.",
 	"token-command": "Runs to obtain a forge token once a flag and the environment both come up empty. Output is never written anywhere.",
 	"color":         "How output is colored.",
-	"update-check":  "How often letsgo checks for a newer release of itself.",
+	"update-check":  "Opt-in: how often letsgo checks for a newer release of itself and mentions it on stderr. Off by default; nothing is ever installed.",
 }
 
 // GlobalDoc returns a global directive's usage and documentation, for hover

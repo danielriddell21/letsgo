@@ -105,7 +105,8 @@ update-check weekly
 | `plugins <dir>` | — | the plugin store, see below |
 | `plugin-repo <owner/name>` | `pluginRepo` constant | a mirror for `plugin install`. The digest pin still decides what runs, so a mirror can't substitute a binary |
 | `proxy <url>` | `DefaultProxy` | the proxy that gets warmed. A private module warms the private proxy |
-| `color`, `update-check` | — | presentation only |
+| `color` | — | presentation only |
+| `update-check off\|daily\|weekly` | — | opt-in, default `off`. Prints one stderr line when a newer stable release exists; never installs |
 
 **Not in global config:**
 
@@ -187,6 +188,20 @@ Phases, in order. Each is a vertical slice: a thin path through every layer, ver
   Proposed: not now.
 - A project-local, gitignored override file (`.letsgo/local.mod`) for machine
   settings per repository? Proposed: no; env vars cover the rare case.
-- Should `update-check` exist at all, given `letsgo update --check` and the
-  action's `version: latest`? It's the only feature here that makes a network
-  call nobody asked for.
+
+## Decided
+
+- `update-check` exists, **opt-in**: unset or `off` makes no network call, so
+  the default stays free of requests nobody asked for. `daily` or `weekly`
+  allows one lookup per interval (stable releases only, drafts and yanked
+  excluded, via the `selfupdate` package). It only ever prints
+  ``letsgo vX is available (you have vY): run `letsgo update` `` to stderr; it
+  never downloads or installs.
+- The last lookup time and latest seen version are kept in
+  `update-check.json` under the cache directory (`cache <dir>` if set, else
+  `UserCacheDir/letsgo`, which honours `XDG_CACHE_HOME`). `cache off` disables
+  the check, since it could not remember having run. A failed or timed-out
+  (~2s) lookup is silent and still counts as the attempt, so it is not
+  retried until the next interval.
+- Never printed in CI (`CI` set), when stderr is not a terminal, with
+  `--json` or `--format json`, or for `lsp`, `update`, `version` and `help`.
