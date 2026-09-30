@@ -90,10 +90,17 @@ type Result struct {
 	// Recorded is false when this run's entry matched the last recorded one
 	// (same vulndb date and findings) and so was not appended.
 	Recorded bool
+
+	// Skipped says why the release was not audited at all, or is empty.
+	Skipped string
 }
 
 // Report writes a human-readable summary.
 func (r *Result) Report(w io.Writer) {
+	if r.Skipped != "" {
+		fmt.Fprintf(w, "%s: skipped, %s\n", r.Tag, r.Skipped)
+		return
+	}
 	if r.Entry.Status != Affected {
 		fmt.Fprintf(w, "%s: clean (as of %s)\n", r.Tag, r.Entry.Vulndb)
 		return
@@ -190,6 +197,12 @@ func RunAll(ctx context.Context, o Options) ([]*Result, error) {
 // SourceFromArchive rejects a directory that already holds another
 // release's extracted archive.
 func auditRelease(ctx context.Context, o Options, release *github.Release) (*Result, error) {
+	// An immutable release cannot have audit.json attached or replaced, and
+	// an audit that cannot be recorded is not worth running.
+	if release.Immutable {
+		return &Result{Tag: release.TagName, Skipped: "the release is immutable, so audit.json cannot be recorded on it"}, nil
+	}
+
 	m, err := verify.FetchManifest(ctx, o.Client, o.Repo, release)
 	if err != nil {
 		return nil, err

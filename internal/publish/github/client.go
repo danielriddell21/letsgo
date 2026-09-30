@@ -71,6 +71,7 @@ type Release struct {
 	Body       string  `json:"body"`
 	Draft      bool    `json:"draft"`
 	Prerelease bool    `json:"prerelease"`
+	Immutable  bool    `json:"immutable"`
 	HTMLURL    string  `json:"html_url"`
 	Assets     []Asset `json:"assets"`
 }

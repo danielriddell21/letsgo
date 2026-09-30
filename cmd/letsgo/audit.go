@@ -62,6 +62,9 @@ func runAudit(args []string) error {
 
 func reportAuditResult(result *audit.Result) {
 	result.Report(os.Stdout)
+	if result.Skipped != "" {
+		return
+	}
 	if result.Recorded {
 		fmt.Println("  recorded in audit.json")
 	} else {
