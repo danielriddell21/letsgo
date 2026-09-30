@@ -24,6 +24,9 @@ const (
 
 	shop = "SHIP IT & SAVE"
 
+	// skipped is how anything verification did not establish reads.
+	skipped = "— SKIPPED"
+
 	// barcodeChars is how many hex characters of the manifest digest the
 	// barcode carries: the most a Code 128 symbol of this width can hold.
 	barcodeChars = 4
@@ -127,7 +130,7 @@ func itemStatus(s verify.Status) string {
 	case verify.Fail:
 		return "✗ MISMATCH"
 	default:
-		return "— SKIPPED"
+		return skipped
 	}
 }
 
@@ -136,7 +139,7 @@ func itemStatus(s verify.Status) string {
 func checkLabel(r *verify.Result, name, pass, warn string) string {
 	c, ok := find(r, name)
 	if !ok {
-		return "— SKIPPED"
+		return skipped
 	}
 	switch c.Status {
 	case verify.Pass:
@@ -146,7 +149,7 @@ func checkLabel(r *verify.Result, name, pass, warn string) string {
 	case verify.Warn:
 		return "! " + warn
 	default:
-		return "— SKIPPED"
+		return skipped
 	}
 }
 
