@@ -413,7 +413,7 @@ func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error
 	}
 	fmt.Printf("\n  built %d files\n", len(result.Files))
 
-	if err := holdToPlan(applied, p, result); err != nil {
+	if applied, err = holdAndStamp(applied, p, result); err != nil {
 		return err
 	}
 
@@ -1334,6 +1334,9 @@ func sumsFrom(r *release.Result) map[string]string {
 	sums := map[string]string{r.Source.Name: r.Source.SHA256}
 	for _, a := range r.Manifest.Artifacts {
 		sums[a.Name] = a.SHA256
+	}
+	if r.Manifest.Plan != nil {
+		sums[release.PlanFileName] = r.Manifest.Plan.SHA256
 	}
 	return sums
 }

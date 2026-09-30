@@ -102,6 +102,22 @@ type Manifest struct {
 	// rebuilt, and `verify` can check the chain by re-downloading that
 	// manifest and hashing it.
 	PromotedFrom *PromotedFrom `json:"promoted_from,omitempty"`
+
+	// Plan records the saved plan this release was applied from, nil for a
+	// release made without one. The plan file is attached to the release, so
+	// a reader can check that what was reviewed is what shipped.
+	Plan *PlanRecord `json:"plan,omitempty"`
+}
+
+// PlanRecord names the plan a release was applied from.
+type PlanRecord struct {
+	// SHA256 is the digest of the attached letsgo.plan.json.
+	SHA256 string `json:"sha256"`
+
+	// CreatedAt is when the plan was made, and LetsgoVersion the version of
+	// letsgo that made it.
+	CreatedAt     string `json:"created_at"`
+	LetsgoVersion string `json:"letsgo_version"`
 }
 
 // PromotedFrom names the prerelease a stable release was rebuilt from.

@@ -744,6 +744,71 @@ func TestVerifyOmitsAuditWhenNoneExists(t *testing.T) {
 	}
 }
 
+// A release applied from a plan records it, and verify prints the record and
+// checks the attached plan is the one it names (PA-12).
+func stampedPlan(t *testing.T, p *published) {
+	t.Helper()
+	if err := release.StampPlan(p.result, []byte(`{"kind":"release"}`), "2026-09-30T10:00:00Z", "0.31.0"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerifyReportsThePlanAReleaseWasAppliedFrom(t *testing.T) {
+	p := buildRelease(t)
+	stampedPlan(t, p)
+	result := run(t, p, verify.Options{Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true})
+
+	c := find(t, result, "plan")
+	if c.Status != verify.Pass || !strings.Contains(c.Detail, "made 2026-09-30T10:00:00Z by letsgo 0.31.0") {
+		t.Errorf("plan = %+v, want a pass naming when and by what the plan was made", c)
+	}
+	if !result.OK() {
+		t.Errorf("a stamped release failed verification: %+v", result.Checks)
+	}
+}
+
+func TestVerifyFailsWhenTheAttachedPlanIsNotTheRecordedOne(t *testing.T) {
+	p := buildRelease(t)
+	stampedPlan(t, p)
+	if err := os.WriteFile(filepath.Join(p.dist, release.PlanFileName), []byte(`{"kind":"other"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := run(t, p, verify.Options{Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true})
+
+	if c := find(t, result, "plan"); c.Status != verify.Fail || !strings.Contains(c.Detail, "the attached") {
+		t.Errorf("plan = %+v, want a fail for a plan that does not match its record", c)
+	}
+}
+
+func TestVerifyFailsWhenTheRecordedPlanIsNotAttached(t *testing.T) {
+	p := buildRelease(t)
+	stampedPlan(t, p)
+	files := p.result.Files[:0:0]
+	for _, name := range p.result.Files {
+		if name != release.PlanFileName {
+			files = append(files, name)
+		}
+	}
+	p.result.Files = files
+	result := run(t, p, verify.Options{Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true})
+
+	if c := find(t, result, "plan"); c.Status != verify.Fail || !strings.Contains(c.Detail, "is not attached") {
+		t.Errorf("plan = %+v, want a fail for a missing plan", c)
+	}
+}
+
+// A release made without a plan has no record to report.
+func TestVerifyOmitsThePlanWhenNoneWasUsed(t *testing.T) {
+	p := buildRelease(t)
+	result := run(t, p, verify.Options{Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true})
+
+	for _, c := range result.Checks {
+		if c.Name == "plan" {
+			t.Errorf("plan = %+v, want no plan check for a release made without one", c)
+		}
+	}
+}
+
 func sha256Of(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])

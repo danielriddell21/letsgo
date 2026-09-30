@@ -208,6 +208,50 @@ func holdToPlan(file *plandiff.File, p *plan.Plan, result *release.Result) error
 	return nil
 }
 
+// holdAndStamp holds the rebuild to the plan, then records the plan in it.
+func holdAndStamp(file *plandiff.File, p *plan.Plan, result *release.Result) (*plandiff.File, error) {
+	if err := holdToPlan(file, p, result); err != nil {
+		return nil, err
+	}
+	return stampApplied(file, result)
+}
+
+// stampApplied records the plan in the release an apply is about to publish,
+// and returns the plan with the asset that adds to what it lists.
+//
+// It runs after the rebuild has been held to the plan, which predicts the
+// manifest without this record. A plan that does not write the manifest —
+// one already published — leaves it as it is: the record would be a change the
+// plan never listed.
+func stampApplied(file *plandiff.File, result *release.Result) (*plandiff.File, error) {
+	if file == nil || !writesManifest(file.Actions) {
+		return file, nil
+	}
+	data, err := file.Encode()
+	if err != nil {
+		return nil, fmt.Errorf("letsgo: %w", err)
+	}
+	if err := release.StampPlan(result, data, file.CreatedAt, file.LetsgoVersion); err != nil {
+		return nil, fmt.Errorf("letsgo: %w", err)
+	}
+
+	stamped := *file
+	stamped.Actions = append(append([]plandiff.Action(nil), file.Actions...), plandiff.Action{
+		Kind: plandiff.KindAsset, Target: release.PlanFileName, Op: plandiff.Add,
+		Planned: "sha256:" + result.Manifest.Plan.SHA256,
+	})
+	return &stamped, nil
+}
+
+func writesManifest(actions []plandiff.Action) bool {
+	for _, a := range actions {
+		if a.Kind == plandiff.KindAsset && a.Target == manifest.FileName && a.Op != plandiff.Keep {
+			return true
+		}
+	}
+	return false
+}
+
 // refusal is the error for a rebuild that did not reproduce the plan, naming
 // the fields that differ.
 func refusal(file *plandiff.File, rebuilt []byte, got string) error {
