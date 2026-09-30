@@ -220,3 +220,39 @@ func TestPruneRemovesOnlyWhatKeepRejects(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestOpenReadOnlyNeverCreatesTheStore(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "absent")
+	store, err := pluginstore.OpenReadOnly(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if path, ok, err := store.Lookup(digest("x"), "letsgo-x"); ok || err != nil {
+		t.Errorf("Lookup = %q, %v, %v; want a plain miss", path, ok, err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("stat %s: %v; want it left uncreated", dir, err)
+	}
+}
+
+func TestOpenReadOnlyFindsWhatOpenInstalled(t *testing.T) {
+	dir := t.TempDir()
+	writable, err := pluginstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := digest("the env plugin")
+	want, err := writable.Put(d, "letsgo-env", []byte("the env plugin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	readOnly, err := pluginstore.OpenReadOnly(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, err := readOnly.Lookup(d, "letsgo-env"); !ok || err != nil || got != want {
+		t.Errorf("Lookup = %q, %v, %v; want %q", got, ok, err, want)
+	}
+}

@@ -25,7 +25,7 @@ language server, and the `letsgo-vscode` extension.
 | ED-1 | Parse and decode errors MUST be published as diagnostics on every change. | 1 |
 | ED-2 | Checks derived from config MUST carry a position, and MUST appear as diagnostics on save. | 2 |
 | ED-3 | Completion MUST offer directive names, build targets, hooks, feature names and first-party plugins. | 3 |
-| ED-4 | Hover over a directive MUST show its documentation. | 4 |
+| ED-4 | Hover over a directive MUST show its documentation. Outside a restricted workspace, hover over a plugin pin MUST show whether it is installed, on PATH with a matching digest, missing or mismatched, and hover over a build target MUST show whether the go toolchain can build it. | 4 |
 | ED-5 | Formatting MUST equal `letsgo fmt` output byte for byte. | 5 |
 | ED-6 | The "update pin" code action MUST rewrite the version and digest of a pin line. | 6 |
 | ED-7 | The panel MUST show, per module, the resolved values, gates, artifacts, features and plugins from `plan --json`. | 7 |

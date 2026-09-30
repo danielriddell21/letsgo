@@ -42,17 +42,48 @@ type Store struct {
 // set, else the global config's `plugins` directive, else the default
 // location: $XDG_DATA_HOME/letsgo/plugins, or its platform equivalent.
 func Open(dir string) (*Store, error) {
+	return openWith(dir, globalOrEmpty())
+}
+
+// OpenReadOnly resolves the store the way Open does but never creates it: a
+// reader that only asks whether something is installed — an editor hovering a
+// pin — must not leave a directory behind on a machine that has installed
+// nothing. A store that does not exist holds nothing, so Lookup reports a
+// plain miss.
+func OpenReadOnly(dir string) (*Store, error) {
+	resolved, err := storeDir(dir, globalOrEmpty())
+	if err != nil {
+		return nil, err
+	}
+	return &Store{dir: resolved}, nil
+}
+
+// globalOrEmpty is the global config, or an empty one when it cannot be
+// read: a broken global file is plan's to report, not the store's.
+func globalOrEmpty() *config.Global {
 	global, err := config.LoadGlobal()
 	if err != nil {
-		global = &config.Global{}
+		return &config.Global{}
 	}
-	return openWith(dir, global)
+	return global
 }
 
 // openWith is Open's core logic, taking the global config directly rather
 // than loading it, so tests can exercise the `plugins` directive without
 // relying on config.LoadGlobal's process-wide memoization.
 func openWith(dir string, global *config.Global) (*Store, error) {
+	dir, err := storeDir(dir, global)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("pluginstore: %w", err)
+	}
+	return &Store{dir: dir}, nil
+}
+
+// storeDir picks where the store lives, without touching the disk.
+func storeDir(dir string, global *config.Global) (string, error) {
 	if dir == "" {
 		dir = os.Getenv(StoreEnvOverride)
 	}
@@ -62,14 +93,11 @@ func openWith(dir string, global *config.Global) (*Store, error) {
 	if dir == "" {
 		home, err := dataHome()
 		if err != nil {
-			return nil, fmt.Errorf("pluginstore: %w", err)
+			return "", fmt.Errorf("pluginstore: %w", err)
 		}
 		dir = filepath.Join(home, "letsgo", "plugins")
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("pluginstore: %w", err)
-	}
-	return &Store{dir: dir}, nil
+	return dir, nil
 }
 
 // entryDir is where digest's entries live: sha256/<hex digest>. ok is false

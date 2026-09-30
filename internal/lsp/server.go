@@ -120,7 +120,7 @@ func (s *Server) handle(ctx context.Context, req request) (any, error) {
 	case "textDocument/completion":
 		return s.handleCompletion(ctx, req.Params)
 	case "textDocument/hover":
-		return s.handleHover(req.Params)
+		return s.handleHover(ctx, req.Params)
 	case "textDocument/formatting":
 		return s.handleFormatting(req.Params)
 	case "textDocument/documentSymbol":
@@ -243,7 +243,7 @@ func (s *Server) handleCompletion(ctx context.Context, raw json.RawMessage) (any
 	return items, nil
 }
 
-func (s *Server) handleHover(raw json.RawMessage) (any, error) {
+func (s *Server) handleHover(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p textDocumentPositionParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("lsp: %w", err)
@@ -252,7 +252,7 @@ func (s *Server) handleHover(raw json.RawMessage) (any, error) {
 	if !ok {
 		return nil, nil
 	}
-	contents, ok := hoverAt(uriToPath(p.TextDocument.URI), doc.text, p.Position)
+	contents, ok := hoverAt(ctx, uriToPath(p.TextDocument.URI), doc.text, p.Position, !s.opts.Restricted, s.opts.GoBin)
 	if !ok {
 		return nil, nil
 	}
