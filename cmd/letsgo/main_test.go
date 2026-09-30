@@ -792,9 +792,9 @@ func manifestForge(t *testing.T, repoName, tag string, m *manifest.Manifest) *gi
 // call, same guarantee TestReleaseNotesSkippedWhenChangelogDisabled proves
 // for the changelog-disabled case.
 func TestWhatShippedSkipsAFirstRelease(t *testing.T) {
-	out := whatShipped(context.Background(), nil, github.Repo{}, "", &manifest.Manifest{Version: "v1.0.0"})
-	if out != "" {
-		t.Errorf("whatShipped = %q, want empty for a first release", out)
+	out, err := whatShipped(context.Background(), nil, github.Repo{}, "", &manifest.Manifest{Version: "v1.0.0"}, nil)
+	if err != nil || out != "" {
+		t.Errorf("whatShipped = %q, %v, want empty for a first release", out, err)
 	}
 }
 
@@ -808,13 +808,34 @@ func TestWhatShippedSkipsAPreviousReleaseWithNoManifest(t *testing.T) {
 
 	var out string
 	stdout := captureStdout(t, func() {
-		out = whatShipped(context.Background(), client, repo, "v1.0.0", current)
+		var err error
+		out, err = whatShipped(context.Background(), client, repo, "v1.0.0", current, nil)
+		if err != nil {
+			t.Errorf("whatShipped: %v", err)
+		}
 	})
 	if out != "" {
 		t.Errorf("whatShipped = %q, want empty", out)
 	}
 	if !strings.Contains(stdout, `skipped the "what shipped" section`) {
 		t.Errorf("stdout = %q, want a skip notice", stdout)
+	}
+}
+
+// A release that required diff-notes asked for the failure the tests above
+// tolerate: no previous release, or one with no manifest, is an error.
+func TestWhatShippedFailsWhenRequiredAndNothingToCompare(t *testing.T) {
+	repo := github.Repo{Owner: "you", Name: "demo"}
+	current := &manifest.Manifest{Version: "v1.1.0"}
+	required := []string{"diff-notes"}
+
+	if _, err := whatShipped(context.Background(), nil, repo, "", current, required); err == nil {
+		t.Error("a first release should fail when diff-notes is required")
+	}
+
+	client := manifestForge(t, "you/demo", "v1.0.0", nil)
+	if _, err := whatShipped(context.Background(), client, repo, "v1.0.0", current, required); err == nil {
+		t.Error("a previous release with no manifest should fail when diff-notes is required")
 	}
 }
 
@@ -828,7 +849,10 @@ func TestWhatShippedRendersTheCollapsedSection(t *testing.T) {
 		Schema: manifest.Schema, Version: "v1.1.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.2"},
 	}
 
-	out := whatShipped(context.Background(), client, repo, "v1.0.0", current)
+	out, err := whatShipped(context.Background(), client, repo, "v1.0.0", current, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(out, "<details><summary>What shipped (vs v1.0.0)</summary>") {
 		t.Errorf("whatShipped = %q, want the collapsed summary", out)
 	}

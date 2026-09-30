@@ -108,7 +108,7 @@ var All = []Feature{
 	},
 
 	{
-		Name: "sbom", Kind: Output, Default: true, Disable: true,
+		Name: "sbom", Kind: Output, Default: true, Disable: true, Require: true,
 		Summary: "a software bill of materials is published with the release",
 	},
 	{
@@ -116,11 +116,11 @@ var All = []Feature{
 		Summary: "install.sh is generated for a GitHub release",
 	},
 	{
-		Name: "changelog", Kind: Output, Default: true, Disable: true,
+		Name: "changelog", Kind: Output, Default: true, Disable: true, Require: true,
 		Summary: "commits since the previous tag become the release body",
 	},
 	{
-		Name: "diff-notes", Kind: Output, Default: true, Disable: true,
+		Name: "diff-notes", Kind: Output, Default: true, Disable: true, Require: true,
 		Summary: "a collapsed \"what shipped\" section compares this release's manifest against the previous one",
 	},
 

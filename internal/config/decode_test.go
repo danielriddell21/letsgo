@@ -361,6 +361,11 @@ func TestRequireDirective(t *testing.T) {
 		t.Errorf("Required = %q", cfg.Required)
 	}
 
+	cfg = decode(t, "require sbom changelog diff-notes\n")
+	if strings.Join(cfg.Required, ",") != "sbom,changelog,diff-notes" {
+		t.Errorf("Required = %q", cfg.Required)
+	}
+
 	cfg = decode(t, "require vulncheck\nrequire vulncheck\n")
 	if len(cfg.Required) != 1 {
 		t.Errorf("Required = %q, want one entry", cfg.Required)
@@ -374,8 +379,6 @@ func TestRequireDirectiveRejects(t *testing.T) {
 		// On by default with no Skip to strengthen, or off by default and
 		// enabled by its own directive: neither can be required.
 		"require reproducible\n",
-		"require sbom\n",
-		"require changelog\n",
 		"require proxy-warm\n",
 		"require brew\n",
 		"require image\n",
