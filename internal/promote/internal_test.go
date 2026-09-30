@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/semver"
@@ -167,5 +169,42 @@ func TestFindReleaseNamesTheListingItCouldNotRead(t *testing.T) {
 	_, err := findRelease(context.Background(), Options{Client: client}, "v1.0.0")
 	if err == nil || !strings.Contains(err.Error(), "promote: listing releases") {
 		t.Errorf("findRelease error = %v, want it to name the listing", err)
+	}
+}
+
+func TestBuildNotesNamesWhatItCouldNotCollect(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildNotes(context.Background(), Options{Dir: t.TempDir()}, "v1.0.0", &plan.Plan{}, &release.Result{})
+	if err == nil || !strings.Contains(err.Error(), "promote: collecting the commits") {
+		t.Errorf("buildNotes error = %v, want it to name the commits", err)
+	}
+}
+
+func TestBuildNotesNamesTheExtraNotesItCouldNotDigest(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "feat: first"},
+		{"tag", "v1.0.0"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+
+	o := Options{
+		Dir: dir, Shallow: true,
+		ExtraNotes: func(context.Context, *plan.Plan, string, *manifest.Manifest, []byte) (string, error) {
+			return "", nil
+		},
+	}
+	_, err := buildNotes(context.Background(), o, "v1.0.0", &plan.Plan{}, &release.Result{Dir: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "promote: digesting the manifest") {
+		t.Errorf("buildNotes error = %v, want it to name the manifest digest", err)
 	}
 }

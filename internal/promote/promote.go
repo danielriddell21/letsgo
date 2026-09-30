@@ -173,7 +173,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	// re-verifies each asset rather than failing because one is already there.
 	built.Manifest.PromotedFrom = &manifest.PromotedFrom{Tag: o.RCTag, ManifestSHA256: rcManifestSHA256}
 	if err := rewriteManifest(built); err != nil {
-		return nil, fmt.Errorf("promote: stamping the manifest: %w", err)
+		return nil, err
 	}
 
 	notes, err := buildNotes(ctx, o, stableTag, p, built)
@@ -449,7 +449,7 @@ func buildNotes(ctx context.Context, o Options, stableTag string, p *plan.Plan, 
 
 	history, err := prereleaseHistory(ctx, o, stableTag)
 	if err != nil {
-		return "", fmt.Errorf("promote: building the prerelease history: %w", err)
+		return "", err
 	}
 	if history != "" {
 		notes += "\n<details><summary>Prerelease history</summary>\n\n" + history + "</details>\n"
