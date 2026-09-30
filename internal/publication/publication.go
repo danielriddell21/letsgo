@@ -82,31 +82,31 @@ func Tag(p *plan.Plan) string {
 // world at assets only the author can see.
 func Publish(ctx context.Context, o Options) (*Result, error) {
 	out := o.out()
+	var done []Step
 
 	if err := gate(ctx, out, o); err != nil {
-		return nil, err
+		return nil, &StepError{Step: StepGate, Done: done, Err: err}
 	}
+	done = append(done, StepGate)
 
 	released, err := publish.Run(ctx, releaseOptions(o, func(format string, args ...any) {
 		fmt.Fprintf(out, "  "+format+"\n", args...)
 	}))
 	if err != nil {
-		return nil, err
+		return nil, &StepError{Step: StepRelease, Done: done, Err: err}
 	}
+	done = append(done, StepRelease)
 	reportPublished(out, released)
 
-	if err := downstream(ctx, o); err != nil {
-		return nil, err
+	if err := publishTap(ctx, out, o.Plan, o.Result, o.Tap, o.Repo, o.Info); err != nil {
+		return nil, &StepError{Step: StepTap, Done: done, Err: err}
+	}
+	done = append(done, StepTap)
+
+	if err := publishImages(ctx, out, o); err != nil {
+		return nil, &StepError{Step: StepImages, Done: done, Err: err}
 	}
 	return &Result{Forge: released}, nil
-}
-
-// downstream publishes what follows the forge release: the tap, then the images.
-func downstream(ctx context.Context, o Options) error {
-	if err := publishTap(ctx, o.out(), o.Plan, o.Result, o.Tap, o.Repo, o.Info); err != nil {
-		return err
-	}
-	return publishImages(ctx, o.out(), o)
 }
 
 // Observe says what Publish would do to the forge, tap and registry, by
@@ -115,7 +115,7 @@ func downstream(ctx context.Context, o Options) error {
 func Observe(ctx context.Context, o Options) ([]plandiff.Action, error) {
 	actions, err := publish.Observe(ctx, releaseOptions(o, nil))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("observing the release: %w", err)
 	}
 
 	if o.Plan.Config.Draft {
@@ -124,13 +124,13 @@ func Observe(ctx context.Context, o Options) ([]plandiff.Action, error) {
 
 	tap := NewTapObserver(o.Tap)
 	if err := publishTap(ctx, io.Discard, o.Plan, o.Result, tap, o.Repo, o.Info); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("observing the tap: %w", err)
 	}
 	actions = append(actions, tap.Actions()...)
 
 	images, err := release.ObserveImages(ctx, o.Result.Images, o.Token)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("observing the images: %w", err)
 	}
 	return append(actions, images...), nil
 }

@@ -8,6 +8,7 @@ import (
 )
 
 func TestPublishImagesHasNothingToDoWithoutImages(t *testing.T) {
+	t.Parallel()
 	var out strings.Builder
 
 	err := publishImages(t.Context(), &out, Options{Plan: releasePlan(), Result: &release.Result{}})
@@ -20,6 +21,7 @@ func TestPublishImagesHasNothingToDoWithoutImages(t *testing.T) {
 }
 
 func TestPublishImagesDescribesWhatARehearsalWouldPush(t *testing.T) {
+	t.Parallel()
 	var out strings.Builder
 	o := Options{Plan: releasePlan(), Result: &release.Result{Images: []release.ImageBuild{{Registry: "ghcr.io", Repository: "you/foo", Tags: []string{"1.2.3"}}}}, Snapshot: true}
 

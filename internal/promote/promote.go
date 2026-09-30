@@ -173,12 +173,12 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	// re-verifies each asset rather than failing because one is already there.
 	built.Manifest.PromotedFrom = &manifest.PromotedFrom{Tag: o.RCTag, ManifestSHA256: rcManifestSHA256}
 	if err := rewriteManifest(built); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("promote: stamping the manifest: %w", err)
 	}
 
 	notes, err := buildNotes(ctx, o, stableTag, p, built)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("promote: building the notes: %w", err)
 	}
 
 	// A promotion is by definition a public, stable release, whatever the
@@ -201,7 +201,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		Out:    o.Out,
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("promote: %w", err)
 	}
 
 	return &Result{
@@ -272,7 +272,7 @@ func stableTagFor(rcTag, prefix string) (string, error) {
 func findRelease(ctx context.Context, o Options, tag string) (*github.Release, error) {
 	releases, err := o.Client.ListReleases(ctx, o.Repo)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("promote: listing releases: %w", err)
 	}
 	for _, r := range releases {
 		if r.TagName == tag {
@@ -408,7 +408,7 @@ func planFailures(p *plan.Plan) []string {
 func rewriteManifest(built *release.Result) error {
 	path := filepath.Join(built.Dir, manifest.FileName)
 	if err := built.Manifest.Write(path); err != nil {
-		return err
+		return fmt.Errorf("promote: writing the manifest: %w", err)
 	}
 
 	sums := make([]build.Sum, 0, len(built.Files))
@@ -418,12 +418,14 @@ func rewriteManifest(built *release.Result) error {
 		}
 		sum, err := sha256File(filepath.Join(built.Dir, name))
 		if err != nil {
-			return err
+			return fmt.Errorf("promote: hashing %s: %w", name, err)
 		}
 		sums = append(sums, build.Sum{Name: name, SHA256: sum})
 	}
-	_, err := build.WriteChecksums(built.Dir, sums)
-	return err
+	if _, err := build.WriteChecksums(built.Dir, sums); err != nil {
+		return fmt.Errorf("promote: writing %s: %w", build.ChecksumFile, err)
+	}
+	return nil
 }
 
 // buildNotes assembles the stable release's description: everything since
@@ -441,13 +443,13 @@ func buildNotes(ctx context.Context, o Options, stableTag string, p *plan.Plan, 
 		Shallow: o.Shallow, Client: o.Client, Repo: o.Repo,
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("promote: collecting the commits: %w", err)
 	}
 	notes := changelog.Build(previous, stableTag, commits).WithAPIChanges(p.APIChanges).Markdown()
 
 	history, err := prereleaseHistory(ctx, o, stableTag)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("promote: building the prerelease history: %w", err)
 	}
 	if history != "" {
 		notes += "\n<details><summary>Prerelease history</summary>\n\n" + history + "</details>\n"
@@ -458,11 +460,11 @@ func buildNotes(ctx context.Context, o Options, stableTag string, p *plan.Plan, 
 	}
 	sum, err := manifestDigest(built)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("promote: digesting the manifest: %w", err)
 	}
 	extra, err := o.ExtraNotes(ctx, p, previous, built.Manifest, sum)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("promote: generating the extra notes: %w", err)
 	}
 	return notes + extra, nil
 }
@@ -473,7 +475,7 @@ func buildNotes(ctx context.Context, o Options, stableTag string, p *plan.Plan, 
 func manifestDigest(built *release.Result) ([]byte, error) {
 	hexSum, err := sha256File(filepath.Join(built.Dir, manifest.FileName))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("promote: hashing the manifest: %w", err)
 	}
 	sum, err := hex.DecodeString(hexSum)
 	if err != nil {

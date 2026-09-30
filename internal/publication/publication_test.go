@@ -24,6 +24,7 @@ import (
 )
 
 func TestTag(t *testing.T) {
+	t.Parallel()
 	if got := Tag(&plan.Plan{Tag: "v1.2.3", Version: "1.2.3"}); got != "v1.2.3" {
 		t.Errorf("releaseTag = %q", got)
 	}
@@ -76,6 +77,7 @@ func publishFixture(t *testing.T) (Options, *fakeForge, *fakeTap) {
 }
 
 func TestPublishCreatesTheReleaseThenWritesTheTap(t *testing.T) {
+	t.Parallel()
 	o, forge, tap := publishFixture(t)
 	var out strings.Builder
 	o.Out = &out
@@ -102,11 +104,18 @@ func TestPublishCreatesTheReleaseThenWritesTheTap(t *testing.T) {
 }
 
 func TestPublishStopsBeforeTheTapWhenTheForgeFails(t *testing.T) {
+	t.Parallel()
 	o, forge, tap := publishFixture(t)
 	forge.err = errors.New("forbidden")
 
-	if _, err := Publish(t.Context(), o); err == nil {
-		t.Fatal("a failed release went on to publish")
+	_, err := Publish(t.Context(), o)
+
+	stopped, ok := errors.AsType[*StepError](err)
+	if !ok || stopped.Step != StepRelease {
+		t.Fatalf("err = %v, want a StepError at %s", err, StepRelease)
+	}
+	if !errors.Is(err, forge.err) {
+		t.Errorf("err = %v, want it to wrap the forge's error", err)
 	}
 	if len(tap.writes) != 0 {
 		t.Errorf("tap writes = %v after a failed release, want none", tap.writes)
@@ -114,6 +123,7 @@ func TestPublishStopsBeforeTheTapWhenTheForgeFails(t *testing.T) {
 }
 
 func TestPublishHoldsBackTheTapForADraft(t *testing.T) {
+	t.Parallel()
 	o, forge, tap := publishFixture(t)
 	o.Plan.Config.Draft = true
 
@@ -129,6 +139,7 @@ func TestPublishHoldsBackTheTapForADraft(t *testing.T) {
 }
 
 func TestReportPublished(t *testing.T) {
+	t.Parallel()
 	var out strings.Builder
 	reportPublished(&out, &publish.Result{
 		Uploaded: []string{"a"}, Skipped: []string{"b", "c"}, Replaced: []string{"d"}, NotesRefused: true,
@@ -141,20 +152,31 @@ func TestReportPublished(t *testing.T) {
 	}
 }
 
-func TestDownstreamStopsWhenTheTapFails(t *testing.T) {
-	o, _, _ := publishFixture(t)
+func TestPublishNamesWhatIsDoneWhenTheTapFails(t *testing.T) {
+	t.Parallel()
+	o, forge, _ := publishFixture(t)
 	o.Tap = failingTap{}
 
-	if err := downstream(t.Context(), o); err == nil {
-		t.Error("a tap that could not be read did not stop the publication")
+	_, err := Publish(t.Context(), o)
+
+	stopped, ok := errors.AsType[*StepError](err)
+	if !ok || stopped.Step != StepTap {
+		t.Fatalf("err = %v, want a StepError at %s", err, StepTap)
+	}
+	if want := []Step{StepGate, StepRelease}; !slices.Equal(stopped.Done, want) {
+		t.Errorf("Done = %v, want %v", stopped.Done, want)
+	}
+	if len(forge.created) != 1 {
+		t.Errorf("created = %+v, want the release kept", forge.created)
 	}
 }
 
-func TestDownstreamPushesNothingForAnEmptyTapAndImageSet(t *testing.T) {
+func TestPublishPushesNothingForAnEmptyTapAndImageSet(t *testing.T) {
+	t.Parallel()
 	o, _, tap := publishFixture(t)
 	o.Plan.Tap = github.Repo{}
 
-	if err := downstream(t.Context(), o); err != nil {
+	if _, err := Publish(t.Context(), o); err != nil {
 		t.Fatal(err)
 	}
 	if len(tap.writes) != 0 {
@@ -163,6 +185,7 @@ func TestDownstreamPushesNothingForAnEmptyTapAndImageSet(t *testing.T) {
 }
 
 func TestOptionsOutDiscardsWhenNil(t *testing.T) {
+	t.Parallel()
 	if got := (Options{}).out(); got != io.Discard {
 		t.Errorf("out() = %v, want io.Discard", got)
 	}
@@ -173,6 +196,7 @@ func TestOptionsOutDiscardsWhenNil(t *testing.T) {
 }
 
 func TestReleaseTitle(t *testing.T) {
+	t.Parallel()
 	if got := releaseTitle(&plan.Plan{Tag: "v1.2.3"}); got != "v1.2.3" {
 		t.Errorf("releaseTitle for a root module = %q, want the bare tag", got)
 	}
@@ -186,6 +210,7 @@ func TestReleaseTitle(t *testing.T) {
 }
 
 func TestIsPrerelease(t *testing.T) {
+	t.Parallel()
 	tests := map[string]struct {
 		version string
 		config  string
@@ -211,6 +236,7 @@ func TestIsPrerelease(t *testing.T) {
 }
 
 func TestIsLatest(t *testing.T) {
+	t.Parallel()
 	tests := map[string]struct {
 		prefix string
 		config string
@@ -236,6 +262,7 @@ func TestIsLatest(t *testing.T) {
 }
 
 func TestNotesMode(t *testing.T) {
+	t.Parallel()
 	if notesMode(true, true) != publish.NotesAppend {
 		t.Error("--append-notes should append")
 	}
@@ -250,6 +277,7 @@ func TestNotesMode(t *testing.T) {
 // Uploads are checked against the digests the release recorded, so every
 // published file has to appear here.
 func TestSumsFromCoversSourceAndArtifacts(t *testing.T) {
+	t.Parallel()
 	sums := sumsFrom(t.TempDir(), &release.Result{
 		Source: build.Source{Name: "foo_1.2.3_source.tar.gz", SHA256: "src"},
 		Manifest: &manifest.Manifest{Artifacts: []manifest.Artifact{
@@ -274,6 +302,7 @@ func TestSumsFromCoversSourceAndArtifacts(t *testing.T) {
 }
 
 func TestSumsFromCoversThePlanFile(t *testing.T) {
+	t.Parallel()
 	sums := sumsFrom(t.TempDir(), &release.Result{
 		Manifest: &manifest.Manifest{Plan: &manifest.PlanRecord{SHA256: "ppp"}},
 	})
@@ -285,6 +314,7 @@ func TestSumsFromCoversThePlanFile(t *testing.T) {
 // The manifest records no digest of itself and may be rewritten after the
 // build, so the file on disk is what an upload is compared with.
 func TestSumsFromAsksTheManifestFileForItsOwnDigest(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, manifest.FileName), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
@@ -322,6 +352,7 @@ func opsOf(actions []plandiff.Action) []plandiff.Op {
 }
 
 func TestObserveAddsTheReleaseAndTheTapFiles(t *testing.T) {
+	t.Parallel()
 	actions, err := Observe(t.Context(), diffFixture(t))
 	if err != nil {
 		t.Fatal(err)
@@ -335,6 +366,7 @@ func TestObserveAddsTheReleaseAndTheTapFiles(t *testing.T) {
 }
 
 func TestObserveLeavesTheTapAloneForADraft(t *testing.T) {
+	t.Parallel()
 	targets := diffFixture(t)
 	targets.Plan.Config.Draft = true
 

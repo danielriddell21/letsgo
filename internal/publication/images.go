@@ -29,7 +29,10 @@ func publishImages(ctx context.Context, out io.Writer, o Options) error {
 		return nil
 	}
 
-	return release.PushImages(ctx, o.Result.Images, o.Token, func(format string, args ...any) {
+	if err := release.PushImages(ctx, o.Result.Images, o.Token, func(format string, args ...any) {
 		fmt.Fprintf(out, "  "+format+"\n", args...)
-	})
+	}); err != nil {
+		return fmt.Errorf("pushing the images: %w", err)
+	}
+	return nil
 }
