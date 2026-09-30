@@ -38,7 +38,7 @@ brew install danielriddell21/tap/letsgo
 ## Usage
 
 ```
-letsgo plan [--explain] [--json] [--publish] [--diff [--exit-code]] [-out file]  resolve and check a release without performing one
+letsgo plan [--explain] [--json] [--publish] [--diff [--exit-code]] [--format md] [-out file]  resolve and check a release without performing one
 letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
 letsgo release [--draft] [-o dir]      build and publish, resumably
 letsgo apply <file> [-o dir]          publish a release exactly as a saved plan agreed it
@@ -153,6 +153,15 @@ A retraction is planned the same way: `letsgo plan -yank v1.3.0 -out y.plan`
 lists the release marking, the `go.mod` directive and the tap rollbacks, and
 `letsgo apply y.plan` does exactly those, or stops if the forge or `go.mod` has
 moved since.
+
+`letsgo plan --format md` writes the diff as Markdown for a job summary: a
+heading, the changes in a `diff` block with `+`, `-` and `!` in column 0 so
+GitHub colours them, and a footer counting what is added, changed, removed and
+left alone. Only the Markdown goes to standard output, so
+`letsgo plan --format md >> "$GITHUB_STEP_SUMMARY"` needs no filtering; the
+rest of the report goes to standard error. The saved plan file's types are the
+public `github.com/danielriddell21/letsgo/plan` package, for tools that read
+one.
 
 ## Promoting a prerelease
 
