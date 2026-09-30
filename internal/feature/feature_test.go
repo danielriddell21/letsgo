@@ -24,6 +24,7 @@ var catalogue = map[string]struct {
 	"install-script": {Output, true, true},
 	"changelog":      {Output, true, true},
 	"diff-notes":     {Output, true, true},
+	"randomart":      {Output, true, true},
 	"proxy-warm":     {Publish, true, false},
 	"brew":           {Publish, false, false},
 	"image":          {Publish, false, false},

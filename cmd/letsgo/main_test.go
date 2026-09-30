@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"io"
@@ -751,7 +754,7 @@ func TestIsLatest(t *testing.T) {
 func TestReleaseNotesSkippedWhenChangelogDisabled(t *testing.T) {
 	p := &plan.Plan{Features: feature.Resolve([]string{"changelog"})}
 
-	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, nil)
+	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, nil, nil)
 	if err != nil || notes != "" {
 		t.Errorf("releaseNotes = (%q, %v), want empty and no error", notes, err)
 	}
@@ -913,7 +916,7 @@ func TestReleaseNotesAppendsWhatShippedUsingTheChangelogsPreviousRelease(t *test
 		Schema: manifest.Schema, Version: "v1.1.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.2"},
 	}
 
-	notes, err := releaseNotes(context.Background(), p, client, repo, current)
+	notes, err := releaseNotes(context.Background(), p, client, repo, current, nil)
 	if err != nil {
 		t.Fatalf("releaseNotes: %v", err)
 	}
@@ -944,7 +947,7 @@ func TestReleaseNotesOmitsWhatShippedWhenDisabled(t *testing.T) {
 		Schema: manifest.Schema, Version: "v1.1.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.2"},
 	}
 
-	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, current)
+	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, current, nil)
 	if err != nil {
 		t.Fatalf("releaseNotes: %v", err)
 	}
@@ -1027,5 +1030,57 @@ func TestTookKeepsSubSecondDetail(t *testing.T) {
 func TestErrUsage(t *testing.T) {
 	if err := errUsage("letsgo yank <tag>"); !strings.HasPrefix(err.Error(), "usage: ") {
 		t.Errorf("errUsage = %v", err)
+	}
+}
+
+func TestReleaseNotesEndWithTheManifestFingerprint(t *testing.T) {
+	dir := historyFixture(t)
+	p := &plan.Plan{Features: feature.Resolve([]string{"diff-notes"}), Module: discover.Module{Dir: dir}, Tag: "v1.1.0"}
+	sum := sha256.Sum256([]byte("manifest"))
+
+	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, nil, sum[:])
+	if err != nil {
+		t.Fatalf("releaseNotes: %v", err)
+	}
+	for _, want := range []string{
+		"<summary>Manifest fingerprint</summary>", "[letsgo v1.1.0]", "sha256:" + hex.EncodeToString(sum[:]),
+	} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("notes = %q, want %q", notes, want)
+		}
+	}
+	if strings.Index(notes, "second release") > strings.Index(notes, "Manifest fingerprint") {
+		t.Errorf("notes = %q, want the fingerprint after the changelog", notes)
+	}
+}
+
+func TestReleaseNotesOmitTheFingerprintWhenDisabled(t *testing.T) {
+	dir := historyFixture(t)
+	p := &plan.Plan{
+		Features: feature.Resolve([]string{"diff-notes", "randomart"}), Module: discover.Module{Dir: dir}, Tag: "v1.1.0",
+	}
+	sum := sha256.Sum256([]byte("manifest"))
+
+	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, nil, sum[:])
+	if err != nil {
+		t.Fatalf("releaseNotes: %v", err)
+	}
+	if strings.Contains(notes, "fingerprint") {
+		t.Errorf("notes = %q, want no fingerprint", notes)
+	}
+}
+
+func TestFileSum(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := fileSum(path)
+	want := sha256.Sum256([]byte("x"))
+	if err != nil || !bytes.Equal(got, want[:]) {
+		t.Errorf("fileSum = %x, %v, want %x", got, err, want)
+	}
+	if _, err := fileSum(path + ".missing"); err == nil {
+		t.Error("fileSum of a missing file succeeded")
 	}
 }
