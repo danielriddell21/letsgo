@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -118,6 +119,34 @@ func TestDraftFlagHoldsTheImagesBack(t *testing.T) {
 	// Reaches the draft guard before any registry call; a push would fail here.
 	if err := publishImages(context.Background(), p, result, "", false); err != nil {
 		t.Fatalf("a draft release tried to push its images: %v", err)
+	}
+}
+
+// The flag has to survive the trip from the command line to the publishers:
+// this drives a rehearsed release rather than the helpers it is made of.
+func TestReleaseDraftFlagReachesTheTap(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		args        []string
+		wantSkipped bool
+	}{
+		{"with --draft", []string{"-draft"}, true},
+		{"without --draft", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			emptyForge(t)
+			t.Chdir(moduleFixtureWith(t, "build linux/amd64\nbrew you/homebrew-tap\n", nil))
+
+			args := append([]string{"-snapshot", "-o", filepath.Join(t.TempDir(), "dist")}, tc.args...)
+			var err error
+			out := captureStdout(t, func() { err = runRelease(args) })
+			if err != nil {
+				t.Fatalf("runRelease = %v\n%s", err, out)
+			}
+			if got := strings.Contains(out, "skipped the Homebrew tap"); got != tc.wantSkipped {
+				t.Errorf("tap skipped = %v, want %v\n%s", got, tc.wantSkipped, out)
+			}
+		})
 	}
 }
 
