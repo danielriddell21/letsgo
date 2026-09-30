@@ -1,7 +1,11 @@
 package gate
 
 import (
+	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -120,5 +124,72 @@ func TestMissingToolIsDistinguishable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "go install") {
 		t.Errorf("the error does not say how to fix it: %v", err)
+	}
+}
+
+// fakeVulncheck installs a govulncheck that logs its arguments and target to
+// a file and reports a finding named for the GOOS it was run under.
+func fakeVulncheck(t *testing.T) (log string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake tool is a shell script")
+	}
+	dir := t.TempDir()
+	log = filepath.Join(dir, "calls")
+	script := "#!/bin/sh\necho \"$* os=$GOOS arch=$GOARCH\" >> " + log + "\n" +
+		`echo '{"config":{"scanner_version":"v1.1.4","db_last_modified":"2026-09-23T00:00:00Z"}}'` + "\n" +
+		`echo "{\"finding\":{\"osv\":\"GO-$GOOS\",\"trace\":[{\"package\":\"p\",\"function\":\"F\"}]}}"` + "\n" +
+		`echo '{"finding":{"osv":"GO-ALL","trace":[{"package":"p","function":"F"}]}}'` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "govulncheck"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOBIN", dir)
+	return log
+}
+
+func TestVulncheckReportScansEachConfigurationAndMergesFindings(t *testing.T) {
+	log := fakeVulncheck(t)
+
+	report, err := VulncheckReport(context.Background(), t.TempDir(),
+		Scan{Tags: []string{"a", "b"}, Env: []string{"GOOS=linux", "GOARCH=amd64"}},
+		Scan{Env: []string{"GOOS=windows", "GOARCH=arm64"}},
+	)
+	if err != nil {
+		t.Fatalf("VulncheckReport: %v", err)
+	}
+
+	var ids []string
+	for _, v := range report.Vulnerabilities {
+		ids = append(ids, v.ID)
+	}
+	if got := strings.Join(ids, ","); got != "GO-ALL,GO-linux,GO-windows" {
+		t.Errorf("findings = %s, want the union of both scans, once each", got)
+	}
+	if report.GovulncheckVersion != "v1.1.4" || report.VulndbDate != "2026-09-23" {
+		t.Errorf("report = %+v", report)
+	}
+
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "-format json -tags a,b ./... os=linux arch=amd64\n-format json ./... os=windows arch=arm64\n"
+	if string(calls) != want {
+		t.Errorf("govulncheck ran as:\n%s\nwant:\n%s", calls, want)
+	}
+}
+
+func TestVulncheckReportWithoutScansRunsOnce(t *testing.T) {
+	log := fakeVulncheck(t)
+
+	if _, err := Vulncheck(context.Background(), t.TempDir()); err != nil {
+		t.Fatalf("Vulncheck: %v", err)
+	}
+	calls, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(calls), "\n"); n != 1 || !strings.HasPrefix(string(calls), "-format json ./...") {
+		t.Errorf("calls = %q, want one plain run", calls)
 	}
 }

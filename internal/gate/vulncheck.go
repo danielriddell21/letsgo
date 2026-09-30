@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -62,24 +63,91 @@ type Report struct {
 	VulndbDate         string // YYYY-MM-DD
 }
 
+// Scan is one build configuration to check a module under. It selects which
+// files compile, and so which code is reachable: a finding behind a build tag
+// or in another platform's files is only real for the configuration that
+// compiles it.
+type Scan struct {
+	// Tags are build tags, passed to govulncheck as -tags.
+	Tags []string
+
+	// Env is extra environment for the run, as KEY=VALUE pairs: GOOS, GOARCH
+	// and CGO_ENABLED, as the release was built with.
+	Env []string
+}
+
 // VulncheckReport is Vulncheck, keeping the tool and database versions the
 // run reported.
-func VulncheckReport(ctx context.Context, dir string) (*Report, error) {
+//
+// With no scans the module is checked as the host would build it. With
+// several, each is run and the findings merged, so a release shipped for many
+// targets is checked for all of them.
+func VulncheckReport(ctx context.Context, dir string, scans ...Scan) (*Report, error) {
 	bin, err := find("govulncheck", VulncheckInstall)
 	if err != nil {
 		return nil, err
 	}
-
-	cmd := exec.CommandContext(ctx, bin, "-format", "json", "./...")
-	cmd.Dir = dir
-
-	// govulncheck exits non-zero when it finds something, which is a result
-	// rather than a failure.
-	out, err := output(cmd, true)
-	if err != nil {
-		return nil, err
+	if len(scans) == 0 {
+		scans = []Scan{{}}
 	}
-	return parseVulncheckReport(strings.NewReader(string(out)))
+
+	reports := make([]*Report, 0, len(scans))
+	for _, scan := range scans {
+		args := []string{"-format", "json"}
+		if len(scan.Tags) > 0 {
+			args = append(args, "-tags", strings.Join(scan.Tags, ","))
+		}
+		cmd := exec.CommandContext(ctx, bin, append(args, "./...")...)
+		cmd.Dir = dir
+		if len(scan.Env) > 0 {
+			cmd.Env = append(os.Environ(), scan.Env...)
+		}
+
+		// govulncheck exits non-zero when it finds something, which is a
+		// result rather than a failure.
+		out, err := output(cmd, true)
+		if err != nil {
+			return nil, err
+		}
+		report, err := parseVulncheckReport(strings.NewReader(string(out)))
+		if err != nil {
+			return nil, err
+		}
+		reports = append(reports, report)
+	}
+	return mergeReports(reports), nil
+}
+
+// mergeReports combines per-scan reports into one. The tool and database
+// versions come from the first report that names them; an advisory reached
+// under several scans is one finding.
+func mergeReports(reports []*Report) *Report {
+	if len(reports) == 1 {
+		return reports[0]
+	}
+	merged := &Report{}
+	seen := map[string]bool{}
+	for _, r := range reports {
+		if merged.GovulncheckVersion == "" {
+			merged.GovulncheckVersion = r.GovulncheckVersion
+		}
+		if merged.VulndbDate == "" {
+			merged.VulndbDate = r.VulndbDate
+		}
+		for _, v := range r.Vulnerabilities {
+			if !seen[v.ID] {
+				seen[v.ID] = true
+				merged.Vulnerabilities = append(merged.Vulnerabilities, v)
+			}
+		}
+	}
+	if merged.Vulnerabilities == nil {
+		merged.Vulnerabilities = []Vulnerability{}
+	}
+	sort.Slice(merged.Vulnerabilities, func(i, j int) bool {
+		return merged.Vulnerabilities[i].ID < merged.Vulnerabilities[j].ID
+	})
+	return merged
 }
 
 // finding is the subset of govulncheck's output that matters here.
