@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/lsp"
@@ -20,13 +21,29 @@ const (
 // client and the document's URI.
 func pinEditor(t *testing.T, opts lsp.Options, name, text string) (*client, string) {
 	t.Helper()
-	uri := "file://" + filepath.Join(t.TempDir(), name)
+	return editorIn(t, opts, map[string]any{}, t.TempDir(), name, text)
+}
+
+// editorIn is pinEditor for a document in dir, which may hold other files,
+// with the client announcing initParams.
+func editorIn(t *testing.T, opts lsp.Options, initParams map[string]any, dir, name, text string) (*client, string) {
+	t.Helper()
+	uri := fileURI(filepath.Join(dir, name))
 	c := newClient(t, opts)
-	c.request("initialize", map[string]any{})
+	c.request("initialize", initParams)
 	c.notify("initialized", map[string]any{})
 	c.notify("textDocument/didOpen", map[string]any{"textDocument": map[string]any{"uri": uri, "text": text}})
 	c.awaitNotification("textDocument/publishDiagnostics") // the pipe is unbuffered: drain it before the next request
 	return c, uri
+}
+
+// fileURI is the URI a client sends for a local path.
+func fileURI(path string) string {
+	path = filepath.ToSlash(path)
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path // a Windows drive path
+	}
+	return "file://" + path
 }
 
 func codeActions(t *testing.T, c *client, uri string) []lsp.CodeAction {

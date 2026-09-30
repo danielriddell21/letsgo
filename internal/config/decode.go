@@ -340,6 +340,9 @@ func checkKnown(file, keyword string, pos Position) error {
 	if _, ok := known[keyword]; ok {
 		return nil
 	}
+	if _, ok := globalKnown[keyword]; ok {
+		return errAt(file, pos, "%s belongs in the global config, not letsgo.mod", keyword)
+	}
 
 	names := make([]string, 0, len(known))
 	for name := range known {

@@ -116,6 +116,21 @@ func TestDecodeGlobalRejectsReleaseDirectives(t *testing.T) {
 	}
 }
 
+// The other direction: a global directive pasted into letsgo.mod says where
+// it belongs, instead of suggesting the nearest repository directive.
+func TestDecodeRejectsGlobalDirectives(t *testing.T) {
+	for _, name := range GlobalDirectives() {
+		_, err := Decode(parse(t, name+" x\n"))
+		if err == nil {
+			t.Errorf("%s: expected an error", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), name+" belongs in the global config, not letsgo.mod") {
+			t.Errorf("%s: got %v, want it to say the directive belongs in the global config", name, err)
+		}
+	}
+}
+
 func TestDecodeGlobalRejectsAnUnknownDirective(t *testing.T) {
 	_, err := decodeGlobalString(t, "gti /usr/bin/git\n")
 	if err == nil {

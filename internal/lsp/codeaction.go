@@ -97,6 +97,7 @@ func (s *Server) handleCodeAction(raw json.RawMessage) (any, error) {
 		return actions, nil
 	}
 	actions = append(actions, didYouMeanActions(p.TextDocument.URI, doc.text, p.Context.Diagnostics)...)
+	actions = append(actions, s.moveActions(p.TextDocument.URI, doc.text, p.Range)...)
 	if !s.pinnable(p.TextDocument.URI) {
 		return actions, nil
 	}
