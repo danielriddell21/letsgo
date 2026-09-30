@@ -103,7 +103,7 @@ func finishPlan(actions []plandiff.Action, save func(path string) (string, error
 
 	fmt.Printf("\n  plan ok in %s", took(r.Started))
 	switch {
-	case r.Out != "":
+	case r.Out != "", r.Then == "" && plandiff.HasChanges(actions):
 		fmt.Println()
 	case plandiff.HasChanges(actions):
 		fmt.Printf(" · run `%s` to apply it\n", r.Then)

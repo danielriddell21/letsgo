@@ -41,7 +41,7 @@ brew install danielriddell21/tap/letsgo
 letsgo plan [--explain] [--json] [--publish] [--diff [--exit-code]] [-out file]  resolve and check a release without performing one
 letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
 letsgo release [--draft] [-o dir]      build and publish, resumably
-letsgo apply <file> [-o dir]          publish a release exactly as a saved plan agreed it
+letsgo apply [file] [-auto-approve]   publish a release as a saved plan agreed it; with no file, plan it, show it and ask
 letsgo plan -yank <tag> [-out file]    show what retracting a release would change
 letsgo release --snapshot              rehearse a release without publishing
 letsgo verify [tag] [--json] [--words]  rebuild a published release and compare it
@@ -148,6 +148,10 @@ before any write, and stops naming the fields that differ, so a changed
 toolchain or dependency between the two steps is caught. `letsgo plan --diff
 --exit-code` exits 2 when a release would change anything, for a scheduled
 drift check.
+
+`letsgo apply` with no file makes that plan itself, shows it, and asks
+`Apply? [y/N]` before publishing exactly what it showed. With no terminal to
+ask on it needs `-auto-approve`, and otherwise stops before building anything.
 
 A retraction is planned the same way: `letsgo plan -yank v1.3.0 -out y.plan`
 lists the release marking, the `go.mod` directive and the tap rollbacks, and

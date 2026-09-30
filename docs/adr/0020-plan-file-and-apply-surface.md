@@ -32,7 +32,9 @@ carry for apply to refuse before any write.
 
 - Apply is one more build, and the same code path as `release`, so the two
   cannot publish differently.
-- `apply` with no file is an error until the prompt of the HLD lands.
+- `apply` with no file plans, renders, and asks `Apply? [y/N]` on a terminal;
+  without one it needs `-auto-approve`. What it applies is the plan it just
+  saved to a temporary file, so it takes the same path as an apply of a file.
 - A plan made by a different letsgo, toolchain or dependency set is refused
   by the digest, not by a separate version check.
 - Apply reads the forge again after the rebuild matches. A target that is
