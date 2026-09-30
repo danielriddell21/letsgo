@@ -49,6 +49,13 @@ func checkSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.R
 		return nil
 	}
 
+	return reportSumdb(p, r, required)
+}
+
+// reportSumdb says what the cross-check found, and returns an error when the
+// release must not go out: a mismatch always, a missing record only when
+// sumdb is required.
+func reportSumdb(p *plan.Plan, r sumdb.Result, required bool) error {
 	if r.NotFound {
 		fmt.Printf("  ! sum.golang.org has no record for %s@%s yet\n", p.Module.Path, p.Version)
 		fmt.Printf("    check again in a few minutes, or manually: curl %s/lookup/%s@%s\n",

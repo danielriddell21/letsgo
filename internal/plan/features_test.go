@@ -205,6 +205,15 @@ func TestSumdbCheckReportsWhyItWillNotRun(t *testing.T) {
 	}
 }
 
+func TestSumdbCheckSkipsASnapshot(t *testing.T) {
+	r := minimalRepo(t, "require sumdb\n")
+	p := r.resolve(plan.Options{Publish: true, Snapshot: true})
+
+	if got := check(t, p, "sumdb"); got.Status != plan.Fail {
+		t.Errorf("sumdb = %+v, want Fail", got)
+	}
+}
+
 func TestSumdbCheckIsSilentWhenItWillRun(t *testing.T) {
 	t.Setenv("GOPRIVATE", "")
 	t.Setenv("GONOSUMDB", "")

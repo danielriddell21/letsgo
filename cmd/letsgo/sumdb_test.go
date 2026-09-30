@@ -11,6 +11,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/release"
+	"github.com/danielriddell21/letsgo/internal/sumdb"
 )
 
 // Each way the cross-check is switched off returns before any network call,
@@ -93,6 +94,29 @@ func TestWarmProxyAndCheckSumdbSkipsWhatIsNotPublic(t *testing.T) {
 			err := warmProxyAndCheckSumdb(context.Background(), tt.p, t.TempDir(), &release.Result{}, tt.snapshot, tt.draft)
 			if err != nil {
 				t.Fatalf("warmProxyAndCheckSumdb = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestReportSumdb(t *testing.T) {
+	p := &plan.Plan{Module: discover.Module{Path: "github.com/you/foo"}, Version: "1.0.0", Tag: "v1.0.0"}
+
+	tests := map[string]struct {
+		result   sumdb.Result
+		required bool
+		wantErr  bool
+	}{
+		"agrees":                 {sumdb.Result{Matched: true}, false, false},
+		"no record":              {sumdb.Result{NotFound: true}, false, false},
+		"no record but required": {sumdb.Result{NotFound: true}, true, true},
+		"files differ":           {sumdb.Result{Mismatched: []string{"a.go"}, Missing: []string{"b.go"}}, false, true},
+		"hashes differ":          {sumdb.Result{SumH1: "h1:x", ZipH1: "h1:y"}, false, true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := reportSumdb(p, tt.result, tt.required); (err != nil) != tt.wantErr {
+				t.Fatalf("reportSumdb = %v, want error %v", err, tt.wantErr)
 			}
 		})
 	}
