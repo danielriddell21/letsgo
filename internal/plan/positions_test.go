@@ -36,24 +36,31 @@ func TestFailingChecksPointAtTheirDirective(t *testing.T) {
 
 			p := r.resolve(plan.Options{})
 
-			var found bool
-			for _, c := range p.Checks {
-				if c.Name != tt.check || c.Status != plan.Fail {
-					continue
-				}
-				found = true
-				want := filepath.Join(r.dir, "letsgo.mod")
-				if c.Pos == nil || c.Pos.File != want || c.Pos.Line != tt.line {
-					t.Errorf("%s pos = %+v, want %s:%d", tt.check, c.Pos, want, tt.line)
-				}
+			c, ok := failing(p, tt.check)
+			if !ok {
+				t.Fatalf("no failing %q check; got %s", tt.check, checkNames(p))
 			}
-			if !found {
-				var names []string
-				for _, c := range p.Checks {
-					names = append(names, fmt.Sprintf("%s:%v", c.Name, c.Status))
-				}
-				t.Fatalf("no failing %q check; got %s", tt.check, strings.Join(names, ", "))
+			want := filepath.Join(r.dir, "letsgo.mod")
+			if c.Pos == nil || c.Pos.File != want || c.Pos.Line != tt.line {
+				t.Errorf("%s pos = %+v, want %s:%d", tt.check, c.Pos, want, tt.line)
 			}
 		})
 	}
+}
+
+func failing(p *plan.Plan, name string) (plan.Check, bool) {
+	for _, c := range p.Checks {
+		if c.Name == name && c.Status == plan.Fail {
+			return c, true
+		}
+	}
+	return plan.Check{}, false
+}
+
+func checkNames(p *plan.Plan) string {
+	var names []string
+	for _, c := range p.Checks {
+		names = append(names, fmt.Sprintf("%s:%v", c.Name, c.Status))
+	}
+	return strings.Join(names, ", ")
 }
