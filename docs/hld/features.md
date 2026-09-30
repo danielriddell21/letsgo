@@ -159,8 +159,7 @@ check, never an input to the bytes.
   switch features. Otherwise pinning `letsgo-cask` could silently turn off the
   SBOM.
 - **Monorepos (#24).** Each module's `letsgo.mod` sets its own features. A
-  library-only module might `disable install-script`. `letsgo-mono check`
-  can flag modules whose gate settings differ from their siblings'.
+  library-only module might `disable install-script`.
 
 ## Alternatives
 

@@ -1,6 +1,6 @@
 # HLD: monorepo releases
 
-Status: implemented, except `letsgo-mono`, which was dropped: orchestration (which modules changed, the matrix) is left to CI, and `letsgo-action` exposes a `tag` output for it.
+Status: implemented. Orchestration across modules (which changed, the CI matrix) is left to CI; `letsgo-action` exposes a `tag` output for it.
 
 | | |
 |---|---|
@@ -22,7 +22,7 @@ monorepo:
 `services/api/v1.2.0` becomes version `1.2.0`, the previous tag is the previous
 `services/api/` tag, the changelog only lists commits touching `services/api`,
 and the build runs in that directory. This document works out what the letsgo
-equivalent is, how much of it can be a plugin, and how it composes with
+equivalent is, what has to be core, and how it composes with
 `letsgo-multi`, `letsgo-env` and `letsgo-cask`.
 
 ## Summary
@@ -35,14 +35,12 @@ equivalent is, how much of it can be a plugin, and how it composes with
 - **It cannot be a hook plugin.** Which tag is being released is decided before
   anything a hook sees, and `verify`, `yank` and `selfupdate` need it without
   any plugin installed. It touches about a dozen places in core (listed below).
-- **What is left over is a plugin:** `letsgo-mono`, a companion with no hook,
-  like `letsgo-cask`. It answers the questions a repository with many modules
-  asks and a single release never does: which modules exist, which changed,
-  what order to release them in, and what the CI matrix is.
+- **Orchestration is CI's job.** Which modules changed and what to release
+  in what order is a question about the repository, not about a release, and
+  a CI path filter answers it without letsgo in the loop.
 - **Existing plugins need no changes.** Each module is its own release with its
   own `letsgo.mod`, so `letsgo-multi`, `letsgo-env` and `letsgo-cask` each see
-  one ordinary release. The friction is repetition (one pin per module), which
-  `letsgo-mono` reports rather than hides.
+  one ordinary release. The friction is repetition (one pin per module).
 
 ## Two shapes of monorepo
 
@@ -79,7 +77,7 @@ that test three ways:
 3. **It is not a question, it is a fact.** A hook exists where a repository
    might legitimately answer differently. For shape A Go has already answered.
 
-So the prefix is core. The plugin is the part that is genuinely optional.
+So the prefix is core.
 
 ## Core changes
 
@@ -131,86 +129,42 @@ dependency hygiene but versioned with the repository), but add a plan **Warn**
 saying so, and skip the proxy warm for it. Scoped releases are the answer for
 anything that wants its own version.
 
-## `letsgo-mono`: the plugin
+## CI
 
-A companion in this repository, in the same position as `letsgo-cask`: no
-hook, no pin, nothing it can do to released bytes. It reads the repository and
-calls `letsgo`; every release it triggers is an ordinary scoped release.
-
-```
-letsgo-mono list [--json]         every releasable module: dir, prefix, last tag, commits since
-letsgo-mono changed [--json]      modules with commits since their last tag, dependency order
-letsgo-mono matrix                the same, as a GitHub Actions matrix
-letsgo-mono tag [dir...]          `letsgo tag` in each changed module, in dependency order
-letsgo-mono check                 cross-module problems no single release can see
-```
-
-**Releasable** means a directory with a `go.mod` that has at least one main
-package or a `letsgo.mod`. Library-only modules are listed (they get tags and
-changelogs) but excluded from `matrix`.
-
-**Changed** is "has commits touching its directory since its last prefixed
-tag" — the same query core uses for the changelog (item 4), so the two can
-never disagree. It deliberately does *not* mark `api` changed because `shared`
-changed: under `GOWORK=off`, `api` builds the `shared` version its `go.mod`
-requires, so its bytes have not changed until someone bumps that require.
-`changed` reports it instead:
-
-```
-services/api   3 commits since services/api/v1.4.0
-libs/shared    2 commits since libs/shared/v0.3.0
-  services/api requires libs/shared v0.3.0; release libs/shared first,
-  then bump the require if api should pick it up
-```
-
-It does not bump the require itself. That is a commit with consequences, and
-it belongs to a person or to Dependabot.
-
-**`check`** covers what is invisible from inside one module:
-
-- two releasable modules with the same project name (`services/api`,
-  `tools/api`) would write the same Homebrew formula;
-- the same plugin pinned at different digests across modules;
-- a `go.work` listing a module that is not in the repository.
-
-### CI
+Orchestration stays in the workflow. A tag-triggered workflow needs no matrix
+at all:
 
 ```yaml
+on:
+  push:
+    tags: ['**/v*']
+
 jobs:
-  plan:
+  release:
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.m.outputs.matrix }}
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
+      - id: module
+        run: echo "dir=${GITHUB_REF_NAME%/v*}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v7
-      - id: m
-        run: |
-          go install github.com/danielriddell21/letsgo-plugins/cmd/letsgo-mono@v0.3.0
-          echo "matrix=$(letsgo-mono matrix)" >> "$GITHUB_OUTPUT"
-
-  release:
-    needs: plan
-    if: needs.plan.outputs.matrix != '[]'
-    strategy:
-      matrix:
-        module: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v7
-        with: { go-version-file: '${{ matrix.module }}/go.mod' }
+        with: { go-version-file: '${{ steps.module.outputs.dir }}/go.mod' }
       - uses: danielriddell21/letsgo-action@v1
         with:
-          working-directory: ${{ matrix.module }}
+          working-directory: ${{ steps.module.outputs.dir }}
 ```
 
-For a tag-triggered workflow the matrix is simpler: `on: push: tags: ['**/v*']`,
-and the module is the tag with `/vX.Y.Z` cut off. `letsgo-action` needs no
-change to run a scoped release (its manifest search is relative to
-`working-directory`); it should gain a `tag` output, because `version` alone no
-longer identifies the release.
+The module is the tag with `/vX.Y.Z` cut off. For a workflow that decides what
+to release from the diff, a path filter or a static matrix of module
+directories does the same job. `letsgo-action` runs a scoped release with no
+change (its manifest search is relative to `working-directory`) and exposes the
+release's `tag` as an output, because `version` alone no longer identifies the
+release.
+
+A dependency module changing does not make its dependents change: under
+`GOWORK=off`, `services/api` builds the `libs/shared` version its `go.mod`
+requires, so its bytes are unchanged until someone bumps that require. That is
+a commit with consequences, and it belongs to a person or to Dependabot.
 
 ## With the existing plugins
 
@@ -230,8 +184,7 @@ commands are one product is a question about that module.
 The cost is that five modules wanting multi pin it five times. Config
 inheritance (a root `letsgo.mod` that nested ones extend) is rejected: it
 makes a root edit silently change every module's release, which is the kind of
-action at a distance the manifest exists to rule out. `letsgo-mono check`
-flags pins that have drifted apart instead.
+action at a distance the manifest exists to rule out.
 
 ### `letsgo-env`
 
@@ -269,18 +222,10 @@ comes last.
 
 Phases, in order. Each is a vertical slice: a thin path through every layer, verified end to end. The behaviour each phase must meet is specified in the [PBS](../pbs/monorepo.md).
 
-1. Root-release bug fixes (user stories 5, 6, 7, 16)
+1. Root-release bug fixes (user stories 5, 6, 7, 13)
 2. Tracer bullet: a scoped plan and build (user stories 1, 2)
 3. Scoped history (user stories 3, 4)
 4. Scoped publish and consumers (user stories 8, 9, 10, 11, 12)
-5. `letsgo-mono` (user stories 13, 14, 15)
-
-## Open questions
-
-- `letsgo-mono tag` creates several tags on one commit. `letsgo tag` today
-  refuses nothing about that, and each release reads only its own prefix, but
-  a push of several tags triggers several workflow runs — which is what the
-  tag-triggered CI wants, and worth stating in the docs.
 
 ## Decided
 

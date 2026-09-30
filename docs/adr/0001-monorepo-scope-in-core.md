@@ -1,6 +1,6 @@
 # ADR-0001: Monorepo scope lives in core, not in a hook plugin
 
-- Status: accepted (amended: `letsgo-mono` was dropped; orchestration stays in CI)
+- Status: accepted
 - Date: 2026-09-24
 - Issue: [#24](https://github.com/danielriddell21/letsgo/issues/24)
 - HLD: [hld/monorepo.md](../hld/monorepo.md)
@@ -15,9 +15,9 @@ release" can be one of those hooks.
 
 ## Decision
 
-The scope `(Dir, Prefix)` is resolved in core. A hookless companion,
-`letsgo-mono`, handles orchestration across modules: list, changed, matrix,
-tag and check.
+The scope `(Dir, Prefix)` is resolved in core. Orchestration across modules
+(which changed, the CI matrix) is left to CI; `letsgo-action` exposes a `tag`
+output for it.
 
 ## Consequences
 
@@ -27,7 +27,6 @@ tag and check.
 - `selfupdate` and `install.sh` get prefix support with no plugin installed.
 - Core changes in about 15 places (see the HLD table). For an unscoped
   repository every one of them is a no-op.
-- `letsgo-mono` can never change released bytes.
 
 ## Alternatives considered
 
