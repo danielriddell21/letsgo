@@ -445,7 +445,7 @@ func demoRepoWith(t *testing.T, rcTag, extraMod string) string {
 		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
 		"main.go":    mainGo,
 		"README.md":  "# demo\n",
-		"letsgo.mod": "build " + gobuild.Host().String() + "\n" + extraMod,
+		"letsgo.mod": "build " + gobuild.Host().String() + "\ndisable proxy-warm\n" + extraMod,
 	})
 	gitInit(t, dir, rcTag)
 	return dir
@@ -486,6 +486,24 @@ func seededForge(t *testing.T, dir, rcTag string) *fakeForge {
 	forge := newFakeForge(t, "you/demo")
 	forge.seedRC(rcTag, mustRead(t, filepath.Join(rc.Dir, manifest.FileName)))
 	return forge
+}
+
+// A promotion goes through the same publication as a release, so the checksum
+// gate stands in front of the stable release's assets too.
+func TestRunConsultsTheChecksumGate(t *testing.T) {
+	dir := demoRepo(t, "v1.3.0-rc.1")
+	forge := seededForge(t, dir, "v1.3.0-rc.1")
+
+	var out strings.Builder
+	_, err := runPromoteWith(t, forge.client(), "v1.3.0-rc.1", dir, t.TempDir(), func(o *promote.Options) {
+		o.Out = &out
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "skipped sum.golang.org check") {
+		t.Errorf("the checksum gate was never consulted:\n%s", out.String())
+	}
 }
 
 // A promoted release reads like any other: the sections `letsgo release`

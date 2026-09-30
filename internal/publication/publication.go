@@ -9,11 +9,16 @@ package publication
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
+	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -90,16 +95,14 @@ func Publish(ctx context.Context, o Options) (*Result, error) {
 	}
 	reportPublished(out, released)
 
-	if err := Downstream(ctx, o); err != nil {
+	if err := downstream(ctx, o); err != nil {
 		return nil, err
 	}
 	return &Result{Forge: released}, nil
 }
 
-// Downstream publishes what follows the forge release: the tap, then the
-// images. It exists for `promote`, which still publishes its own forge release,
-// until that command is moved onto Publish.
-func Downstream(ctx context.Context, o Options) error {
+// downstream publishes what follows the forge release: the tap, then the images.
+func downstream(ctx context.Context, o Options) error {
 	if err := publishTap(ctx, o.out(), o.Plan, o.Result, o.Tap, o.Repo, o.Info); err != nil {
 		return err
 	}
@@ -148,7 +151,7 @@ func releaseOptions(o Options, logf func(format string, args ...any)) publish.Op
 		Repo:   o.Repo,
 		Dir:    o.Dir,
 		Files:  o.Result.Files,
-		Sums:   sumsFrom(o.Result),
+		Sums:   sumsFrom(o.Dir, o.Result),
 		Notes:  notesMode(o.Append, p.Features.On("changelog")),
 		Release: github.ReleaseInput{
 			TagName:         Tag(p),
@@ -186,7 +189,7 @@ func notesMode(appendNotes, changelogEnabled bool) publish.NotesMode {
 	return publish.NotesReplace
 }
 
-func sumsFrom(r *release.Result) map[string]string {
+func sumsFrom(dir string, r *release.Result) map[string]string {
 	sums := map[string]string{r.Source.Name: r.Source.SHA256}
 	for _, a := range r.Manifest.Artifacts {
 		sums[a.Name] = a.SHA256
@@ -194,7 +197,27 @@ func sumsFrom(r *release.Result) map[string]string {
 	if r.Manifest.Plan != nil {
 		sums[release.PlanFileName] = r.Manifest.Plan.SHA256
 	}
+
+	// The manifest records no digest of itself, and a caller may rewrite it
+	// after the build (promote stamps promoted_from), so the file is asked.
+	if sum, err := fileSHA256(filepath.Join(dir, manifest.FileName)); err == nil {
+		sums[manifest.FileName] = sum
+	}
 	return sums
+}
+
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("hash %s: %w", path, err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // isPrerelease follows semver: a version carrying a pre-release segment is one.

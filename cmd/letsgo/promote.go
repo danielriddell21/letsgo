@@ -10,7 +10,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/promote"
-	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
@@ -85,6 +84,9 @@ func runPromote(args []string) error {
 		RepoInfo:    info,
 		WorkDir:     workDir,
 		AppendNotes: *appendNotes,
+		Tap:         tapClient,
+		Token:       tokenValue,
+		Out:         os.Stdout,
 		ExtraNotes: func(ctx context.Context, p *plan.Plan, previous string, current *manifest.Manifest, sum []byte) (string, error) {
 			return extraNotes(ctx, p, client, repo, previous, current, sum)
 		},
@@ -93,14 +95,6 @@ func runPromote(args []string) error {
 		},
 	})
 	if err != nil {
-		return err
-	}
-	reportPublished(result.Published)
-
-	if err := publication.Downstream(ctx, publication.Options{
-		Plan: result.Plan, Result: result.Build, Repo: repo, Tap: tapClient, Info: info,
-		Token: tokenValue, Out: os.Stdout,
-	}); err != nil {
 		return err
 	}
 
