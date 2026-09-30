@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
@@ -233,5 +237,80 @@ func TestFinishDiffReportsAnUnwritablePlanPath(t *testing.T) {
 		diffRun{Out: filepath.Join(t.TempDir(), "no", "dir", "p")})
 	if err == nil {
 		t.Error("finishDiff succeeded writing into a missing directory")
+	}
+}
+
+// emptyForge is a forge with nothing on it: every release lookup is a 404.
+func emptyForge(t *testing.T) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	previous := newForgeClient
+	t.Cleanup(func() { newForgeClient = previous })
+	newForgeClient = func(token string) *github.Client {
+		client := github.New(token)
+		client.SetEndpoints(srv.URL, srv.URL)
+		return client
+	}
+}
+
+func TestPlanOutSavesAPlanThatAnApplyWouldCheck(t *testing.T) {
+	emptyForge(t)
+	t.Chdir(moduleFixture(t))
+	path := filepath.Join(t.TempDir(), "release.plan")
+
+	var err error
+	out := captureStdout(t, func() { err = runPlan([]string{"-out", path, "--exit-code"}) })
+	if !errors.Is(err, errPlanChanges) {
+		t.Fatalf("runPlan -out --exit-code = %v, want the plan to have changes\n%s", err, out)
+	}
+	for _, want := range []string{"+ release", "to add", "saved to " + path, "letsgo apply " + path} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+
+	file, err := plandiff.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.Tag != "v1.2.3" || file.Repo != "you/demo" || !file.Changes() {
+		t.Errorf("saved %+v", file)
+	}
+
+	// The saved manifest is what a rebuild is held to.
+	if file.ManifestSHA256 == "" || len(file.Manifest) == 0 {
+		t.Error("the plan carries no manifest digest")
+	}
+}
+
+func TestPlanDiffWithoutARepositoryCannotCompare(t *testing.T) {
+	_, err := planDiff(context.Background(), &plan.Plan{}, diffTokens{})
+	if err == nil || !strings.Contains(err.Error(), "repository") {
+		t.Errorf("planDiff = %v, want a complaint about the missing repository", err)
+	}
+}
+
+func TestApplyStopsWhenThePlanCannotBeResolved(t *testing.T) {
+	emptyForge(t)
+	t.Chdir(moduleFixture(t))
+	path := filepath.Join(t.TempDir(), "release.plan")
+	_ = captureStdout(t, func() { _ = runPlan([]string{"-out", path}) })
+
+	// With no token a release's forge checks fail, so apply stops before it
+	// builds: the point is that it neither panics nor publishes.
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+	var err error
+	out := captureStdout(t, func() { err = runApply([]string{path}) })
+	if err == nil {
+		t.Errorf("runApply succeeded without a forge token:\n%s", out)
+	}
+	if !strings.Contains(out, "applying "+path) {
+		t.Errorf("output does not say what is being applied:\n%s", out)
 	}
 }

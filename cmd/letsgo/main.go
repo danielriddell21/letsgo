@@ -387,8 +387,7 @@ func doRelease(ctx context.Context, a releaseArgs, agreed func(*plan.Plan, *rele
 	started := time.Now()
 
 	tokenValue, _ := plan.Token(a.token)
-	client := github.New(tokenValue)
-	client.UserAgent = "letsgo/" + version
+	client := newForgeClient(tokenValue)
 
 	// A rehearsal needs no forge and no token, so the gates that check for
 	// them are not run. The repository's description and licence are read

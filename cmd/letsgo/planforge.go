@@ -135,6 +135,14 @@ func blobFingerprint(content []byte) string {
 	return "blob:" + hex.EncodeToString(h.Sum(nil))
 }
 
+// newForgeClient is how a command reaches the forge. A variable so that a test
+// can point it at a server of its own.
+var newForgeClient = func(token string) *github.Client {
+	client := github.New(token)
+	client.UserAgent = "letsgo/" + version
+	return client
+}
+
 // forgeDiff is what reading the forge against a fresh build came to.
 type forgeDiff struct {
 	Actions []plandiff.Action
@@ -164,8 +172,7 @@ func planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*forgeDiff,
 	defer func() { _ = os.RemoveAll(dir) }()
 
 	tokenValue, _ := plan.Token(tokens.Token)
-	client := github.New(tokenValue)
-	client.UserAgent = "letsgo/" + version
+	client := newForgeClient(tokenValue)
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 
 	var info *github.RepoInfo
