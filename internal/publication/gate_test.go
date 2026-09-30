@@ -1,7 +1,8 @@
-package main
+package publication
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,7 +29,7 @@ func TestCheckSumdbSkipsWithoutTouchingTheNetwork(t *testing.T) {
 	}
 	for name, p := range tests {
 		t.Run(name, func(t *testing.T) {
-			if err := checkSumdb(context.Background(), p, t.TempDir(), &release.Result{}); err != nil {
+			if err := checkSumdb(context.Background(), io.Discard, p, t.TempDir(), &release.Result{}); err != nil {
 				t.Fatalf("checkSumdb = %v, want nil", err)
 			}
 		})
@@ -66,7 +67,7 @@ func TestCheckSumdbTreatsAnUnreachableDatabaseAsAWarningUnlessRequired(t *testin
 				Proxy:    server.URL,
 				Required: tt.required,
 			}
-			err := checkSumdb(context.Background(), p, t.TempDir(), &release.Result{})
+			err := checkSumdb(context.Background(), io.Discard, p, t.TempDir(), &release.Result{})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("checkSumdb = %v, want error %v", err, tt.wantErr)
 			}
@@ -76,7 +77,7 @@ func TestCheckSumdbTreatsAnUnreachableDatabaseAsAWarningUnlessRequired(t *testin
 
 // A snapshot, a draft and a `module <dir>` release never reach the network:
 // there is nothing public to compare against.
-func TestWarmProxyAndCheckSumdbSkipsWhatIsNotPublic(t *testing.T) {
+func TestGateSkipsWhatIsNotPublic(t *testing.T) {
 	p := &plan.Plan{Config: &config.Config{}, Features: feature.Resolve([]string{"proxy-warm", "sumdb"})}
 	scoped := &plan.Plan{Config: &config.Config{ModuleDir: "web"}}
 
@@ -91,9 +92,15 @@ func TestWarmProxyAndCheckSumdbSkipsWhatIsNotPublic(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			err := warmProxyAndCheckSumdb(context.Background(), tt.p, t.TempDir(), &release.Result{}, tt.snapshot, tt.draft)
+			p := *tt.p
+			cfg := *p.Config
+			cfg.Draft = tt.draft
+			p.Config = &cfg
+			err := gate(context.Background(), io.Discard, Options{
+				Plan: &p, Result: &release.Result{}, Dir: t.TempDir(), Snapshot: tt.snapshot,
+			})
 			if err != nil {
-				t.Fatalf("warmProxyAndCheckSumdb = %v, want nil", err)
+				t.Fatalf("gate = %v, want nil", err)
 			}
 		})
 	}
@@ -115,7 +122,7 @@ func TestReportSumdb(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			if err := reportSumdb(p, tt.result, tt.required); (err != nil) != tt.wantErr {
+			if err := reportSumdb(io.Discard, p, tt.result, tt.required); (err != nil) != tt.wantErr {
 				t.Fatalf("reportSumdb = %v, want error %v", err, tt.wantErr)
 			}
 		})

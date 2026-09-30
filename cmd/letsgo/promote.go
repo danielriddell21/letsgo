@@ -10,6 +10,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/promote"
+	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
@@ -96,10 +97,10 @@ func runPromote(args []string) error {
 	}
 	reportPublished(result.Published)
 
-	if err := publishTap(ctx, result.Plan, result.Build, tapClient, repo, info); err != nil {
-		return err
-	}
-	if err := publishImages(ctx, result.Plan, result.Build, tokenValue, false); err != nil {
+	if err := publication.Downstream(ctx, publication.Options{
+		Plan: result.Plan, Result: result.Build, Repo: repo, Tap: tapClient, Info: info,
+		Token: tokenValue, Out: os.Stdout,
+	}); err != nil {
 		return err
 	}
 

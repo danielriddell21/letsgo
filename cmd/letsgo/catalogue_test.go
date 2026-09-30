@@ -18,6 +18,8 @@ import (
 	installer "github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/publication"
+	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/sbom"
@@ -403,7 +405,11 @@ func proxyWarmRan(t *testing.T, disabled []string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := warmProxyAndCheckSumdb(context.Background(), p, dir, &release.Result{}, false, false); err != nil {
+	recorder := publish.NewRecorder(nil)
+	if _, err := publication.Publish(context.Background(), publication.Options{
+		Plan: p, Dir: dir, Forge: recorder, Tap: recorder,
+		Result: &release.Result{Manifest: &manifest.Manifest{}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	return hits.Load() > 0

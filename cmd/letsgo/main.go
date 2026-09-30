@@ -27,6 +27,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/randomart"
@@ -565,10 +566,11 @@ func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error
 
 	// Everything above this line is identical in a rehearsal. Only the thing
 	// that writes to the world is exchanged.
-	forge, tapAPI, err := guardApply(ctx, p, applied, forgeTargets{
-		Forge: releaseClient, Tap: tapClient, Token: tokenValue, Repo: repo, Dir: dir,
-		Result: result, Notes: notes, Info: info,
-	})
+	targets := publication.Options{
+		Plan: p, Result: result, Dir: dir, Repo: repo, Forge: releaseClient, Tap: tapClient,
+		Info: info, Notes: notes, Token: tokenValue, Snapshot: a.snapshot, Out: os.Stdout,
+	}
+	forge, tapAPI, err := guardApply(ctx, applied, targets)
 	if err != nil {
 		return err
 	}
@@ -578,31 +580,9 @@ func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error
 		forge, tapAPI = recorder, recorder
 	}
 
-	// Before anything is attached: a disagreement with sum.golang.org must
-	// stop the release, not annotate one that is already public.
-	if err := warmProxyAndCheckSumdb(ctx, p, dir, result, a.snapshot, a.draft || p.Config.Draft); err != nil {
-		return err
-	}
-
-	published, err := publish.Run(ctx, releaseOptions(p, releaseRun{
-		Forge: forge, Repo: repo, Dir: dir, Result: result, Notes: notes,
-		Draft: a.draft || p.Config.Draft, Append: a.appendNotes,
-		Logf: func(format string, args ...any) {
-			fmt.Printf("  "+format+"\n", args...)
-		},
-	}))
+	targets.Forge, targets.Tap, targets.Append = forge, tapAPI, a.appendNotes
+	done, err := publication.Publish(ctx, targets)
 	if err != nil {
-		return err
-	}
-	reportPublished(published)
-
-	// After publication, because a formula names download URLs that only
-	// exist once the assets are attached.
-	if err := publishTap(ctx, p, result, tapAPI, repo, info); err != nil {
-		return err
-	}
-
-	if err := publishImages(ctx, p, result, tokenValue, a.snapshot); err != nil {
 		return err
 	}
 
@@ -611,44 +591,8 @@ func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error
 		return nil
 	}
 
-	fmt.Printf("\n  released in %s\n  %s\n", took(started), published.Release.HTMLURL)
+	fmt.Printf("\n  released in %s\n  %s\n", took(started), done.Forge.Release.HTMLURL)
 	return nil
-}
-
-// releaseRun is everything publishing a release depends on beyond the plan.
-type releaseRun struct {
-	Forge  publish.Forge
-	Repo   github.Repo
-	Dir    string
-	Result *release.Result
-	Notes  string
-	Draft  bool
-	Append bool
-	Logf   func(format string, args ...any)
-}
-
-// releaseOptions is the publication of a release, decided once so that what
-// `letsgo release` does and what `letsgo plan --diff` predicts it will do
-// cannot drift apart.
-func releaseOptions(p *plan.Plan, r releaseRun) publish.Options {
-	return publish.Options{
-		Client: r.Forge,
-		Repo:   r.Repo,
-		Dir:    r.Dir,
-		Files:  r.Result.Files,
-		Sums:   sumsFrom(r.Result),
-		Notes:  notesMode(r.Append, p.Features.On("changelog")),
-		Release: github.ReleaseInput{
-			TagName:         releaseTag(p),
-			Name:            releaseTitle(p),
-			Body:            r.Notes,
-			Draft:           r.Draft,
-			Prerelease:      isPrerelease(p),
-			MakeLatest:      isLatest(p),
-			TargetCommitish: p.Git.Commit,
-		},
-		Logf: r.Logf,
-	}
 }
 
 // planBuildOptions describes the resolve-report-build sequence both `letsgo
@@ -730,34 +674,6 @@ func reportPublished(published *publish.Result) {
 		fmt.Printf(", replaced %d", len(published.Replaced))
 	}
 	fmt.Println()
-}
-
-// warmProxy primes the resolved module proxy so `go install` works
-// immediately.
-//
-// Best effort, and deliberately after publication: a proxy that is slow has
-// not broken a release that is already live.
-func warmProxy(ctx context.Context, p *plan.Plan) {
-	if err := publish.WarmProxy(ctx, p.Proxy, p.Module.Path, p.Version); err != nil {
-		fmt.Printf("  ! could not prime the module proxy: %v\n", err)
-		fmt.Printf("    `go install` may fail briefly until the proxy fetches %s\n", p.Tag)
-		return
-	}
-	fmt.Printf("  primed %s\n", p.Proxy)
-}
-
-// warmProxyAndCheckSumdb primes the module proxy, then cross-checks
-// sum.golang.org and the proxy against the built source archive — on every
-// non-snapshot, non-draft, non-scoped release, before any asset is attached.
-// The tag is already pushed, which is all the proxy needs.
-func warmProxyAndCheckSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.Result, snapshot, draft bool) error {
-	if snapshot || draft || p.Config.ModuleDir != "" {
-		return nil
-	}
-	if p.Features.On("proxy-warm") {
-		warmProxy(ctx, p)
-	}
-	return checkSumdb(ctx, p, dir, result)
 }
 
 func runVerify(args []string) error {
@@ -1311,42 +1227,6 @@ func errUsage(usage string) error {
 	return fmt.Errorf("usage: %s", usage)
 }
 
-// releaseTag is the tag a release is published under.
-//
-// A real release always has one, because the plan will not pass without it. A
-// rehearsal does not, so the version supplies it: showing an empty tag name
-// would misrepresent the call being rehearsed, and the point of a rehearsal is
-// that it does not misrepresent anything.
-func releaseTag(p *plan.Plan) string {
-	if p.Tag != "" {
-		return p.Tag
-	}
-	return "v" + p.Version
-}
-
-// releaseTitle is the release's display name: the tag alone for a root
-// module, unchanged from every single-module repository today, or the
-// module's own directory plus the version for a scoped one — so two modules
-// in the same repository read apart on the releases page instead of both
-// showing a bare tag with an unlabeled prefix.
-func releaseTitle(p *plan.Plan) string {
-	tag := releaseTag(p)
-	if p.Scope.Dir == "" {
-		return tag
-	}
-	return p.Scope.Dir + " " + strings.TrimPrefix(tag, p.Scope.Prefix)
-}
-
-// notesMode also treats a disabled changelog as append-with-nothing-generated,
-// so resuming a release with `disable changelog` set never blanks an existing
-// description the way replacing it with empty notes would.
-func notesMode(appendNotes, changelogEnabled bool) publish.NotesMode {
-	if appendNotes || !changelogEnabled {
-		return publish.NotesAppend
-	}
-	return publish.NotesReplace
-}
-
 // fileSum is the sha256 of a file, which for the manifest is what identifies a
 // release.
 func fileSum(path string) ([]byte, error) {
@@ -1456,44 +1336,6 @@ func whatShipped(
 		return "", nil
 	}
 	return diff.Compare(before, current).Notes(previous), nil
-}
-
-func sumsFrom(r *release.Result) map[string]string {
-	sums := map[string]string{r.Source.Name: r.Source.SHA256}
-	for _, a := range r.Manifest.Artifacts {
-		sums[a.Name] = a.SHA256
-	}
-	if r.Manifest.Plan != nil {
-		sums[release.PlanFileName] = r.Manifest.Plan.SHA256
-	}
-	return sums
-}
-
-// isPrerelease follows semver: a version carrying a pre-release segment is one.
-func isPrerelease(p *plan.Plan) bool {
-	switch p.Config.Prerelease {
-	case "true":
-		return true
-	case "false":
-		return false
-	}
-	base, _, _ := strings.Cut(p.Version, "+")
-	return strings.Contains(base, "-")
-}
-
-// isLatest reports GitHub's make_latest value: a repository has one "latest"
-// release, so auto claims it for a root module and defers for a scoped one
-// (see discover.Scope), rather than fight whichever module released last for
-// the badge.
-func isLatest(p *plan.Plan) string {
-	switch p.Config.Latest {
-	case "true", "false":
-		return p.Config.Latest
-	}
-	if p.Scope.Prefix == "" {
-		return "true"
-	}
-	return "false"
 }
 
 // took formats an elapsed duration at a resolution a person cares about.
