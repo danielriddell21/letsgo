@@ -11,6 +11,10 @@ import (
 	"github.com/danielriddell21/letsgo/internal/sumdb"
 )
 
+// sumdbURL is the checksum database consulted; a variable so tests can point
+// it at a fake.
+var sumdbURL = sumdb.DefaultURL
+
 // checkSumdb cross-checks the just-published release's source archive
 // against sum.golang.org and the module proxy (SD-1 through SD-5), unless
 // skipped for a private module, a disabled proxy warm (SD-7) or `disable
@@ -36,7 +40,7 @@ func checkSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.R
 
 	archivePath := filepath.Join(dir, result.Source.Name)
 
-	r, err := sumdb.Check(ctx, sumdb.DefaultURL, p.Proxy, p.Module.Path, p.Version, archivePath)
+	r, err := sumdb.Check(ctx, sumdbURL, p.Proxy, p.Module.Path, p.Version, archivePath)
 	if err != nil {
 		if required {
 			return fmt.Errorf("sumdb: could not check sum.golang.org: %w", err)
@@ -48,7 +52,7 @@ func checkSumdb(ctx context.Context, p *plan.Plan, dir string, result *release.R
 	if r.NotFound {
 		fmt.Printf("  ! sum.golang.org has no record for %s@%s yet\n", p.Module.Path, p.Version)
 		fmt.Printf("    check again in a few minutes, or manually: curl %s/lookup/%s@%s\n",
-			sumdb.DefaultURL, p.Module.Path, p.Version)
+			sumdbURL, p.Module.Path, p.Version)
 		if required {
 			return fmt.Errorf("sumdb: no record for %s yet", p.Tag)
 		}

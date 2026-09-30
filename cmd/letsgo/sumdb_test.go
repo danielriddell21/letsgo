@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
@@ -26,6 +28,45 @@ func TestCheckSumdbSkipsWithoutTouchingTheNetwork(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if err := checkSumdb(context.Background(), p, t.TempDir(), &release.Result{}); err != nil {
 				t.Fatalf("checkSumdb = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// Not being able to reach the checksum database is a warning, unless sumdb is
+// required, in which case a release nobody could check must not go out.
+func TestCheckSumdbTreatsAnUnreachableDatabaseAsAWarningUnlessRequired(t *testing.T) {
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GONOSUMDB", "")
+	t.Setenv("GONOSUMCHECK", "")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "down", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	old := sumdbURL
+	sumdbURL = server.URL
+	defer func() { sumdbURL = old }()
+
+	tests := map[string]struct {
+		required []string
+		wantErr  bool
+	}{
+		"not required": {nil, false},
+		"required":     {[]string{"sumdb"}, true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			p := &plan.Plan{
+				Module:   discover.Module{Path: "github.com/you/foo"},
+				Version:  "1.0.0",
+				Tag:      "v1.0.0",
+				Proxy:    server.URL,
+				Required: tt.required,
+			}
+			err := checkSumdb(context.Background(), p, t.TempDir(), &release.Result{})
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("checkSumdb = %v, want error %v", err, tt.wantErr)
 			}
 		})
 	}
