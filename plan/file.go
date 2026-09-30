@@ -16,6 +16,11 @@ const FileSchema = 1
 // FileKindRelease marks a plan file that publishes a release.
 const FileKindRelease = "release"
 
+// FileKindYank marks a plan file that retracts a release. It predicts no
+// manifest, so it has none: its actions are checked against the forge and
+// go.mod alone.
+const FileKindYank = "yank"
+
 // File is a saved plan: what was agreed, to be applied later.
 //
 // It holds intent and fingerprints, never artifact bytes. The predicted
@@ -29,13 +34,20 @@ type File struct {
 	Kind          string `json:"kind"`
 	Repo          string `json:"repo"`
 	Tag           string `json:"tag"`
-	Commit        string `json:"commit"`
+	Commit        string `json:"commit,omitempty"`
 
 	// ManifestSHA256 is the digest of the manifest a rebuild must reproduce
 	// byte for byte; Manifest is that manifest, for reading and for naming
-	// what differs when it is not reproduced.
-	ManifestSHA256 string          `json:"manifest_sha256"`
-	Manifest       json.RawMessage `json:"manifest"`
+	// what differs when it is not reproduced. A yank plan has neither.
+	ManifestSHA256 string          `json:"manifest_sha256,omitempty"`
+	Manifest       json.RawMessage `json:"manifest,omitempty"`
+
+	// Reason and Previous are what a yank was planned with: the explanation
+	// it records, and the release the tap is rolled back to. Applying uses
+	// these rather than working them out again, so a release published in
+	// between cannot change what the plan does.
+	Reason   string `json:"reason,omitempty"`
+	Previous string `json:"previous,omitempty"`
 
 	Actions []Action `json:"actions"`
 }
@@ -81,11 +93,17 @@ func Decode(data []byte) (*File, error) {
 	if f.Schema != FileSchema {
 		return nil, fmt.Errorf("plan: schema %d is not supported (this letsgo applies %d)", f.Schema, FileSchema)
 	}
-	if f.Kind != FileKindRelease {
+	switch f.Kind {
+	case FileKindRelease:
+		if f.Tag == "" || f.Commit == "" || f.ManifestSHA256 == "" {
+			return nil, errors.New("plan: the file is missing its tag, commit or manifest digest")
+		}
+	case FileKindYank:
+		if f.Tag == "" || f.Repo == "" {
+			return nil, errors.New("plan: the file is missing its tag or repository")
+		}
+	default:
 		return nil, fmt.Errorf("plan: cannot apply a %q plan", f.Kind)
-	}
-	if f.Tag == "" || f.Commit == "" || f.ManifestSHA256 == "" {
-		return nil, errors.New("plan: the file is missing its tag, commit or manifest digest")
 	}
 	return &f, nil
 }

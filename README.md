@@ -42,6 +42,7 @@ letsgo plan [--explain] [--json] [--publish] [--diff [--exit-code]] [-out file] 
 letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
 letsgo release [--draft] [-o dir]      build and publish, resumably
 letsgo apply <file> [-o dir]          publish a release exactly as a saved plan agreed it
+letsgo plan -yank <tag> [-out file]    show what retracting a release would change
 letsgo release --snapshot              rehearse a release without publishing
 letsgo verify [tag] [--json] [--words]  rebuild a published release and compare it
 letsgo doctor [--json]                 diagnose tools and repository state, read-only
@@ -147,6 +148,11 @@ before any write, and stops naming the fields that differ, so a changed
 toolchain or dependency between the two steps is caught. `letsgo plan --diff
 --exit-code` exits 2 when a release would change anything, for a scheduled
 drift check.
+
+A retraction is planned the same way: `letsgo plan -yank v1.3.0 -out y.plan`
+lists the release marking, the `go.mod` directive and the tap rollbacks, and
+`letsgo apply y.plan` does exactly those, or stops if the forge or `go.mod` has
+moved since.
 
 ## Promoting a prerelease
 

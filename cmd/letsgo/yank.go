@@ -10,8 +10,6 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/config"
-	"github.com/danielriddell21/letsgo/internal/diff"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -20,11 +18,11 @@ import (
 
 func runYank(args []string) error {
 	fs := flag.NewFlagSet("yank", flag.ExitOnError)
-	reason := fs.String("reason", "", "why the release should not be used; shown by `go list -m -retracted`")
+	var y yankArgs
+	y.bind(fs)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	tapToken := fs.String("tap-token", "", tapTokenUsage)
 	yes := fs.Bool("yes", false, "retract without asking")
-	keepTap := fs.Bool("keep-tap", false, "leave the Homebrew formula pointing at the retracted release")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -39,34 +37,17 @@ func runYank(args []string) error {
 	if err != nil {
 		return err
 	}
-	module, repo, scope, client := m.Module, m.Repo, m.Scope, m.Client
 
-	previous, err := previousRelease(ctx, client, repo, tag, scope.Prefix)
+	previous, err := previousRelease(ctx, m.Client, m.Repo, tag, m.Scope.Prefix)
 	if err != nil {
 		return err
 	}
 
-	options := yank.Options{
-		Client:   client,
-		Repo:     repo,
-		Tag:      tag,
-		Reason:   *reason,
-		GoMod:    filepath.Join(module.Dir, "go.mod"),
-		Prefix:   scope.Prefix,
-		Project:  module.Name,
-		Caveats:  brewCaveats(module.Dir),
-		Previous: previous,
-		Manifests: func(ctx context.Context, tag string) (*manifest.Manifest, error) {
-			return diff.Fetch(ctx, client, repo, tag)
-		},
-		Logf: func(format string, args ...any) { fmt.Printf("  "+format+"\n", args...) },
-	}
+	options := yankOptions(m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap},
+		diffTokens{Token: *token, TapToken: *tapToken})
+	options.Logf = func(format string, args ...any) { fmt.Printf("  "+format+"\n", args...) }
 
-	if !*keepTap {
-		options.Tap, options.TapAPI, options.TapFilesPlugin, options.PluginRoot = tapFor(module.Dir, tapClientFor(client, *tapToken, *token))
-	}
-
-	reportYank(tag, repo, previous, options)
+	reportYank(tag, m.Repo, previous, options)
 	if !*yes && !confirmYank(tag) {
 		fmt.Println("\n  nothing was retracted")
 		return nil
