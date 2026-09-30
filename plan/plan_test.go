@@ -61,3 +61,34 @@ func TestRenderShowsARemovalByWhatItRemoves(t *testing.T) {
 		t.Errorf("removal is not shown by its observed state:\n%s", got)
 	}
 }
+
+func TestMarkdownPutsMarkersInColumnZeroOfADiffBlock(t *testing.T) {
+	got := plan.Markdown("letsgo plan", []plan.Action{
+		{Op: plan.Add, Kind: plan.KindAsset, Target: "a.tar.gz", Planned: "sha256:ab"},
+		{Op: plan.Change, Kind: plan.KindTap, Target: "Formula/a.rb", Observed: "blob:1", Planned: "blob:2"},
+		{Op: plan.Remove, Kind: plan.KindImage, Target: "a:old", Observed: "sha256:cd"},
+		{Op: plan.Keep, Kind: plan.KindProxy, Target: "example.com/a", Planned: "v1"},
+	})
+
+	want := "## letsgo plan\n\n" +
+		"```diff\n" +
+		"+ asset  a.tar.gz      sha256:ab\n" +
+		"! tap    Formula/a.rb  blob:1 → blob:2\n" +
+		"- image  a:old         sha256:cd\n" +
+		"```\n\n" +
+		"Plan: 1 to add, 1 to change, 1 to remove. 1 unchanged.\n"
+	if got != want {
+		t.Errorf("Markdown =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestMarkdownOmitsTheBlockWhenNothingChanges(t *testing.T) {
+	got := plan.Markdown("letsgo plan", []plan.Action{{Op: plan.Keep, Kind: plan.KindProxy, Target: "x", Planned: "v1"}})
+	want := "## letsgo plan\n\nPlan: 0 to add, 0 to change, 0 to remove. 1 unchanged.\n"
+	if got != want {
+		t.Errorf("Markdown = %q, want %q", got, want)
+	}
+	if got := plan.Markdown("t", nil); strings.Contains(got, "```") || strings.Contains(got, "unchanged") {
+		t.Errorf("an empty plan renders a block or a kept count: %q", got)
+	}
+}

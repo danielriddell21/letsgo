@@ -314,3 +314,48 @@ func TestApplyStopsWhenThePlanCannotBeResolved(t *testing.T) {
 		t.Errorf("output does not say what is being applied:\n%s", out)
 	}
 }
+
+func TestPlanFormatMarkdownWritesOnlyTheSummaryToStdout(t *testing.T) {
+	emptyForge(t)
+	t.Chdir(moduleFixture(t))
+
+	var err error
+	out := captureStdout(t, func() { err = runPlan([]string{"--format", "md"}) })
+	if err != nil {
+		t.Fatalf("runPlan --format md = %v\n%s", err, out)
+	}
+	if !strings.HasPrefix(out, "## letsgo plan\n\n```diff\n+ release") {
+		t.Errorf("summary does not open with a heading and a diff block:\n%s", out)
+	}
+	if !strings.Contains(out, "```\n\nPlan: ") || !strings.HasSuffix(out, "to remove.\n") {
+		t.Errorf("summary does not close the block and end on the footer:\n%s", out)
+	}
+	for _, leaked := range []string{"plan ok", "resolved", "  + release"} {
+		if strings.Contains(out, leaked) {
+			t.Errorf("stdout carries %q, which belongs on stderr:\n%s", leaked, out)
+		}
+	}
+	if os.Stdout == os.Stderr {
+		t.Error("standard output was left pointing at standard error")
+	}
+}
+
+func TestPlanFormatRejectsWhatItCannotWrite(t *testing.T) {
+	if err := runPlan([]string{"--format", "yaml"}); err == nil || !strings.Contains(err.Error(), "yaml") {
+		t.Errorf("--format yaml = %v", err)
+	}
+	if err := runPlan([]string{"--format", "md", "--json"}); err == nil || !strings.Contains(err.Error(), "--json") {
+		t.Errorf("--format md --json = %v", err)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+func TestFinishPlanReportsASummaryItCannotWrite(t *testing.T) {
+	err := finishPlan(nil, nil, diffRun{Markdown: failingWriter{}, Title: "letsgo plan"})
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Errorf("finishPlan = %v, want the write failure", err)
+	}
+}

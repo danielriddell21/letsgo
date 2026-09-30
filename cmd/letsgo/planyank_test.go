@@ -414,3 +414,19 @@ func TestObserveYankPlansTheTapRollback(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanYankFormatMarkdown(t *testing.T) {
+	yankForgeFor(t)
+	t.Chdir(moduleFixture(t))
+
+	var err error
+	out := captureStdout(t, func() { err = runPlan([]string{"-yank", "v1.2.3", "--format", "md"}) })
+	if err != nil {
+		t.Fatalf("plan -yank --format md = %v\n%s", err, out)
+	}
+	for _, want := range []string{"## letsgo plan: yank v1.2.3\n", "```diff\n! release", "\n! gomod"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("summary missing %q:\n%s", want, out)
+		}
+	}
+}

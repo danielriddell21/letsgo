@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -67,6 +68,40 @@ type diffRun struct {
 
 	// Then is what to run to make the plan happen when it is not saved.
 	Then string
+
+	// Markdown, when set, is where the plan is written as Markdown, under
+	// Title. The text rendering is left out, since the same actions would
+	// appear twice.
+	Markdown io.Writer
+	Title    string
+}
+
+// markdownFormat reads --format, reporting whether it asked for Markdown.
+func markdownFormat(name string, jsonOutput bool) (bool, error) {
+	switch name {
+	case "text":
+		return false, nil
+	case "md":
+		if jsonOutput {
+			return false, errors.New("letsgo: --format md and --json are two answers to one question; pick one")
+		}
+		return true, nil
+	}
+	return false, fmt.Errorf("letsgo: unknown --format %q (text or md)", name)
+}
+
+// toMarkdown makes the run write Markdown to standard output, and returns what
+// puts standard output back. A summary is piped into a file, so everything
+// else the plan says, the gate report and progress, moves to standard error
+// where it stays in the log without being mixed into the summary.
+func (r *diffRun) toMarkdown(on bool) func() {
+	if !on {
+		return func() {}
+	}
+	out := os.Stdout
+	os.Stdout = os.Stderr
+	r.Markdown = out
+	return func() { os.Stdout = out }
 }
 
 // diffAndSave prints what a release would change, saves the plan when asked,
@@ -84,14 +119,21 @@ func diffAndSave(ctx context.Context, p *plan.Plan, r diffRun) error {
 // save the plan, and answer --exit-code.
 func finishDiff(p *plan.Plan, d *forgeDiff, r diffRun) error {
 	r.Then = "letsgo release"
+	r.Title = "letsgo plan"
 	return finishPlan(d.Actions, func(path string) (string, error) { return savePlan(p, d, path) }, r)
 }
 
 // finishPlan shows a plan's actions, saves it through save when asked, and
 // answers --exit-code. It is the part a release plan and a yank plan share.
 func finishPlan(actions []plandiff.Action, save func(path string) (string, error), r diffRun) error {
-	fmt.Println()
-	fmt.Print(plandiff.Render(actions))
+	if r.Markdown != nil {
+		if _, err := io.WriteString(r.Markdown, plandiff.Markdown(r.Title, actions)); err != nil {
+			return fmt.Errorf("letsgo: writing the summary: %w", err)
+		}
+	} else {
+		fmt.Println()
+		fmt.Print(plandiff.Render(actions))
+	}
 
 	if r.Out != "" {
 		digest, err := save(r.Out)
