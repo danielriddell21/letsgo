@@ -135,20 +135,35 @@ func blobFingerprint(content []byte) string {
 	return "blob:" + hex.EncodeToString(h.Sum(nil))
 }
 
-// planDiff builds the release into a scratch directory, reads the forge, and
-// prints what releasing would change.
-func planDiff(ctx context.Context, p *plan.Plan, token, tapToken, releaseToken string) error {
+// forgeDiff is what reading the forge against a fresh build came to.
+type forgeDiff struct {
+	Actions []plandiff.Action
+
+	// Manifest is the manifest the build produced, and ManifestSHA256 its
+	// digest: what an apply must reproduce.
+	Manifest       []byte
+	ManifestSHA256 string
+}
+
+// diffTokens are the credentials planDiff reads the forge with.
+type diffTokens struct {
+	Token, TapToken, ReleaseToken string
+}
+
+// planDiff builds the release into a scratch directory and reads the forge to
+// say what releasing would change.
+func planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*forgeDiff, error) {
 	if !p.HasRepo {
-		return fmt.Errorf("letsgo: --diff needs a repository on a forge to compare against")
+		return nil, fmt.Errorf("letsgo: --diff needs a repository on a forge to compare against")
 	}
 
 	dir, err := os.MkdirTemp("", "letsgo-plan-")
 	if err != nil {
-		return fmt.Errorf("letsgo: %w", err)
+		return nil, fmt.Errorf("letsgo: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	tokenValue, _ := plan.Token(token)
+	tokenValue, _ := plan.Token(tokens.Token)
 	client := github.New(tokenValue)
 	client.UserAgent = "letsgo/" + version
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
@@ -162,28 +177,33 @@ func planDiff(ctx context.Context, p *plan.Plan, token, tapToken, releaseToken s
 		fmt.Printf("    ! "+format+"\n", args...)
 	})
 	if err != nil {
-		return fmt.Errorf("letsgo: %w", err)
+		return nil, fmt.Errorf("letsgo: %w", err)
 	}
 
-	manifestSum, err := fileSum(filepath.Join(result.Dir, manifest.FileName))
+	manifestPath := filepath.Join(result.Dir, manifest.FileName)
+	manifestBytes, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("letsgo: %w", err)
+	}
+	manifestSum, err := fileSum(manifestPath)
+	if err != nil {
+		return nil, err
 	}
 	notes, err := releaseNotes(ctx, p, client, repo, result.Manifest, manifestSum)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	actions, err := diffForge(ctx, p, forgeTargets{
-		Forge: releaseClientFor(client, releaseToken, token),
-		Tap:   tapClientFor(client, tapToken, token),
+		Forge: releaseClientFor(client, tokens.ReleaseToken, tokens.Token),
+		Tap:   tapClientFor(client, tokens.TapToken, tokens.Token),
 		Token: tokenValue, Repo: repo, Dir: dir, Result: result, Notes: notes, Info: info,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	fmt.Println()
-	fmt.Print(plandiff.Render(actions))
-	return nil
+	return &forgeDiff{
+		Actions: actions, Manifest: manifestBytes, ManifestSHA256: "sha256:" + hex.EncodeToString(manifestSum),
+	}, nil
 }

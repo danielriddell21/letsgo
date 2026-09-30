@@ -38,9 +38,10 @@ brew install danielriddell21/tap/letsgo
 ## Usage
 
 ```
-letsgo plan [--explain] [--json] [--publish] [--diff]  resolve and check a release without performing one
+letsgo plan [--explain] [--json] [--publish] [--diff [--exit-code]] [-out file]  resolve and check a release without performing one
 letsgo build [--snapshot] [-o dir]     build every artifact into dist/ without publishing
 letsgo release [--draft] [-o dir]      build and publish, resumably
+letsgo apply <file> [-o dir]          publish a release exactly as a saved plan agreed it
 letsgo release --snapshot              rehearse a release without publishing
 letsgo verify [tag] [--json] [--words]  rebuild a published release and compare it
 letsgo doctor [--json]                 diagnose tools and repository state, read-only
@@ -133,6 +134,19 @@ which one the project releases with. The action installs the latest letsgo by
 default; pin `version:` to a tag when the release has to be reproducible.
 
 [action]: https://github.com/danielriddell21/letsgo-action
+
+## Agreeing a release before making it
+
+```
+letsgo plan -out release.plan    # build, read the forge, show and save what would change
+letsgo apply release.plan        # rebuild, refuse unless it matches the plan, then publish
+```
+
+The plan holds digests, not bytes. `apply` rebuilds and compares the manifest
+before any write, and stops naming the fields that differ, so a changed
+toolchain or dependency between the two steps is caught. `letsgo plan --diff
+--exit-code` exits 2 when a release would change anything, for a scheduled
+drift check.
 
 ## Promoting a prerelease
 

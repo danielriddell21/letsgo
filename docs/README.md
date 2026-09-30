@@ -53,6 +53,7 @@ Each HLD opens with its status. Implemented designs are kept as the record of wh
 | [0017](adr/0017-stale-plan-by-observed-state.md) | Stale plan = tag moved or target in unplanned state | proposed |
 | [0018](adr/0018-native-summary-terraform-export.md) | Native job summary; Terraform export is the `letsgo-tfplan` companion | proposed |
 | [0019](adr/0019-plan-apply-enforcement-in-core.md) | Plan/apply enforcement in core; only presentation may be a plugin | proposed |
+| [0020](adr/0020-plan-file-and-apply-surface.md) | The plan file, `apply`, and drift detection | accepted |
 
 New ADRs take the next number. Superseded ADRs stay, with their status set to
 `superseded by NNNN`.
