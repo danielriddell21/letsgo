@@ -38,11 +38,12 @@ func TestTag(t *testing.T) {
 // fakeForge is a forge holding no releases that hands out one on request.
 type fakeForge struct {
 	created []github.ReleaseInput
+	readErr error
 	err     error
 }
 
 func (f *fakeForge) ReleaseByTag(context.Context, github.Repo, string) (*github.Release, error) {
-	return nil, nil
+	return nil, f.readErr
 }
 
 func (f *fakeForge) CreateRelease(_ context.Context, _ github.Repo, in github.ReleaseInput) (*github.Release, error) {
@@ -168,6 +169,27 @@ func TestPublishNamesWhatIsDoneWhenTheTapFails(t *testing.T) {
 	}
 	if len(forge.created) != 1 {
 		t.Errorf("created = %+v, want the release kept", forge.created)
+	}
+}
+
+func TestPublishNamesWhatIsDoneWhenTheImagesFail(t *testing.T) {
+	t.Parallel()
+	o, _, tap := publishFixture(t)
+	o.Result.Images = []release.ImageBuild{unversionedImage()}
+	o.Snapshot = false
+	o.Plan.Config.ModuleDir = "sub"
+
+	_, err := Publish(t.Context(), o)
+
+	stopped, ok := errors.AsType[*StepError](err)
+	if !ok || stopped.Step != StepImages {
+		t.Fatalf("err = %v, want a StepError at %s", err, StepImages)
+	}
+	if want := []Step{StepGate, StepRelease, StepTap}; !slices.Equal(stopped.Done, want) {
+		t.Errorf("Done = %v, want %v", stopped.Done, want)
+	}
+	if len(tap.writes) == 0 {
+		t.Error("the tap was not written before the images")
 	}
 }
 
@@ -376,5 +398,32 @@ func TestObserveLeavesTheTapAloneForADraft(t *testing.T) {
 	}
 	if len(actions) != 1 || actions[0].Kind != plandiff.KindRelease {
 		t.Errorf("actions = %+v, want the release only", actions)
+	}
+}
+
+func TestObserveNamesWhatItCouldNotRead(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		broken func(*Options)
+		want   string
+	}{
+		{"the release", func(o *Options) { o.Forge = &fakeForge{readErr: errors.New("forbidden")} }, "observing the release"},
+		{"the tap", func(o *Options) { o.Tap = failingTap{} }, "observing the tap"},
+		{"the images", func(o *Options) { o.Result.Images = []release.ImageBuild{unversionedImage()} }, "observing the images"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			o := diffFixture(t)
+			tt.broken(&o)
+
+			_, err := Observe(t.Context(), o)
+
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("err = %v, want it to contain %q", err, tt.want)
+			}
+		})
 	}
 }

@@ -2,6 +2,7 @@ package publication
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -103,6 +104,37 @@ func TestGateSkipsWhatIsNotPublic(t *testing.T) {
 				t.Fatalf("gate = %v, want nil", err)
 			}
 		})
+	}
+}
+
+// The gate stands in front of the release: a check that cannot be made when it
+// is required stops the publication before anything reaches the forge.
+func TestPublishStopsAtTheGateBeforeTheRelease(t *testing.T) {
+	t.Setenv("GOPRIVATE", "")
+	t.Setenv("GONOSUMDB", "")
+	t.Setenv("GONOSUMCHECK", "")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "down", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	old := sumdbURL
+	sumdbURL = server.URL
+	defer func() { sumdbURL = old }()
+
+	o, forge, _ := publishFixture(t)
+	o.Snapshot = false
+	o.Plan.Module = discover.Module{Path: "github.com/you/foo"}
+	o.Plan.Proxy, o.Plan.Required = server.URL, []string{"sumdb"}
+
+	_, err := Publish(t.Context(), o)
+
+	stopped, ok := errors.AsType[*StepError](err)
+	if !ok || stopped.Step != StepGate || len(stopped.Done) != 0 {
+		t.Fatalf("err = %v, want a StepError at %s with nothing done", err, StepGate)
+	}
+	if len(forge.created) != 0 {
+		t.Errorf("created = %+v, want nothing released past a failed gate", forge.created)
 	}
 }
 
