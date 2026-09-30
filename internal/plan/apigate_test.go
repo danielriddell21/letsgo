@@ -172,3 +172,25 @@ func TestAPIGateSkipsAFirstRelease(t *testing.T) {
 		t.Errorf("api compatibility = %+v, want skip", c)
 	}
 }
+
+// A module of commands has no exported API, so the gate skips it — even when
+// required, and without needing apidiff or an earlier release.
+func TestAPIGateSkipsAModuleWithNothingImportable(t *testing.T) {
+	for _, mod := range []string{"", "require api-gate\n"} {
+		r := newRepo(t)
+		r.write("go.mod", "module example.com/tool\n\ngo 1.24\n")
+		r.write("main.go", "package main\n\nfunc main() {}\n")
+		r.write("internal/x/x.go", "package x\n")
+		if mod != "" {
+			r.write("letsgo.mod", mod)
+		}
+		r.commit("v1.0.0")
+		r.write("main.go", "package main\n\nfunc main() { println() }\n")
+		r.commit("v1.1.0")
+
+		c := apiCheck(t, r, false)
+		if c.Status != plan.Skip || !strings.Contains(c.Detail, "nothing in this module is importable") {
+			t.Errorf("mod %q: api compatibility = %+v, want a skip naming the reason", mod, c)
+		}
+	}
+}

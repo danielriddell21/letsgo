@@ -12,6 +12,7 @@ func minimalRepo(t *testing.T, letsgoMod string) *repo {
 	r := newRepo(t)
 	r.write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
 	r.write("main.go", "package main\n\nvar version = \"dev\"\n\nfunc main() {}\n")
+	r.write("lib/lib.go", "package lib\n") // importable, so the API gate has an API to look at
 	if letsgoMod != "" {
 		r.write("letsgo.mod", letsgoMod)
 	}

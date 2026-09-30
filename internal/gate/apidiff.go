@@ -100,6 +100,17 @@ type pkgRef struct {
 	dir        string // relative to the module root
 }
 
+// Importable reports whether anyone outside the module could import any of its
+// packages. A module of commands and internal packages has no API to break, so
+// the gate has nothing to look at, whatever tools are installed.
+func Importable(ctx context.Context, dir string) (bool, error) {
+	packages, err := exportedPackages(ctx, dir)
+	if err != nil {
+		return false, err
+	}
+	return len(packages) > 0, nil
+}
+
 // exportedPackages lists the packages a dependant could import: everything
 // except commands and anything under internal, neither of which anyone
 // outside the module can depend on.
