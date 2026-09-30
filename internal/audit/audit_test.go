@@ -632,6 +632,34 @@ func TestRunAllExcludesDraftsRetractedAndPrereleases(t *testing.T) {
 	}
 }
 
+// An immutable release cannot take an audit.json, so it is skipped with a
+// reason before anything is fetched: this one has no manifest to find.
+func TestRunSkipsAnImmutableRelease(t *testing.T) {
+	client := serveMany(t, nil, []github.Release{{ID: 1, TagName: "v1.0.0", Immutable: true}})
+	opts := audit.Options{Client: client, Repo: github.Repo{Owner: "you", Name: "demo"}, WorkDir: t.TempDir()}
+
+	opts.Tag = "v1.0.0"
+	result, err := audit.Run(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("audit.Run: %v", err)
+	}
+	if result.Recorded || !strings.Contains(result.Skipped, "immutable") {
+		t.Errorf("result = %+v, want a skip naming immutability", result)
+	}
+
+	var out strings.Builder
+	result.Report(&out)
+	if !strings.Contains(out.String(), "v1.0.0: skipped, the release is immutable") {
+		t.Errorf("report = %q", out.String())
+	}
+
+	opts.Tag = ""
+	results, err := audit.RunAll(context.Background(), opts)
+	if err != nil || len(results) != 1 || results[0].Skipped == "" {
+		t.Errorf("RunAll = %+v, %v, want the immutable release skipped", results, err)
+	}
+}
+
 // A tag outside the module's scope must not be audited as if it were this
 // module's own release.
 func TestRunAllExcludesOutOfScopeTags(t *testing.T) {
