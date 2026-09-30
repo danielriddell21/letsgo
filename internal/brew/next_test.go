@@ -2,6 +2,7 @@ package brew_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
@@ -111,5 +112,60 @@ func TestPublishNextKeepsAnUnparseableFormula(t *testing.T) {
 	}
 	if len(tap.writes) != 0 {
 		t.Errorf("an unparseable formula was overwritten anyway: %d writes", len(tap.writes))
+	}
+}
+
+// Retracting the release @next names points it back at the previous one.
+func TestRevertNextRollsBackAFormulaThatNamesTheRetractedRelease(t *testing.T) {
+	yanked := nextSample("1.3.0")
+	content, err := yanked.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tap := &fakeTap{files: map[string][]byte{yanked.FileName(): content}}
+	repo := github.Repo{Owner: "you", Name: "homebrew-tap"}
+
+	result, err := brew.RevertNext(context.Background(), tap, repo, nextSample("1.2.0"), "1.3.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != brew.Updated || len(tap.writes) != 1 {
+		t.Fatalf("result = %+v, writes = %d, want one update", result, len(tap.writes))
+	}
+}
+
+// An @next that has moved on, is absent, or is not ours is not this release's
+// to undo.
+func TestRevertNextLeavesAFormulaThatDoesNotNameTheRetractedRelease(t *testing.T) {
+	newer := nextSample("1.4.0")
+	content, err := newer.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := github.Repo{Owner: "you", Name: "homebrew-tap"}
+
+	for name, files := range map[string]map[string][]byte{
+		"moved on":    {newer.FileName(): content},
+		"absent":      nil,
+		"unparseable": {newer.FileName(): []byte("not a formula\n")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tap := &fakeTap{files: files}
+			result, err := brew.RevertNext(context.Background(), tap, repo, nextSample("1.2.0"), "1.3.0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Status != brew.Kept || len(tap.writes) != 0 {
+				t.Errorf("result = %+v, writes = %d, want it left alone", result, len(tap.writes))
+			}
+		})
+	}
+}
+
+func TestRevertNextReportsATapThatCannotBeRead(t *testing.T) {
+	tap := &fakeTap{err: errors.New("tap down")}
+	_, err := brew.RevertNext(context.Background(), tap, github.Repo{}, nextSample("1.2.0"), "1.3.0")
+	if err == nil {
+		t.Fatal("RevertNext succeeded against an unreadable tap")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -278,12 +279,17 @@ func TestFormulasFromSkipsAVariant(t *testing.T) {
 
 // fakeTap is a Homebrew tap that remembers what was written to it.
 type fakeTap struct {
+	files    map[string][]byte
 	writes   []github.FileInput
 	writeErr error
 }
 
-func (f *fakeTap) ReadFile(context.Context, github.Repo, string) (*github.File, error) {
-	return nil, nil
+func (f *fakeTap) ReadFile(_ context.Context, _ github.Repo, path string) (*github.File, error) {
+	content, ok := f.files[path]
+	if !ok {
+		return nil, nil
+	}
+	return &github.File{Path: path, SHA: "blob", Content: content}, nil
 }
 
 func (f *fakeTap) WriteFile(_ context.Context, _ github.Repo, in github.FileInput) error {
@@ -471,4 +477,117 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// go.mod is read and written through the hooks when they are given, so that a
+// plan can see the edit without making it.
+func TestRunEditsGoModThroughTheHooks(t *testing.T) {
+	forge := &fakeForge{release: &github.Release{ID: 7, TagName: "v1.2.3", Body: "notes"}}
+
+	var written []byte
+	result, err := yank.Run(context.Background(), yank.Options{
+		Client: forge, Repo: github.Repo{Owner: "you", Name: "foo"},
+		Tag: "v1.2.3", Reason: "bad", GoMod: "never/on/disk/go.mod",
+		ReadGoMod: func(path string) ([]byte, error) {
+			if path != "never/on/disk/go.mod" {
+				t.Errorf("read %s", path)
+			}
+			return []byte("module example.com/foo\n"), nil
+		},
+		WriteGoMod: func(_ string, data []byte) error { written = data; return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Retracted || !strings.Contains(string(written), "retract") {
+		t.Errorf("retracted = %v, written:\n%s", result.Retracted, written)
+	}
+}
+
+func TestRunReportsAGoModThatCannotBeWritten(t *testing.T) {
+	forge := &fakeForge{release: &github.Release{ID: 7, TagName: "v1.2.3", Body: "notes"}}
+	_, err := yank.Run(context.Background(), yank.Options{
+		Client: forge, Repo: github.Repo{Owner: "you", Name: "foo"},
+		Tag: "v1.2.3", GoMod: "go.mod",
+		ReadGoMod:  func(string) ([]byte, error) { return []byte("module example.com/foo\n"), nil },
+		WriteGoMod: func(string, []byte) error { return errors.New("read-only") },
+	})
+	if err == nil || !strings.Contains(err.Error(), "read-only") {
+		t.Errorf("err = %v, want the write failure", err)
+	}
+}
+
+// A release already marked as retracted is not edited again: there is nothing
+// to change, so nothing is written.
+func TestRunLeavesAReleaseThatIsAlreadyRetracted(t *testing.T) {
+	forge := &fakeForge{release: &github.Release{
+		ID: 7, TagName: "v1.2.3", Prerelease: true, Body: "> [!CAUTION]\n> **This release is retracted.**\n\nnotes",
+	}}
+
+	result, err := yank.Run(context.Background(), yank.Options{
+		Client: forge, Repo: github.Repo{Owner: "you", Name: "foo"}, Tag: "v1.2.3", Reason: "bad",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forge.updated.TagName != "" {
+		t.Errorf("the release was edited anyway: %+v", forge.updated)
+	}
+	if result.Release != forge.release {
+		t.Errorf("result.Release = %+v", result.Release)
+	}
+}
+
+// @next is rolled back with the formula, but only while it names the release
+// being retracted.
+func TestRunRollsBackNextOnlyWhileItNamesTheRetractedRelease(t *testing.T) {
+	artifact := manifest.Artifact{Name: "foo_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64", Binary: "foo", SHA256: "aaa"}
+	previous := &manifest.Manifest{Version: "1.2.0", Tag: "v1.2.0", Artifacts: []manifest.Artifact{artifact}}
+
+	nextAt := func(version string) map[string][]byte {
+		f := yank.FormulasFrom(&manifest.Manifest{Version: version, Tag: "v" + version, Artifacts: []manifest.Artifact{artifact}},
+			github.Repo{Owner: "you", Name: "foo"}, "foo", "")[0]
+		f.Name = brew.NextName(f.Name)
+		content, err := f.Render()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string][]byte{f.FileName(): content}
+	}
+
+	for name, tc := range map[string]struct {
+		next   string
+		writes bool
+	}{
+		"names the yanked release": {"1.3.0", true},
+		"has moved on":             {"1.4.0", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tap := &fakeTap{files: nextAt(tc.next)}
+			_, err := yank.Run(context.Background(), yank.Options{
+				Client: &fakeForge{release: &github.Release{ID: 7, TagName: "v1.3.0", Body: "notes"}},
+				Repo:   github.Repo{Owner: "you", Name: "foo"},
+				Tag:    "v1.3.0", Reason: "bad build",
+				Tap: github.Repo{Owner: "you", Name: "homebrew-tap"}, TapAPI: tap,
+				Previous: "v1.2.0", Project: "foo",
+				Manifests: func(context.Context, string) (*manifest.Manifest, error) { return previous, nil },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var next *github.FileInput
+			for i, w := range tap.writes {
+				if strings.HasSuffix(w.Path, "@next.rb") {
+					next = &tap.writes[i]
+				}
+			}
+			if (next != nil) != tc.writes {
+				t.Fatalf("@next written = %v, want %v (writes %+v)", next != nil, tc.writes, tap.writes)
+			}
+			if next != nil && !strings.Contains(string(next.Content), `"1.2.0"`) {
+				t.Errorf("@next was not rolled back to 1.2.0:\n%s", next.Content)
+			}
+		})
+	}
 }

@@ -44,6 +44,29 @@ func PublishNext(ctx context.Context, api FileAPI, tap github.Repo, f Formula) (
 	return publish(ctx, api, tap, path, content, fmt.Sprintf("%s %s", f.Name, f.Version))
 }
 
+// RevertNext points the @next formula back at f, but only while it still names
+// version: the release being retracted. A @next that has since moved on to a
+// newer release, or that does not exist, is left alone.
+func RevertNext(ctx context.Context, api FileAPI, tap github.Repo, f Formula, version string) (Result, error) {
+	path := f.FileName()
+	existing, err := api.ReadFile(ctx, tap, path)
+	if err != nil {
+		return Result{}, err
+	}
+	if existing == nil {
+		return Result{Path: path, Status: Kept}, nil
+	}
+	if current, ok := versionOf(existing.Content); !ok || current != version {
+		return Result{Path: path, Status: Kept}, nil
+	}
+
+	content, err := f.Render()
+	if err != nil {
+		return Result{}, err
+	}
+	return publish(ctx, api, tap, path, content, fmt.Sprintf("%s %s", f.Name, f.Version))
+}
+
 // newerThanPublished reports whether version is newer than whatever formula
 // is currently at path. A path that doesn't exist yet has nothing for
 // version to be older than, so it always counts as newer. A formula that

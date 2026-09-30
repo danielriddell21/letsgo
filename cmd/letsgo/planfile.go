@@ -43,6 +43,11 @@ func savePlan(p *plan.Plan, d *forgeDiff, path string) (string, error) {
 		Manifest:       json.RawMessage(d.Manifest),
 		Actions:        d.Actions,
 	}
+	return writePlan(file, path)
+}
+
+// writePlan writes a plan file and returns its digest.
+func writePlan(file *plandiff.File, path string) (string, error) {
 	if err := file.Write(path); err != nil {
 		return "", fmt.Errorf("letsgo: %w", err)
 	}
@@ -59,6 +64,9 @@ type diffRun struct {
 	Out      string
 	ExitCode bool
 	Started  time.Time
+
+	// Then is what to run to make the plan happen when it is not saved.
+	Then string
 }
 
 // diffAndSave prints what a release would change, saves the plan when asked,
@@ -75,11 +83,18 @@ func diffAndSave(ctx context.Context, p *plan.Plan, r diffRun) error {
 // finishDiff is everything after the forge has been read: show the actions,
 // save the plan, and answer --exit-code.
 func finishDiff(p *plan.Plan, d *forgeDiff, r diffRun) error {
+	r.Then = "letsgo release"
+	return finishPlan(d.Actions, func(path string) (string, error) { return savePlan(p, d, path) }, r)
+}
+
+// finishPlan shows a plan's actions, saves it through save when asked, and
+// answers --exit-code. It is the part a release plan and a yank plan share.
+func finishPlan(actions []plandiff.Action, save func(path string) (string, error), r diffRun) error {
 	fmt.Println()
-	fmt.Print(plandiff.Render(d.Actions))
+	fmt.Print(plandiff.Render(actions))
 
 	if r.Out != "" {
-		digest, err := savePlan(p, d, r.Out)
+		digest, err := save(r.Out)
 		if err != nil {
 			return err
 		}
@@ -90,13 +105,13 @@ func finishDiff(p *plan.Plan, d *forgeDiff, r diffRun) error {
 	switch {
 	case r.Out != "":
 		fmt.Println()
-	case plandiff.HasChanges(d.Actions):
-		fmt.Println(" · run `letsgo release` to apply it")
+	case plandiff.HasChanges(actions):
+		fmt.Printf(" · run `%s` to apply it\n", r.Then)
 	default:
 		fmt.Println(" · nothing to change")
 	}
 
-	if r.ExitCode && plandiff.HasChanges(d.Actions) {
+	if r.ExitCode && plandiff.HasChanges(actions) {
 		return errPlanChanges
 	}
 	return nil
@@ -136,7 +151,7 @@ func freshAgainst(ctx context.Context, p *plan.Plan, file *plandiff.File, t forg
 	if err != nil {
 		return nil, err
 	}
-	if err := staleness(file.Actions, current); err != nil {
+	if err := staleness(file.Actions, current, "letsgo plan -out"); err != nil {
 		return nil, err
 	}
 	for _, name := range alreadyDone(file.Actions, current) {
@@ -162,7 +177,7 @@ func guardApply(ctx context.Context, p *plan.Plan, file *plandiff.File, t forgeT
 
 // staleness is the error for a plan whose targets have changed since it was
 // made, naming each one.
-func staleness(saved, current []plandiff.Action) error {
+func staleness(saved, current []plandiff.Action, remake string) error {
 	drifted := plandiff.Drifted(saved, current)
 	if len(drifted) == 0 {
 		return nil
@@ -172,7 +187,7 @@ func staleness(saved, current []plandiff.Action) error {
 	for _, d := range drifted {
 		b.WriteString("\n    " + d.String())
 	}
-	b.WriteString("\n  make a new plan with `letsgo plan -out`")
+	b.WriteString("\n  make a new plan with `" + remake + "`")
 	return errors.New(b.String())
 }
 

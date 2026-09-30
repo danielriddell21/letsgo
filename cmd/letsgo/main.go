@@ -55,6 +55,7 @@ usage:
   letsgo diff <from> [to] [--format text|md|json]  compare two releases: size, dependencies, API
   letsgo promote <rc-tag>                rebuild a prerelease as a stable release
   letsgo yank <tag> [--reason "..."]     retract a release, including the go.mod directive
+  letsgo plan -yank <tag> [-out file]    show what retracting a release would change
   letsgo tag [--major|--minor|--patch|--pre|--json]  work out the next version and tag it
   letsgo update [--check]                update letsgo itself, verified against its manifest
   letsgo plugin install <name>           install a plugin, verified against its manifest
@@ -227,8 +228,15 @@ func runPlan(args []string) error {
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	tapToken := fs.String("tap-token", "", tapTokenUsage)
 	releaseToken := fs.String("release-token", "", releaseTokenUsage)
+	yankTag := fs.String("yank", "", "plan retracting the release `tag` instead of publishing one")
+	var yankFlags yankArgs
+	yankFlags.bind(fs)
 	if err := parseFlags(fs, args); err != nil {
 		return err
+	}
+	if *yankTag != "" {
+		return planYankCommand(*yankTag, yankFlags, *jsonOutput, diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken},
+			diffRun{Out: *planOut, ExitCode: *exitCode, Started: time.Now()})
 	}
 
 	saving := *planOut != ""
@@ -376,6 +384,9 @@ func runApply(args []string) error {
 	}
 	fmt.Printf("  applying %s (%s) for %s\n", fs.Arg(0), short12(strings.TrimPrefix(digest, "sha256:")), file.Tag)
 
+	if file.Kind == plandiff.FileKindYank {
+		return applyYank(context.Background(), file, diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken})
+	}
 	return doRelease(context.Background(), a, file)
 }
 
@@ -751,8 +762,7 @@ func resolveModuleRepo(ctx context.Context, token string) (moduleRepo, error) {
 	if tokenValue == "" {
 		return moduleRepo{}, fmt.Errorf("letsgo: no token; set %s", envList())
 	}
-	client := github.New(tokenValue)
-	client.UserAgent = "letsgo/" + version
+	client := newForgeClient(tokenValue)
 
 	return moduleRepo{Module: module, Git: git, Repo: repo, Scope: scope, Token: tokenValue, Client: client}, nil
 }

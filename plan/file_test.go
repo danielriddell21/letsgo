@@ -83,7 +83,7 @@ func TestDecodeRefusesWhatItCannotApply(t *testing.T) {
 		want   string
 	}{
 		"schema":   {func(f *plan.File) { f.Schema = 2 }, "schema 2"},
-		"kind":     {func(f *plan.File) { f.Kind = "yank" }, `"yank"`},
+		"kind":     {func(f *plan.File) { f.Kind = "promote" }, `"promote"`},
 		"tag":      {func(f *plan.File) { f.Tag = "" }, "missing"},
 		"commit":   {func(f *plan.File) { f.Commit = "" }, "missing"},
 		"manifest": {func(f *plan.File) { f.ManifestSHA256 = "" }, "missing"},
@@ -103,6 +103,50 @@ func TestDecodeRefusesWhatItCannotApply(t *testing.T) {
 
 	if _, err := plan.Decode([]byte("not json")); err == nil {
 		t.Error("Decode accepted garbage")
+	}
+}
+
+func yankFile() *plan.File {
+	return &plan.File{
+		Schema: plan.FileSchema, Kind: plan.FileKindYank, Repo: "you/gambit", Tag: "v1.3.0",
+		Reason: "wrong version", Previous: "v1.2.8",
+		Actions: []plan.Action{{Op: plan.Change, Kind: plan.KindGoMod, Target: "go.mod", Observed: digestA, Planned: digestB}},
+	}
+}
+
+func TestAYankPlanNeedsNoManifestOrCommit(t *testing.T) {
+	data, err := yankFile().Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, absent := range []string{"manifest", "commit"} {
+		if strings.Contains(string(data), absent) {
+			t.Errorf("a yank plan carries %q:\n%s", absent, data)
+		}
+	}
+
+	got, err := plan.Decode(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != plan.FileKindYank || got.Reason != "wrong version" || got.Previous != "v1.2.8" || !got.Changes() {
+		t.Errorf("Decode = %+v", got)
+	}
+}
+
+func TestDecodeRefusesAYankPlanThatNamesNothing(t *testing.T) {
+	for name, mutate := range map[string]func(*plan.File){
+		"tag":  func(f *plan.File) { f.Tag = "" },
+		"repo": func(f *plan.File) { f.Repo = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := yankFile()
+			mutate(f)
+			data, _ := f.Encode()
+			if _, err := plan.Decode(data); err == nil || !strings.Contains(err.Error(), "missing") {
+				t.Errorf("Decode = %v, want a missing-field error", err)
+			}
+		})
 	}
 }
 

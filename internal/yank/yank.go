@@ -35,6 +35,12 @@ type Options struct {
 	// GoMod is the path to the module's go.mod.
 	GoMod string
 
+	// ReadGoMod and WriteGoMod are how go.mod is read and written. Nil is the
+	// file on disk. A plan sets them so that the edit is decided by this code
+	// and seen, without being made.
+	ReadGoMod  func(path string) ([]byte, error)
+	WriteGoMod func(path string, data []byte) error
+
 	// Prefix is the module's scope prefix (see discover.Scope), empty for a
 	// root module. Tag carries it; go.mod's own retract directive does not,
 	// so it has to be stripped before the directive is written and reattached
@@ -152,6 +158,11 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 // someone who lands on the release page is told.
 func (o Options) markRelease(ctx context.Context, result *Result, release *github.Release, logf func(string, ...any)) error {
 	body := release.Body
+	if IsRetracted(body) && release.Prerelease {
+		result.Release = release
+		logf("%s is already marked as retracted", o.Tag)
+		return nil
+	}
 	if !IsRetracted(body) {
 		reason := strings.TrimSpace(o.Reason)
 		if reason == "" {
@@ -180,7 +191,15 @@ func (o Options) editGoMod(result *Result, logf func(string, ...any)) error {
 		return nil
 	}
 
-	data, err := os.ReadFile(o.GoMod)
+	read, write := o.ReadGoMod, o.WriteGoMod
+	if read == nil {
+		read = os.ReadFile
+	}
+	if write == nil {
+		write = func(path string, data []byte) error { return os.WriteFile(path, data, 0o600) }
+	}
+
+	data, err := read(o.GoMod)
 	if err != nil {
 		return fmt.Errorf("yank: reading %s: %w", o.GoMod, err)
 	}
@@ -197,7 +216,7 @@ func (o Options) editGoMod(result *Result, logf func(string, ...any)) error {
 		return nil
 	}
 
-	if err := os.WriteFile(o.GoMod, out, 0o600); err != nil {
+	if err := write(o.GoMod, out); err != nil {
 		return fmt.Errorf("yank: writing %s: %w", o.GoMod, err)
 	}
 	result.Retracted = true
@@ -234,6 +253,10 @@ func (o Options) revertTap(ctx context.Context, result *Result, logf func(string
 		result.Formulas = append(result.Formulas, published.Path)
 	}
 
+	if err := o.revertNext(ctx, m, logf); err != nil {
+		return err
+	}
+
 	if o.TapFilesPlugin.Command == "" {
 		return nil
 	}
@@ -250,6 +273,25 @@ func (o Options) revertTap(ctx context.Context, result *Result, logf func(string
 		}
 		logf("%s %s in %s (back to %s)", published.Status, published.Path, o.Tap, o.Previous)
 		result.TapFiles = append(result.TapFiles, published.Path)
+	}
+	return nil
+}
+
+// revertNext points each @next formula back at the previous release, when it
+// names the one being retracted. One that has moved on to something newer is
+// not this release's to undo.
+func (o Options) revertNext(ctx context.Context, m *manifest.Manifest, logf func(string, ...any)) error {
+	yanked := strings.TrimPrefix(strings.TrimPrefix(o.Tag, o.Prefix), "v")
+	for _, formula := range FormulasFrom(m, o.Repo, o.Project, o.Caveats) {
+		formula.Name = brew.NextName(formula.Name)
+		published, err := brew.RevertNext(ctx, o.TapAPI, o.Tap, formula, yanked)
+		if err != nil {
+			return err
+		}
+		if published.Status == brew.Kept {
+			continue
+		}
+		logf("%s %s in %s (back to %s)", published.Status, published.Path, o.Tap, o.Previous)
 	}
 	return nil
 }

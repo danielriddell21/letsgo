@@ -136,11 +136,11 @@ func TestStalenessSaysHowToRecover(t *testing.T) {
 	saved := []plandiff.Action{{Op: plandiff.Add, Kind: plandiff.KindAsset, Target: "a", Planned: "sha256:a"}}
 	current := []plandiff.Action{{Op: plandiff.Change, Kind: plandiff.KindAsset, Target: "a", Observed: "sha256:z", Planned: "sha256:a"}}
 
-	err := staleness(saved, current)
+	err := staleness(saved, current, "letsgo plan -out")
 	if err == nil || !strings.Contains(err.Error(), "letsgo plan -out") || !strings.Contains(err.Error(), "asset a") {
 		t.Errorf("err = %v", err)
 	}
-	if err := staleness(saved, saved); err != nil {
+	if err := staleness(saved, saved, "letsgo plan -out"); err != nil {
 		t.Errorf("unchanged forge: %v", err)
 	}
 }
