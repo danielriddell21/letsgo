@@ -11,8 +11,11 @@ package plugin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 )
 
 // Hook is a point in a release a plugin can answer for.
@@ -219,4 +222,32 @@ func run[In, Out any](hook Hook, answer func(In) (Out, error)) error {
 		return fmt.Errorf("writing the hook's answer: %w", err)
 	}
 	return nil
+}
+
+// ReadConfig reads a plugin's own config: name.mod in configDir, falling back
+// to the legacy letsgo-name.mod in the working directory, which is the
+// repository root where letsgo runs a plugin. It returns the bytes and the
+// path they came from, so an error can name the file.
+//
+// An empty configDir skips the first location. When neither file exists the
+// error satisfies errors.Is(err, fs.ErrNotExist), so a plugin can decide for
+// itself whether a missing config is fatal.
+func ReadConfig(configDir, name string) (data []byte, path string, err error) {
+	var candidates []string
+	if configDir != "" {
+		candidates = append(candidates, filepath.Join(configDir, name+".mod"))
+	}
+	candidates = append(candidates, "letsgo-"+name+".mod")
+
+	for _, c := range candidates {
+		data, err = os.ReadFile(c)
+		if err == nil {
+			return data, c, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return nil, c, fmt.Errorf("%s: %w", c, err)
+		}
+	}
+	last := candidates[len(candidates)-1]
+	return nil, last, fmt.Errorf("%s: %w", last, fs.ErrNotExist)
 }
