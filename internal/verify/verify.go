@@ -28,6 +28,8 @@ import (
 	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/randomart"
+	"github.com/danielriddell21/letsgo/internal/releases"
+	"github.com/danielriddell21/letsgo/internal/releases/githubsource"
 )
 
 // auditFileName is internal/audit.FileName, duplicated rather than imported:
@@ -249,7 +251,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	}
 
 	result := &Result{
-		Tag: release.TagName, Repo: o.Repo.String(), userAgent: o.UserAgent,
+		Tag: release.Tag, Repo: o.Repo.String(), userAgent: o.UserAgent,
 		published: map[string]Status{}, rebuilt: map[string]Status{},
 	}
 	if result.userAgent == "" {
@@ -282,9 +284,11 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 	return result, nil
 }
 
-func findRelease(ctx context.Context, o Options) (*github.Release, error) {
+func findRelease(ctx context.Context, o Options) (*releases.Published, error) {
+	src := &githubsource.Source{Client: o.Client, Repo: o.Repo}
+
 	if o.Tag != "" {
-		release, err := o.Client.ReleaseByTag(ctx, o.Repo, o.Tag)
+		release, err := releases.ByTag(ctx, src, o.Tag)
 		if err != nil {
 			return nil, err
 		}
@@ -294,7 +298,7 @@ func findRelease(ctx context.Context, o Options) (*github.Release, error) {
 		return release, nil
 	}
 
-	release, err := latestRelease(ctx, o)
+	release, err := releases.Latest(ctx, src, discover.Scope{Prefix: o.Prefix})
 	if err != nil {
 		return nil, err
 	}
@@ -304,54 +308,18 @@ func findRelease(ctx context.Context, o Options) (*github.Release, error) {
 	return release, nil
 }
 
-// latestRelease finds the most recent release, scoped to o.Prefix when it
-// is set. The forge's own "latest release" has no concept of a monorepo's
-// scopes, so a scoped module instead lists tags and picks the highest
-// version within its own prefix, the same way yank.PreviousOf does.
-func latestRelease(ctx context.Context, o Options) (*github.Release, error) {
-	if o.Prefix == "" {
-		return o.Client.LatestRelease(ctx, o.Repo)
-	}
-
-	tags, err := o.Client.Tags(ctx, o.Repo, 100)
-	if err != nil {
-		return nil, err
-	}
-
-	tag, ok := (discover.Scope{Prefix: o.Prefix}).LatestTag(tags)
-	if !ok {
-		return nil, nil
-	}
-	return o.Client.ReleaseByTag(ctx, o.Repo, tag)
-}
-
-// FetchManifest downloads and decodes a release's manifest. Exported for
-// audit, which checks a release's manifest the same way verify does.
-func FetchManifest(ctx context.Context, client *github.Client, repo github.Repo, release *github.Release) (*manifest.Manifest, error) {
-	m, _, err := fetchManifest(ctx, Options{Client: client, Repo: repo}, release)
-	return m, err
-}
-
 // fetchManifest also returns the sha256 of the manifest as published, which is
 // what identifies the release.
-func fetchManifest(ctx context.Context, o Options, release *github.Release) (*manifest.Manifest, []byte, error) {
-	asset, ok := release.Asset(manifest.FileName)
-	if !ok {
+func fetchManifest(ctx context.Context, o Options, release *releases.Published) (*manifest.Manifest, []byte, error) {
+	src := &githubsource.Source{Client: o.Client, Repo: o.Repo}
+	m, sum, err := releases.Manifest(ctx, src, release)
+	if releases.IsNoManifest(err) {
 		return nil, nil, fmt.Errorf(
 			"verify: release %s has no %s, so there is nothing describing what it should contain\n"+
 				"  only releases published by letsgo can be verified",
-			release.TagName, manifest.FileName)
+			release.Tag, manifest.FileName)
 	}
-	data, err := o.Client.DownloadAsset(ctx, o.Repo, asset.ID)
-	if err != nil {
-		return nil, nil, err
-	}
-	m, err := manifest.Decode(data)
-	if err != nil {
-		return nil, nil, err
-	}
-	sum := sha256.Sum256(data)
-	return m, sum[:], nil
+	return m, sum, err
 }
 
 // comparePublished checks the assets attached to the release against what the
@@ -359,8 +327,8 @@ func fetchManifest(ctx context.Context, o Options, release *github.Release) (*ma
 //
 // The forge reports each asset's digest, so this needs no downloads: the
 // question is whether the release's own description matches its contents.
-func comparePublished(result *Result, release *github.Release, m *manifest.Manifest) {
-	published := make(map[string]github.Asset, len(release.Assets))
+func comparePublished(result *Result, release *releases.Published, m *manifest.Manifest) {
+	published := make(map[string]releases.Asset, len(release.Assets))
 	for _, a := range release.Assets {
 		published[a.Name] = a
 	}
@@ -375,8 +343,8 @@ func comparePublished(result *Result, release *github.Release, m *manifest.Manif
 			result.published[want.Name] = Fail
 			continue
 		}
-		got, ok := asset.SHA256()
-		if !ok {
+		got := asset.SHA256
+		if got == "" {
 			// Without a digest from the forge there is nothing to compare
 			// that downloading would not be needed for.
 			continue
@@ -432,7 +400,7 @@ type auditEntry struct {
 // exists (AU-10): informational only, so an affected release still passes
 // (AU-9) — a later audit re-checking against today's vulndb is not the
 // release's own fault.
-func reportAudit(ctx context.Context, o Options, result *Result, release *github.Release) {
+func reportAudit(ctx context.Context, o Options, result *Result, release *releases.Published) {
 	asset, ok := release.Asset(auditFileName)
 	if !ok {
 		return
@@ -464,7 +432,7 @@ func reportAudit(ctx context.Context, o Options, result *Result, release *github
 // reportPlan prints the plan record a release was applied from and checks the
 // attached plan is the one it names (PA-12). A release made without a plan has
 // nothing to report.
-func reportPlan(ctx context.Context, o Options, result *Result, release *github.Release, m *manifest.Manifest) {
+func reportPlan(ctx context.Context, o Options, result *Result, release *releases.Published, m *manifest.Manifest) {
 	if m.Plan == nil {
 		return
 	}

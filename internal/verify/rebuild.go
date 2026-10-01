@@ -20,6 +20,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/releases"
 )
 
 // maxSourceFile bounds one entry extracted from a source archive. The archive
@@ -31,7 +32,7 @@ const maxSourceFile = 256 << 20
 // Nothing here returns an error: a rebuild that cannot proceed is a failed
 // check, not a failed verification. Reporting it as an error would abandon the
 // checks already gathered, which are the reason anyone ran this.
-func rebuild(ctx context.Context, o Options, result *Result, release *github.Release, m *manifest.Manifest) {
+func rebuild(ctx context.Context, o Options, result *Result, release *releases.Published, m *manifest.Manifest) {
 	source, from, err := obtainSource(ctx, o, release, m)
 	if err != nil {
 		result.add("source", Fail, "%v", err)
@@ -59,7 +60,7 @@ func rebuild(ctx context.Context, o Options, result *Result, release *github.Rel
 // result means: rebuilding from the repository ties the binaries to source
 // anyone can review, while rebuilding from the release's own source archive
 // only shows the release is internally consistent.
-func obtainSource(ctx context.Context, o Options, release *github.Release, m *manifest.Manifest) (dir, from string, err error) {
+func obtainSource(ctx context.Context, o Options, release *releases.Published, m *manifest.Manifest) (dir, from string, err error) {
 	if o.Dir != "" {
 		if worktree, err := checkoutCommit(ctx, o, m.Commit); err == nil {
 			return worktree, fmt.Sprintf("local checkout at %s", shortCommit(m.Commit)), nil
@@ -94,10 +95,10 @@ func obtainSource(ctx context.Context, o Options, release *github.Release, m *ma
 // repository happens to contain today.
 func SourceFromArchive(
 	ctx context.Context, client *github.Client, repo github.Repo,
-	release *github.Release, m *manifest.Manifest, dir string,
+	release *releases.Published, m *manifest.Manifest, dir string,
 ) (string, error) {
 	if m.Source == nil {
-		return "", fmt.Errorf("release %s published no source archive", release.TagName)
+		return "", fmt.Errorf("release %s published no source archive", release.Tag)
 	}
 	if err := extractSource(ctx, Options{Client: client, Repo: repo}, release, m, dir); err != nil {
 		return "", err
@@ -120,7 +121,7 @@ func checkoutCommit(ctx context.Context, o Options, commit string) (string, erro
 	return dir, discover.AddWorktree(ctx, o.Dir, dir, commit)
 }
 
-func extractSource(ctx context.Context, o Options, release *github.Release, m *manifest.Manifest, dir string) error {
+func extractSource(ctx context.Context, o Options, release *releases.Published, m *manifest.Manifest, dir string) error {
 	var data []byte
 	for _, asset := range release.Assets {
 		if asset.Name == m.Source.Archive {
