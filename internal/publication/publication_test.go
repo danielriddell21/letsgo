@@ -2,17 +2,12 @@ package publication
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
@@ -296,60 +291,6 @@ func TestNotesMode(t *testing.T) {
 	}
 }
 
-// Uploads are checked against the digests the release recorded, so every
-// published file has to appear here.
-func TestSumsFromCoversSourceAndArtifacts(t *testing.T) {
-	t.Parallel()
-	sums := sumsFrom(t.TempDir(), &release.Result{
-		Source: build.Source{Name: "foo_1.2.3_source.tar.gz", SHA256: "src"},
-		Manifest: &manifest.Manifest{Artifacts: []manifest.Artifact{
-			{Name: "foo_1.2.3_linux_amd64.tar.gz", SHA256: "aaa"},
-			{Name: "foo_1.2.3_darwin_arm64.tar.gz", SHA256: "bbb"},
-		}},
-	})
-
-	want := map[string]string{
-		"foo_1.2.3_source.tar.gz":       "src",
-		"foo_1.2.3_linux_amd64.tar.gz":  "aaa",
-		"foo_1.2.3_darwin_arm64.tar.gz": "bbb",
-	}
-	if len(sums) != len(want) {
-		t.Fatalf("sums = %v", sums)
-	}
-	for name, digest := range want {
-		if sums[name] != digest {
-			t.Errorf("%s = %q, want %q", name, sums[name], digest)
-		}
-	}
-}
-
-func TestSumsFromCoversThePlanFile(t *testing.T) {
-	t.Parallel()
-	sums := sumsFrom(t.TempDir(), &release.Result{
-		Manifest: &manifest.Manifest{Plan: &manifest.PlanRecord{SHA256: "ppp"}},
-	})
-	if sums[release.PlanFileName] != "ppp" {
-		t.Errorf("sums = %v, want the plan file's digest", sums)
-	}
-}
-
-// The manifest records no digest of itself and may be rewritten after the
-// build, so the file on disk is what an upload is compared with.
-func TestSumsFromAsksTheManifestFileForItsOwnDigest(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, manifest.FileName), []byte("{}"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	sums := sumsFrom(dir, &release.Result{Manifest: &manifest.Manifest{}})
-
-	want := sha256.Sum256([]byte("{}"))
-	if got := sums[manifest.FileName]; got != hex.EncodeToString(want[:]) {
-		t.Errorf("manifest digest = %q, want %x", got, want)
-	}
-}
-
 func diffFixture(t *testing.T) Options {
 	t.Helper()
 	p := releasePlan()
@@ -425,57 +366,5 @@ func TestObserveNamesWhatItCouldNotRead(t *testing.T) {
 				t.Errorf("err = %v, want it to contain %q", err, tt.want)
 			}
 		})
-	}
-}
-
-// SHA256SUMS, the SBOM and install.sh record no digest anywhere, so a re-planned
-// one the same size as the last would be kept on a resumed publish if the
-// upload were compared by size.
-func TestSumsFromHashesEveryOtherPublishedFile(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	files := map[string]string{"SHA256SUMS": "sums", "foo.spdx.json": "sbom", "install.sh": "#!/bin/sh"}
-	var names []string
-	for name, body := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		names = append(names, name)
-	}
-
-	sums := sumsFrom(dir, &release.Result{Manifest: &manifest.Manifest{}, Files: names})
-
-	for name, body := range files {
-		want := sha256.Sum256([]byte(body))
-		if got := sums[name]; got != hex.EncodeToString(want[:]) {
-			t.Errorf("%s digest = %q, want %x", name, got, want)
-		}
-	}
-}
-
-// A listed file that is not on disk is left without a digest, not invented.
-func TestSumsFromSkipsAnUnreadableFile(t *testing.T) {
-	t.Parallel()
-
-	sums := sumsFrom(t.TempDir(), &release.Result{Manifest: &manifest.Manifest{}, Files: []string{"gone"}})
-
-	if _, ok := sums["gone"]; ok {
-		t.Errorf("digest recorded for a file that is not there: %v", sums)
-	}
-}
-
-// A digest the build recorded is kept; the file is not asked again.
-func TestSumsFromKeepsARecordedDigest(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "foo.tar.gz"), []byte("on disk"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	m := &manifest.Manifest{Artifacts: []manifest.Artifact{{Name: "foo.tar.gz", SHA256: "recorded"}}}
-
-	sums := sumsFrom(dir, &release.Result{Manifest: m, Files: []string{"foo.tar.gz"}})
-
-	if got := sums["foo.tar.gz"]; got != "recorded" {
-		t.Errorf("digest = %q, want the recorded one", got)
 	}
 }

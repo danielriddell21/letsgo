@@ -40,20 +40,5 @@ func StampPlan(r *Result, planFile []byte, createdAt, letsgoVersion string) erro
 	}
 	r.Files = files
 
-	if err := r.Manifest.Write(filepath.Join(r.Dir, manifest.FileName)); err != nil {
-		return err
-	}
-	sums := make([]build.Sum, 0, len(r.Files))
-	for _, name := range r.Files {
-		if name == build.ChecksumFile {
-			continue
-		}
-		digest, err := sha256File(filepath.Join(r.Dir, name))
-		if err != nil {
-			return err
-		}
-		sums = append(sums, build.Sum{Name: name, SHA256: digest})
-	}
-	_, err := build.WriteChecksums(r.Dir, sums)
-	return err
+	return r.Restamp()
 }

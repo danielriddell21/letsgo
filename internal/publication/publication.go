@@ -9,16 +9,11 @@ package publication
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -89,9 +84,13 @@ func Publish(ctx context.Context, o Options) (*Result, error) {
 	}
 	done = append(done, StepGate)
 
-	released, err := publish.Run(ctx, releaseOptions(o, func(format string, args ...any) {
+	ro, err := releaseOptions(o, func(format string, args ...any) {
 		fmt.Fprintf(out, "  "+format+"\n", args...)
-	}))
+	})
+	if err != nil {
+		return nil, &StepError{Step: StepRelease, Done: done, Err: err}
+	}
+	released, err := publish.Run(ctx, ro)
 	if err != nil {
 		return nil, &StepError{Step: StepRelease, Done: done, Err: err}
 	}
@@ -113,7 +112,11 @@ func Publish(ctx context.Context, o Options) (*Result, error) {
 // running the same decisions against views that can only be read. The
 // prediction cannot drift from the practice because it is the practice.
 func Observe(ctx context.Context, o Options) ([]plandiff.Action, error) {
-	actions, err := publish.Observe(ctx, releaseOptions(o, nil))
+	ro, err := releaseOptions(o, nil)
+	if err != nil {
+		return nil, fmt.Errorf("observing the release: %w", err)
+	}
+	actions, err := publish.Observe(ctx, ro)
 	if err != nil {
 		return nil, fmt.Errorf("observing the release: %w", err)
 	}
@@ -144,14 +147,18 @@ func (o Options) out() io.Writer {
 
 // releaseOptions is the publication of the forge release, decided once so that
 // what Publish does and what Observe predicts cannot drift apart.
-func releaseOptions(o Options, logf func(format string, args ...any)) publish.Options {
+func releaseOptions(o Options, logf func(format string, args ...any)) (publish.Options, error) {
 	p := o.Plan
+	sums, err := sumsFrom(o.Result)
+	if err != nil {
+		return publish.Options{}, err
+	}
 	return publish.Options{
 		Client: o.Forge,
 		Repo:   o.Repo,
 		Dir:    o.Dir,
 		Files:  o.Result.Files,
-		Sums:   sumsFrom(o.Dir, o.Result),
+		Sums:   sums,
 		Notes:  notesMode(o.Append, p.Features.On("changelog")),
 		Release: github.ReleaseInput{
 			TagName:         Tag(p),
@@ -163,7 +170,7 @@ func releaseOptions(o Options, logf func(format string, args ...any)) publish.Op
 			TargetCommitish: p.Git.Commit,
 		},
 		Logf: logf,
-	}
+	}, nil
 }
 
 // releaseTitle is the release's display name: the tag alone for a root
@@ -189,47 +196,14 @@ func notesMode(appendNotes, changelogEnabled bool) publish.NotesMode {
 	return publish.NotesReplace
 }
 
-func sumsFrom(dir string, r *release.Result) map[string]string {
-	sums := map[string]string{r.Source.Name: r.Source.SHA256}
-	for _, a := range r.Manifest.Artifacts {
-		sums[a.Name] = a.SHA256
-	}
-	if r.Manifest.Plan != nil {
-		sums[release.PlanFileName] = r.Manifest.Plan.SHA256
-	}
-
-	// The manifest records no digest of itself, and a caller may rewrite it
-	// after the build (promote stamps promoted_from), so the file is asked.
-	if sum, err := fileSHA256(filepath.Join(dir, manifest.FileName)); err == nil {
-		sums[manifest.FileName] = sum
-	}
-
-	// Anything else published (SHA256SUMS, the SBOM, install.sh) has no
-	// recorded digest; without one an upload is compared by size alone, which
-	// keeps a stale file whose content changed but whose length did not.
-	for _, name := range r.Files {
-		if _, ok := sums[name]; ok {
-			continue
-		}
-		if sum, err := fileSHA256(filepath.Join(dir, name)); err == nil {
-			sums[name] = sum
-		}
-	}
-	return sums
-}
-
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
+// sumsFrom is the digest of every file about to be published, read from disk:
+// an upload is only conclusively the file we built if its digest says so.
+func sumsFrom(r *release.Result) (map[string]string, error) {
+	sums, err := r.Digests()
 	if err != nil {
-		return "", fmt.Errorf("open %s: %w", path, err)
+		return nil, fmt.Errorf("publication: %w", err)
 	}
-	defer func() { _ = f.Close() }()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", fmt.Errorf("hash %s: %w", path, err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return sums, nil
 }
 
 // isPrerelease follows semver: a version carrying a pre-release segment is one.

@@ -12,7 +12,6 @@ package promote
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -21,7 +20,6 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
-	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
@@ -393,24 +391,8 @@ func planFailures(p *plan.Plan) []string {
 // promote had anything to stamp, so both are stale the moment PromotedFrom
 // is attached and have to be regenerated from what is actually on disk.
 func rewriteManifest(built *release.Result) error {
-	path := filepath.Join(built.Dir, manifest.FileName)
-	if err := built.Manifest.Write(path); err != nil {
-		return fmt.Errorf("promote: writing the manifest: %w", err)
-	}
-
-	sums := make([]build.Sum, 0, len(built.Files))
-	for _, name := range built.Files {
-		if name == build.ChecksumFile {
-			continue
-		}
-		sum, err := sha256File(filepath.Join(built.Dir, name))
-		if err != nil {
-			return fmt.Errorf("promote: hashing %s: %w", name, err)
-		}
-		sums = append(sums, build.Sum{Name: name, SHA256: sum})
-	}
-	if _, err := build.WriteChecksums(built.Dir, sums); err != nil {
-		return fmt.Errorf("promote: writing %s: %w", build.ChecksumFile, err)
+	if err := built.Restamp(); err != nil {
+		return fmt.Errorf("promote: %w", err)
 	}
 	return nil
 }
@@ -460,7 +442,7 @@ func buildNotes(ctx context.Context, o Options, stableTag string, p *plan.Plan, 
 // from the file because stamping promoted_from changed what the in-memory
 // copy recorded of itself.
 func manifestDigest(built *release.Result) ([]byte, error) {
-	hexSum, err := sha256File(filepath.Join(built.Dir, manifest.FileName))
+	hexSum, err := built.Digest(manifest.FileName)
 	if err != nil {
 		return nil, fmt.Errorf("promote: hashing the manifest: %w", err)
 	}
@@ -469,20 +451,6 @@ func manifestDigest(built *release.Result) ([]byte, error) {
 		return nil, fmt.Errorf("promote: %w", err)
 	}
 	return sum, nil
-}
-
-func sha256File(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("promote: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", fmt.Errorf("promote: hashing %s: %w", path, err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func shortCommit(commit string) string {

@@ -110,7 +110,7 @@ func TestRewriteManifestNamesWhatItCouldNotWrite(t *testing.T) {
 				t.Helper()
 				return &release.Result{Dir: filepath.Join(t.TempDir(), "gone"), Manifest: &manifest.Manifest{}}
 			},
-			wantErr: "promote: writing the manifest",
+			wantErr: "promote: release: writing the manifest",
 		},
 		{
 			name: "a listed file is missing",
@@ -118,7 +118,7 @@ func TestRewriteManifestNamesWhatItCouldNotWrite(t *testing.T) {
 				t.Helper()
 				return &release.Result{Dir: t.TempDir(), Manifest: &manifest.Manifest{}, Files: []string{"absent.tar.gz"}}
 			},
-			wantErr: "promote: hashing absent.tar.gz",
+			wantErr: "promote: release: open",
 		},
 		{
 			name: "the checksum file cannot be replaced",
@@ -130,7 +130,7 @@ func TestRewriteManifestNamesWhatItCouldNotWrite(t *testing.T) {
 				}
 				return &release.Result{Dir: dir, Manifest: &manifest.Manifest{}}
 			},
-			wantErr: "promote: writing " + build.ChecksumFile,
+			wantErr: "promote: release: writing " + build.ChecksumFile,
 		},
 	}
 
