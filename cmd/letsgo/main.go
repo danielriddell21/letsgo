@@ -461,7 +461,7 @@ func applyFresh(ctx context.Context, a releaseArgs, autoApprove bool) error {
 }
 
 // forgeAPIEndpoint overrides the forge API host for the gates a plan checks
-// before it reads the forge. Empty means the real one; a test points it at a
+// before it reads the forge, and for diff. Empty means the real one; a test points it at a
 // fake.
 var forgeAPIEndpoint string
 
@@ -923,6 +923,9 @@ func runDiff(args []string) error {
 		tokenValue, _ := plan.Token(*token)
 		client = github.New(tokenValue)
 		client.UserAgent = "letsgo/" + version
+		if forgeAPIEndpoint != "" {
+			client.SetEndpoints(forgeAPIEndpoint, forgeAPIEndpoint)
+		}
 	}
 
 	before, err := loadManifest(ctx, client, repo, scope, from)

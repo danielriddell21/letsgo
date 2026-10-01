@@ -988,3 +988,44 @@ func TestFileSum(t *testing.T) {
 		t.Error("fileSum of a missing file succeeded")
 	}
 }
+
+// With no "to", diff compares against the latest release within the module's
+// own scope, not another module's.
+func TestRunDiffDefaultsToTheModulesOwnLatestRelease(t *testing.T) {
+	repoDir, moduleDir := scopedModuleFixture(t)
+	if out, err := exec.Command("git", "-C", repoDir, "remote", "add", "origin", "https://github.com/you/foo.git").CombinedOutput(); err != nil {
+		t.Fatalf("git remote add: %v\n%s", err, out)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/you/foo/releases/latest", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(github.Release{ID: 1, TagName: "other/v9.0.0"})
+	})
+	mux.HandleFunc("/repos/you/foo/tags", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]github.Tag{{Name: "other/v9.0.0"}, {Name: "services/api/v1.2.3"}})
+	})
+	mux.HandleFunc("/repos/you/foo/releases/tags/services/api/v1.2.3", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(github.Release{
+			ID: 2, TagName: "services/api/v1.2.3",
+			Assets: []github.Asset{{ID: 5, Name: manifest.FileName}},
+		})
+	})
+	mux.HandleFunc("/repos/you/foo/releases/assets/5", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"schema":1,"version":"1.2.3"}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	previous := forgeAPIEndpoint
+	t.Cleanup(func() { forgeAPIEndpoint = previous })
+	forgeAPIEndpoint = srv.URL
+
+	t.Chdir(moduleDir)
+	local := filepath.Join(t.TempDir(), "letsgo.json")
+	if err := os.WriteFile(local, []byte(`{"schema":1,"version":"1.2.2"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runDiff([]string{local}); err != nil {
+		t.Fatalf("runDiff: %v", err)
+	}
+}
