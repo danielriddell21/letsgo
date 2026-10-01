@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -122,6 +123,33 @@ func TestOpenCacheUsesTheGivenDir(t *testing.T) {
 	}
 	if c.dir != dir {
 		t.Errorf("dir = %q, want %q", c.dir, dir)
+	}
+}
+
+// No dir given: the user cache directory is used.
+func TestOpenCacheDefaultsToTheUserCacheDir(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", base)
+	t.Setenv("HOME", base)
+	t.Setenv("LocalAppData", base)
+
+	c := OpenCache("", false)
+	if c == nil {
+		t.Fatal("expected a cache")
+	}
+	if !strings.HasPrefix(c.dir, base) {
+		t.Errorf("dir = %q, want it under %q", c.dir, base)
+	}
+}
+
+// A directory that cannot be created leaves the builds uncached.
+func TestOpenCacheWithAnUncreatableDirIsNil(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if OpenCache(filepath.Join(file, "cache"), false) != nil {
+		t.Error("an uncreatable dir produced a cache")
 	}
 }
 

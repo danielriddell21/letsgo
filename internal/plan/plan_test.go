@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/bytesize"
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
@@ -906,5 +907,22 @@ func TestGroupProgramDropsTheVariantSuffix(t *testing.T) {
 				t.Errorf("Program() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// A global config handed to Resolve is the one the plan carries and reports
+// the proxy from: nothing reads the machine's file behind its back.
+func TestResolveUsesTheGlobalConfigItIsGiven(t *testing.T) {
+	t.Setenv("GOPROXY", "")
+	r := minimalRepo(t, "")
+	global := &config.Global{Proxy: "https://proxy.example", Path: "/etc/letsgo/config"}
+
+	p := r.resolve(plan.Options{Global: global})
+
+	if p.Global != global {
+		t.Error("the plan did not carry the global config it was given")
+	}
+	if p.Proxy != "https://proxy.example" {
+		t.Errorf("Proxy = %q, want the configured one", p.Proxy)
 	}
 }
