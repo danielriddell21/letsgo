@@ -251,7 +251,7 @@ func TestParseRecordsWordSpans(t *testing.T) {
 	}
 
 	block := f.Stmts[1].(*Block)
-	if block.KeywordSpan != (Span{1, 6}) || len(block.ArgSpans) != 1 || block.ArgSpans[0] != (Span{7, 8}) || !block.Closed {
+	if block.KeywordSpan != (Span{1, 6}) || len(block.ArgSpans) != 1 || block.ArgSpans[0] != (Span{7, 8}) || block.Close != (Position{4, 1}) {
 		t.Errorf("block = %+v", block)
 	}
 	inner := block.Lines[0]
@@ -270,7 +270,7 @@ func TestParseLenientKeepsWhatItCanRead(t *testing.T) {
 		t.Fatalf("stmts = %d, want 2", len(f.Stmts))
 	}
 	block := f.Stmts[1].(*Block)
-	if block.Closed || len(block.Lines) != 1 {
+	if block.Close != (Position{}) || len(block.Lines) != 1 {
 		t.Errorf("block = %+v, want open with its line", block)
 	}
 	if _, err := Parse("letsgo.mod", []byte("project foo\n)\n")); err == nil {

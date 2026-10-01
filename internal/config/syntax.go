@@ -68,9 +68,9 @@ type Block struct {
 	KeywordSpan Span
 	ArgSpans    []Span // of Args
 
-	// Closed is false for a block the file ends inside, which only a lenient
-	// parse returns.
-	Closed bool
+	// Close is where the closing parenthesis is, zero for a block the file
+	// ends inside, which only a lenient parse returns.
+	Close Position
 }
 
 func (b *Block) Pos() Position { return b.P }
@@ -132,7 +132,7 @@ func parseLine(file *File, name string, lineNo int, text string, open *Block) (*
 			return nil, err
 		}
 		if closed {
-			open.Closed = true
+			open.Close = Position{lineNo, tokens[0].pos.Col}
 			return nil, nil
 		}
 		return open, nil
