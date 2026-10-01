@@ -502,7 +502,7 @@ func (f forge) planForApply(ctx context.Context, a releaseArgs, path string) (bo
 func (f forge) doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error {
 	started := time.Now()
 
-	tokenValue, _ := plan.Token(ctx, a.token)
+	tokenValue, _ := plan.Token(ctx, machineConfig(), a.token)
 	client := f.client(tokenValue)
 
 	// A rehearsal needs no forge and no token, so the gates that check for
@@ -778,7 +778,7 @@ func (f forge) resolveModuleRepo(ctx context.Context, token string) (moduleRepo,
 		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
 	}
 
-	tokenValue, _ := plan.Token(ctx, token)
+	tokenValue, _ := plan.Token(ctx, machineConfig(), token)
 	if tokenValue == "" {
 		return moduleRepo{}, fmt.Errorf("letsgo: no token; set %s", envList())
 	}
@@ -832,7 +832,7 @@ func (f forge) resolveScratchRun(ctx context.Context, repoFlag, token, work, tmp
 		cleanup = func() { _ = os.RemoveAll(workDir) }
 	}
 
-	tokenValue, _ := plan.Token(ctx, token)
+	tokenValue, _ := plan.Token(ctx, machineConfig(), token)
 	client := f.client(tokenValue)
 
 	return scratchRun{Repo: repo, Dir: dir, Prefix: prefix, WorkDir: workDir, Client: client, GitBin: gitBin, cleanup: cleanup}, nil
@@ -931,7 +931,7 @@ func (f forge) runDiff(args []string) error {
 			return err
 		}
 		scope = discover.Scope{Prefix: prefix}
-		tokenValue, _ := plan.Token(context.Background(), *token)
+		tokenValue, _ := plan.Token(context.Background(), machineConfig(), *token)
 		client = f.client(tokenValue)
 	}
 

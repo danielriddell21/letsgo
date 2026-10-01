@@ -34,7 +34,7 @@ func (f forge) planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	tokenValue, _ := plan.Token(ctx, tokens.Token)
+	tokenValue, _ := plan.Token(ctx, machineConfig(), tokens.Token)
 	client := f.client(tokenValue)
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 

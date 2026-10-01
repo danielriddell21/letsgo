@@ -20,7 +20,7 @@ const releaseTokenUsage = "token the GitHub release is published with (default: 
 // one connection pool and one user agent, and it keeps the single-credential
 // arrangement exactly as it was.
 func (f forge) splitClientFor(ctx context.Context, client *github.Client, resolved, token string) *github.Client {
-	current, _ := plan.Token(ctx, token)
+	current, _ := plan.Token(ctx, machineConfig(), token)
 	if resolved == current {
 		return client
 	}
@@ -29,7 +29,7 @@ func (f forge) splitClientFor(ctx context.Context, client *github.Client, resolv
 
 // tapClientFor returns the client the tap is written with.
 func (f forge) tapClientFor(ctx context.Context, client *github.Client, tapToken, token string) *github.Client {
-	value, _ := plan.TapToken(ctx, tapToken, token)
+	value, _ := plan.TapToken(ctx, machineConfig(), tapToken, token)
 	return f.splitClientFor(ctx, client, value, token)
 }
 
@@ -37,7 +37,7 @@ func (f forge) tapClientFor(ctx context.Context, client *github.Client, tapToken
 // and published with. Mirrors tapClientFor exactly, one split credential at
 // a time.
 func (f forge) releaseClientFor(ctx context.Context, client *github.Client, releaseToken, token string) *github.Client {
-	value, _ := plan.ReleaseToken(ctx, releaseToken, token)
+	value, _ := plan.ReleaseToken(ctx, machineConfig(), releaseToken, token)
 	return f.splitClientFor(ctx, client, value, token)
 }
 

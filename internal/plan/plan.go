@@ -932,7 +932,9 @@ var ReleaseTokenEnvVars = []string{"LETSGO_RELEASE_TOKEN"}
 const tokenCommandSource = "token-command"
 
 // Token returns the resolved token, and where it came from.
-func Token(ctx context.Context, override string) (token, source string) {
+//
+// A nil global is no global config: the flag and the environment still apply.
+func Token(ctx context.Context, global *config.Global, override string) (token, source string) {
 	if override != "" {
 		return override, "--token"
 	}
@@ -941,17 +943,9 @@ func Token(ctx context.Context, override string) (token, source string) {
 			return v, name
 		}
 	}
-	global, err := config.LoadGlobal()
-	if err != nil {
-		global = &config.Global{}
+	if global == nil {
+		return "", ""
 	}
-	return tokenWith(ctx, global)
-}
-
-// tokenWith is Token's last fallback tier, taking the global config directly
-// rather than loading it, so tests can exercise token-command without
-// relying on config.LoadGlobal's process-wide memoization.
-func tokenWith(ctx context.Context, global *config.Global) (token, source string) {
 	if token := runTokenCommand(ctx, global.TokenCommand); token != "" {
 		return token, tokenCommandSource
 	}
@@ -992,7 +986,7 @@ func runTokenCommand(ctx context.Context, argv []string) string {
 // published with one credential keeps working unchanged. What the fallback
 // costs is stated where it is configured, not here: one token that can write
 // to both repositories is one token whose loss reaches both.
-func TapToken(ctx context.Context, override, tokenOverride string) (token, source string) {
+func TapToken(ctx context.Context, global *config.Global, override, tokenOverride string) (token, source string) {
 	if override != "" {
 		return override, "--tap-token"
 	}
@@ -1001,7 +995,7 @@ func TapToken(ctx context.Context, override, tokenOverride string) (token, sourc
 			return v, name
 		}
 	}
-	return Token(ctx, tokenOverride)
+	return Token(ctx, global, tokenOverride)
 }
 
 // ReleaseToken returns the token the GitHub release is published with, and
@@ -1010,7 +1004,7 @@ func TapToken(ctx context.Context, override, tokenOverride string) (token, sourc
 // It falls back to the release token so that a repository which has always
 // published with one credential keeps working unchanged, exactly as
 // TapToken does for the tap.
-func ReleaseToken(ctx context.Context, override, tokenOverride string) (token, source string) {
+func ReleaseToken(ctx context.Context, global *config.Global, override, tokenOverride string) (token, source string) {
 	if override != "" {
 		return override, "--release-token"
 	}
@@ -1019,7 +1013,7 @@ func ReleaseToken(ctx context.Context, override, tokenOverride string) (token, s
 			return v, name
 		}
 	}
-	return Token(ctx, tokenOverride)
+	return Token(ctx, global, tokenOverride)
 }
 
 // checkVulnerabilities refuses to publish a binary that can reach known
@@ -1251,7 +1245,7 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 		return
 	}
 
-	token, source := Token(ctx, opts.Token)
+	token, source := Token(ctx, p.Global, opts.Token)
 	if token == "" {
 		p.add("token", Fail, "no token; set %s", strings.Join(TokenEnvVars, " or "))
 		return
@@ -1280,7 +1274,7 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 	// Probing the release's credential instead is how a plan passes and the
 	// release then fails on its last step, which is the one failure this
 	// gate exists to prevent.
-	tapToken, tapSource := TapToken(ctx, opts.TapToken, opts.Token)
+	tapToken, tapSource := TapToken(ctx, p.Global, opts.TapToken, opts.Token)
 	tapClient := client
 	if tapToken != token {
 		tapClient = opts.client(tapToken)
@@ -1321,7 +1315,7 @@ func ClientAt(endpoint string) func(token string) *github.Client {
 func (p *Plan) checkRelease(
 	ctx context.Context, opts Options, repo github.Repo, token string, client *github.Client, access github.Access,
 ) bool {
-	releaseToken, releaseSource := ReleaseToken(ctx, opts.ReleaseToken, opts.Token)
+	releaseToken, releaseSource := ReleaseToken(ctx, p.Global, opts.ReleaseToken, opts.Token)
 	releaseClient, releaseAccess := client, access
 	if releaseToken != token {
 		releaseClient = opts.client(releaseToken)

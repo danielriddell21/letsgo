@@ -11,53 +11,57 @@ import (
 )
 
 // CD-12: token-command is the last fallback tier, tried only once a flag and
-// the environment have both come up empty — which is exactly what tokenWith
-// covers, since Token only reaches it after checking both.
-func TestTokenWithRunsTheGlobalTokenCommand(t *testing.T) {
+// the environment have both come up empty — which these tests reach by clearing both.
+func TestTokenRunsTheGlobalTokenCommand(t *testing.T) {
+	clearTokenEnv(t)
 	helper := printArgScript(t)
 
-	got, source := tokenWith(t.Context(), &config.Global{TokenCommand: []string{helper, "helper-token"}})
+	got, source := Token(t.Context(), &config.Global{TokenCommand: []string{helper, "helper-token"}}, "")
 	if got != "helper-token" || source != tokenCommandSource {
-		t.Errorf("tokenWith() = %q, %q; want %q, %q", got, source, "helper-token", tokenCommandSource)
+		t.Errorf("Token() = %q, %q; want %q, %q", got, source, "helper-token", tokenCommandSource)
 	}
 }
 
 // A cancelled run does not wait on a credential helper: the command is not
 // started, so there is no token.
-func TestTokenWithStopsWhenTheRunIsCancelled(t *testing.T) {
+func TestTokenStopsWhenTheRunIsCancelled(t *testing.T) {
+	clearTokenEnv(t)
 	helper := printArgScript(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	if got, source := tokenWith(ctx, &config.Global{TokenCommand: []string{helper, "helper-token"}}); got != "" || source != "" {
-		t.Errorf("tokenWith() = %q, %q; want no token", got, source)
+	if got, source := Token(ctx, &config.Global{TokenCommand: []string{helper, "helper-token"}}, ""); got != "" || source != "" {
+		t.Errorf("Token() = %q, %q; want no token", got, source)
 	}
 }
 
-func TestTokenWithTrimsTrailingWhitespace(t *testing.T) {
+func TestTokenTrimsTrailingWhitespace(t *testing.T) {
+	clearTokenEnv(t)
 	helper := printArgScript(t)
 
-	got, _ := tokenWith(t.Context(), &config.Global{TokenCommand: []string{helper, "helper-token\n"}})
+	got, _ := Token(t.Context(), &config.Global{TokenCommand: []string{helper, "helper-token\n"}}, "")
 	if got != "helper-token" {
-		t.Errorf("tokenWith() token = %q, want no trailing newline", got)
+		t.Errorf("Token() token = %q, want no trailing newline", got)
 	}
 }
 
 // The PBS edge case: a token-command that exits non-zero falls through to
 // "no token", not an error.
-func TestTokenWithFallsThroughOnANonZeroExit(t *testing.T) {
+func TestTokenFallsThroughOnANonZeroExit(t *testing.T) {
+	clearTokenEnv(t)
 	helper := failingScript(t)
 
-	got, source := tokenWith(t.Context(), &config.Global{TokenCommand: []string{helper}})
+	got, source := Token(t.Context(), &config.Global{TokenCommand: []string{helper}}, "")
 	if got != "" || source != "" {
-		t.Errorf("tokenWith() = %q, %q; want no token", got, source)
+		t.Errorf("Token() = %q, %q; want no token", got, source)
 	}
 }
 
-func TestTokenWithWithoutATokenCommandYieldsNoToken(t *testing.T) {
-	got, source := tokenWith(t.Context(), &config.Global{})
+func TestTokenWithoutATokenCommandYieldsNoToken(t *testing.T) {
+	clearTokenEnv(t)
+	got, source := Token(t.Context(), &config.Global{}, "")
 	if got != "" || source != "" {
-		t.Errorf("tokenWith() = %q, %q; want no token", got, source)
+		t.Errorf("Token() = %q, %q; want no token", got, source)
 	}
 }
 
@@ -97,4 +101,21 @@ func script(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// clearTokenEnv leaves a test no environment token, so that Token reaches the
+// global config's token-command.
+func clearTokenEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range TokenEnvVars {
+		t.Setenv(name, "")
+	}
+}
+
+func TestTokenTreatsANilGlobalAsNoTokenCommand(t *testing.T) {
+	clearTokenEnv(t)
+
+	if got, source := Token(t.Context(), nil, ""); got != "" || source != "" {
+		t.Errorf("Token() = %q, %q; want no token", got, source)
+	}
 }

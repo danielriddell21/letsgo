@@ -195,7 +195,7 @@ func TestTapTokenResolution(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("LETSGO_TAP_TOKEN", tt.env)
-			token, source := plan.TapToken(t.Context(), tt.override, tt.token)
+			token, source := plan.TapToken(t.Context(), nil, tt.override, tt.token)
 			if token != tt.wantToken || source != tt.wantSource {
 				t.Errorf("TapToken(%q, %q) = %q from %q, want %q from %q",
 					tt.override, tt.token, token, source, tt.wantToken, tt.wantSource)
