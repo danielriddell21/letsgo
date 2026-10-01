@@ -427,3 +427,55 @@ func TestObserveNamesWhatItCouldNotRead(t *testing.T) {
 		})
 	}
 }
+
+// SHA256SUMS, the SBOM and install.sh record no digest anywhere, so a re-planned
+// one the same size as the last would be kept on a resumed publish if the
+// upload were compared by size.
+func TestSumsFromHashesEveryOtherPublishedFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	files := map[string]string{"SHA256SUMS": "sums", "foo.spdx.json": "sbom", "install.sh": "#!/bin/sh"}
+	var names []string
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, name)
+	}
+
+	sums := sumsFrom(dir, &release.Result{Manifest: &manifest.Manifest{}, Files: names})
+
+	for name, body := range files {
+		want := sha256.Sum256([]byte(body))
+		if got := sums[name]; got != hex.EncodeToString(want[:]) {
+			t.Errorf("%s digest = %q, want %x", name, got, want)
+		}
+	}
+}
+
+// A listed file that is not on disk is left without a digest, not invented.
+func TestSumsFromSkipsAnUnreadableFile(t *testing.T) {
+	t.Parallel()
+
+	sums := sumsFrom(t.TempDir(), &release.Result{Manifest: &manifest.Manifest{}, Files: []string{"gone"}})
+
+	if _, ok := sums["gone"]; ok {
+		t.Errorf("digest recorded for a file that is not there: %v", sums)
+	}
+}
+
+// A digest the build recorded is kept; the file is not asked again.
+func TestSumsFromKeepsARecordedDigest(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "foo.tar.gz"), []byte("on disk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{Artifacts: []manifest.Artifact{{Name: "foo.tar.gz", SHA256: "recorded"}}}
+
+	sums := sumsFrom(dir, &release.Result{Manifest: m, Files: []string{"foo.tar.gz"}})
+
+	if got := sums["foo.tar.gz"]; got != "recorded" {
+		t.Errorf("digest = %q, want the recorded one", got)
+	}
+}
