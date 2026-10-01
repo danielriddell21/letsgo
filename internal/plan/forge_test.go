@@ -62,7 +62,7 @@ func releasable(t *testing.T) *repo {
 func tokenCheck(t *testing.T, r *repo, endpoint string) plan.Check {
 	t.Helper()
 	p, err := plan.Resolve(context.Background(), plan.Options{
-		Dir: r.dir, Publish: true, Token: "test-token", APIEndpoint: endpoint,
+		Dir: r.dir, Publish: true, Token: "test-token", NewClient: plan.ClientAt(endpoint),
 	})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -147,7 +147,7 @@ func TestUnconfirmedPermissionDoesNotBlockTheRelease(t *testing.T) {
 
 	p, err := plan.Resolve(context.Background(), plan.Options{
 		Dir: r.dir, Publish: true, Token: "t",
-		APIEndpoint: forge{probeCode: http.StatusInternalServerError}.serve(t),
+		NewClient: plan.ClientAt(forge{probeCode: http.StatusInternalServerError}.serve(t)),
 	})
 	if err != nil {
 		t.Fatal(err)

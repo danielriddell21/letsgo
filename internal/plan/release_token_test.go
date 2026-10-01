@@ -108,7 +108,7 @@ func TestReleaseGateProbesTheReleaseToken(t *testing.T) {
 			t.Setenv("LETSGO_RELEASE_TOKEN", tt.env)
 
 			got := releaseTokenCheck(t, plan.Options{
-				Token: tt.token, ReleaseToken: tt.releaseToken, APIEndpoint: releaseForge(t, tt.serverAllows),
+				Token: tt.token, ReleaseToken: tt.releaseToken, NewClient: plan.ClientAt(releaseForge(t, tt.serverAllows)),
 			}).Status
 			if got != tt.want {
 				t.Errorf("token check = %q, want %q", got, tt.want)

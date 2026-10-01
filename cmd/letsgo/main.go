@@ -463,6 +463,15 @@ func applyFresh(ctx context.Context, a releaseArgs, autoApprove bool) error {
 // fake.
 var forgeAPIEndpoint string
 
+// forgeClientFactory builds plan's forge clients against forgeAPIEndpoint, or
+// the real forge when it is empty.
+func forgeClientFactory() func(string) *github.Client {
+	if forgeAPIEndpoint == "" {
+		return nil
+	}
+	return plan.ClientAt(forgeAPIEndpoint)
+}
+
 // planForApply resolves and diffs a release as `letsgo plan -out` does, shows
 // it, and saves it at path. It reports whether there is anything to apply.
 func planForApply(ctx context.Context, a releaseArgs, path string) (bool, error) {
@@ -471,7 +480,7 @@ func planForApply(ctx context.Context, a releaseArgs, path string) (bool, error)
 	p, err := plan.Resolve(ctx, plan.Options{
 		Dir: ".", Publish: true, Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken,
 		Analyse: true, AllowVulnerable: a.allowVulnerable, AllowBreaking: a.allowBreaking,
-		APIEndpoint: forgeAPIEndpoint, DisableProxyWarm: a.skipWarm,
+		NewClient: forgeClientFactory(), DisableProxyWarm: a.skipWarm,
 	})
 	if err != nil {
 		return false, err

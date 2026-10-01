@@ -124,9 +124,9 @@ func TestTapGateProbesTheTapToken(t *testing.T) {
 			t.Setenv("LETSGO_TAP_TOKEN", tt.env)
 			r := withTap(t)
 			got := tapCheck(t, r, plan.Options{
-				Token:       tt.token,
-				TapToken:    tt.tapToken,
-				APIEndpoint: tapForge(t, "tap-token"),
+				Token:     tt.token,
+				TapToken:  tt.tapToken,
+				NewClient: plan.ClientAt(tapForge(t, "tap-token")),
 			}).Status
 			if got != tt.want {
 				t.Errorf("brew tap check = %q, want %q", got, tt.want)
@@ -143,7 +143,7 @@ func TestTapTokenDoesNotStandInForTheReleaseToken(t *testing.T) {
 	r := withTap(t)
 	p, err := plan.Resolve(context.Background(), plan.Options{
 		Dir: r.dir, Publish: true, TapToken: "tap-token",
-		APIEndpoint: tapForge(t, "tap-token"),
+		NewClient: plan.ClientAt(tapForge(t, "tap-token")),
 	})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -240,7 +240,7 @@ func TestTapGateOnArchivedAndUnconfirmed(t *testing.T) {
 		})
 
 		r := withTap(t)
-		if got := tapCheck(t, r, plan.Options{Token: "t", APIEndpoint: endpoint}).Status; got != plan.Fail {
+		if got := tapCheck(t, r, plan.Options{Token: "t", NewClient: plan.ClientAt(endpoint)}).Status; got != plan.Fail {
 			t.Errorf("brew tap check = %q, want %q", got, plan.Fail)
 		}
 	})
@@ -259,7 +259,7 @@ func TestTapGateOnArchivedAndUnconfirmed(t *testing.T) {
 		})
 
 		r := withTap(t)
-		check := tapCheck(t, r, plan.Options{Token: "t", APIEndpoint: endpoint})
+		check := tapCheck(t, r, plan.Options{Token: "t", NewClient: plan.ClientAt(endpoint)})
 		if check.Status != plan.Warn {
 			t.Errorf("brew tap check = %q, want %q", check.Status, plan.Warn)
 		}
@@ -279,7 +279,7 @@ func TestTapGateOnArchivedAndUnconfirmed(t *testing.T) {
 		})
 
 		r := withTap(t)
-		if got := tapCheck(t, r, plan.Options{Token: "t", APIEndpoint: endpoint}).Status; got != plan.Fail {
+		if got := tapCheck(t, r, plan.Options{Token: "t", NewClient: plan.ClientAt(endpoint)}).Status; got != plan.Fail {
 			t.Errorf("brew tap check = %q, want %q", got, plan.Fail)
 		}
 	})
