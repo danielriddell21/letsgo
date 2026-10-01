@@ -25,6 +25,13 @@ Resolve credentials once during command wiring, construct the forge client
 there, and pass a `Forge` through the interface to plan, release, verify and
 promote. Plan stops constructing clients itself.
 
+As built: `plan.Options.NewClient` is a factory (`func(token string)
+*github.Client`) that plan calls once the token is resolved, and `cmd/letsgo`
+holds a `forge` value, built once in `main`, whose `client` method is that
+factory. Every command is a method on it, so a test builds a `forge` pointed
+at a fake server instead of overwriting a global. Credential lookups take a
+`context.Context`, so a token command is cancelled with the run.
+
 ## Consequences
 
 - The two test globals go away.
