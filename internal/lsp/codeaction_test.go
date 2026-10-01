@@ -220,7 +220,7 @@ func didYouMeanActions(t *testing.T, c *client, uri string, diagnostics []map[st
 func TestCodeActionFixesAMisspelledDirectiveEvenWhenRestricted(t *testing.T) {
 	c, uri := pinEditor(t, lsp.Options{Restricted: true}, "letsgo.mod", "bulid linux/amd64\n")
 
-	actions := didYouMeanActions(t, c, uri, []map[string]any{diagnosticAt(0, 0, `unknown directive "bulid"; did you mean "build"?`)})
+	actions := didYouMeanActions(t, c, uri, []map[string]any{suggestionAt(0, 0, "bulid", "build")})
 	if len(actions) != 1 || actions[0].Title != "Change bulid to build" || actions[0].Edit == nil {
 		t.Fatalf("actions = %+v, want one did-you-mean fix", actions)
 	}
@@ -236,7 +236,7 @@ func TestCodeActionFixesAMisspelledDirectiveEvenWhenRestricted(t *testing.T) {
 func TestCodeActionFixesAMisspelledFeatureName(t *testing.T) {
 	c, uri := pinEditor(t, lsp.Options{}, "letsgo.mod", "disable chnagelog\n")
 
-	actions := didYouMeanActions(t, c, uri, []map[string]any{diagnosticAt(0, 8, `unknown feature "chnagelog"; did you mean "changelog"?`)})
+	actions := didYouMeanActions(t, c, uri, []map[string]any{suggestionAt(0, 8, "chnagelog", "changelog")})
 	if len(actions) != 1 || actions[0].Edit == nil {
 		t.Fatalf("actions = %+v, want one fix", actions)
 	}
@@ -250,9 +250,9 @@ func TestCodeActionIgnoresDiagnosticsWithoutASuggestion(t *testing.T) {
 	c, uri := pinEditor(t, lsp.Options{}, "letsgo.mod", "bulid linux/amd64\n")
 
 	for name, d := range map[string]map[string]any{
-		"no suggestion": diagnosticAt(0, 0, "something else"),
-		"line gone":     diagnosticAt(9, 0, `unknown directive "bulid"; did you mean "build"?`),
-		"text changed":  diagnosticAt(0, 0, `unknown directive "zzz"; did you mean "build"?`),
+		"no suggestion": diagnosticAt(0, 0, `unknown directive "bulid"; did you mean "build"?`),
+		"line gone":     suggestionAt(9, 0, "bulid", "build"),
+		"text changed":  suggestionAt(0, 0, "zzz", "build"),
 	} {
 		if actions := didYouMeanActions(t, c, uri, []map[string]any{d}); len(actions) != 0 {
 			t.Errorf("%s: actions = %+v, want none", name, actions)
@@ -269,6 +269,13 @@ func diagnosticAt(line, col int, message string) map[string]any {
 		},
 		"message": message,
 	}
+}
+
+// suggestionAt is a diagnostic carrying a correction for the word at line, col.
+func suggestionAt(line, col int, wrong, suggest string) map[string]any {
+	d := diagnosticAt(line, col, "unknown name")
+	d["data"] = map[string]any{"wrong": wrong, "suggest": suggest}
+	return d
 }
 
 func TestCodeActionOffersNothingForAnUnopenedDocument(t *testing.T) {
