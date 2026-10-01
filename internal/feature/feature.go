@@ -41,11 +41,36 @@ func (k Kind) String() string {
 	}
 }
 
+// Name identifies one catalogue entry. Code that consults a feature uses
+// these constants, never a quoted string, so a retired entry fails to compile.
+type Name string
+
+const (
+	Reproducible  Name = "reproducible"
+	Source        Name = "source"
+	Manifest      Name = "manifest"
+	Checksums     Name = "checksums"
+	TagCheck      Name = "tag-check"
+	ModulePath    Name = "module-path"
+	Vulncheck     Name = "vulncheck"
+	APIGate       Name = "api-gate"
+	Sumdb         Name = "sumdb"
+	Budget        Name = "budget"
+	SBOM          Name = "sbom"
+	InstallScript Name = "install-script"
+	Changelog     Name = "changelog"
+	DiffNotes     Name = "diff-notes"
+	Randomart     Name = "randomart"
+	ProxyWarm     Name = "proxy-warm"
+	Brew          Name = "brew"
+	Image         Name = "image"
+)
+
 // Feature describes one entry in the catalogue.
 type Feature struct {
 	// Name is the identifier used in `disable`, `require`, the manifest and
 	// `letsgo features` output.
-	Name string
+	Name Name
 	Kind Kind
 
 	// Default is whether the feature is on with no configuration at all.
@@ -70,78 +95,78 @@ type Feature struct {
 // are documented: integrity first, then gates, outputs and publish targets.
 var All = []Feature{
 	{
-		Name: "reproducible", Kind: Integrity, Default: true,
+		Name: Reproducible, Kind: Integrity, Default: true,
 		Summary: "the build is reproducible from source",
 	},
 	{
-		Name: "source", Kind: Integrity, Default: true,
+		Name: Source, Kind: Integrity, Default: true,
 		Summary: "a source archive is published with the release",
 	},
 	{
-		Name: "manifest", Kind: Integrity, Default: true,
+		Name: Manifest, Kind: Integrity, Default: true,
 		Summary: "letsgo.json records what was built and how",
 	},
 	{
-		Name: "checksums", Kind: Integrity, Default: true,
+		Name: Checksums, Kind: Integrity, Default: true,
 		Summary: "SHA256SUMS lists every artifact's digest",
 	},
 	{
-		Name: "tag-check", Kind: Integrity, Default: true,
+		Name: TagCheck, Kind: Integrity, Default: true,
 		Summary: "the tag matches the version letsgo resolved",
 	},
 	{
-		Name: "module-path", Kind: Integrity, Default: true,
+		Name: ModulePath, Kind: Integrity, Default: true,
 		Summary: "the module path matches its major version",
 	},
 
 	{
-		Name: "vulncheck", Kind: Gate, Default: true, Disable: true, Require: true,
+		Name: Vulncheck, Kind: Gate, Default: true, Disable: true, Require: true,
 		Summary: "govulncheck must find no reachable vulnerabilities",
 	},
 	{
-		Name: "api-gate", Kind: Gate, Default: true, Disable: true, Require: true,
+		Name: APIGate, Kind: Gate, Default: true, Disable: true, Require: true,
 		Summary: "an incompatible API change needs a major version bump",
 	},
 	{
-		Name: "sumdb", Kind: Gate, Default: true, Disable: true, Require: true,
+		Name: Sumdb, Kind: Gate, Default: true, Disable: true, Require: true,
 		Summary: "sum.golang.org must agree with the source archive before assets are published",
 	},
 	{
-		Name: "budget", Kind: Gate, Default: false, Enable: "budget",
+		Name: Budget, Kind: Gate, Default: false, Enable: "budget",
 		Summary: "an artifact over its configured size fails the release",
 	},
 
 	{
-		Name: "sbom", Kind: Output, Default: true, Disable: true, Require: true,
+		Name: SBOM, Kind: Output, Default: true, Disable: true, Require: true,
 		Summary: "a software bill of materials is published with the release",
 	},
 	{
-		Name: "install-script", Kind: Output, Default: true, Disable: true, Require: true,
+		Name: InstallScript, Kind: Output, Default: true, Disable: true, Require: true,
 		Summary: "install.sh is generated for a GitHub release",
 	},
 	{
-		Name: "changelog", Kind: Output, Default: true, Disable: true, Require: true,
+		Name: Changelog, Kind: Output, Default: true, Disable: true, Require: true,
 		Summary: "commits since the previous tag become the release body",
 	},
 	{
-		Name: "diff-notes", Kind: Output, Default: true, Disable: true, Require: true,
+		Name: DiffNotes, Kind: Output, Default: true, Disable: true, Require: true,
 		Summary: "a collapsed \"what shipped\" section compares this release's manifest against the previous one",
 	},
 	{
 		Summary: "a collapsed fingerprint of the manifest is added to the release notes",
-		Name:    "randomart", Require: true, Disable: true, Default: true, Kind: Output,
+		Name:    Randomart, Require: true, Disable: true, Default: true, Kind: Output,
 	},
 
 	{
-		Name: "proxy-warm", Kind: Publish, Default: true, Disable: true,
+		Name: ProxyWarm, Kind: Publish, Default: true, Disable: true,
 		Summary: "proxy.golang.org is primed before the release is published",
 	},
 	{
-		Name: "brew", Kind: Publish, Default: false, Enable: "brew",
+		Name: Brew, Kind: Publish, Default: false, Enable: "brew",
 		Summary: "a Homebrew formula is written to a tap",
 	},
 	{
-		Name: "image", Kind: Publish, Default: false, Enable: "image",
+		Name: Image, Kind: Publish, Default: false, Enable: "image",
 		Summary: "a container image is built and published",
 	},
 }
@@ -149,7 +174,7 @@ var All = []Feature{
 // Lookup returns the feature named name, and whether it exists.
 func Lookup(name string) (Feature, bool) {
 	for _, f := range All {
-		if f.Name == name {
+		if string(f.Name) == name {
 			return f, true
 		}
 	}
@@ -159,14 +184,14 @@ func Lookup(name string) (Feature, bool) {
 // Set is which catalogue features are disabled for a release, however that
 // was decided — a `disable` directive, or a one-run flag such as
 // `--no-proxy-warm` that means the same thing.
-type Set map[string]bool
+type Set map[Name]bool
 
 // Resolve builds a Set from the names a release disabled. Repeats are
 // harmless: this is a set, not a log of how each name was said.
 func Resolve(disabled []string) Set {
 	s := make(Set, len(disabled))
 	for _, name := range disabled {
-		s[name] = true
+		s[Name(name)] = true
 	}
 	return s
 }
@@ -174,7 +199,7 @@ func Resolve(disabled []string) Set {
 // On reports whether a feature is on. Only meaningful for a feature whose
 // Default is true: one that defaults off is on only because its own
 // directive is present, which a Set knows nothing about.
-func (s Set) On(name string) bool {
+func (s Set) On(name Name) bool {
 	return !s[name]
 }
 
@@ -183,7 +208,7 @@ func (s Set) On(name string) bool {
 func (s Set) Disabled() []string {
 	names := make([]string, 0, len(s))
 	for name := range s {
-		names = append(names, name)
+		names = append(names, string(name))
 	}
 	sort.Strings(names)
 	return names

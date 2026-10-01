@@ -874,7 +874,7 @@ func applyRequire(cfg *Config, file string, line *Line) error {
 func unknownFeature(file string, pos Position, name string) error {
 	names := make([]string, len(feature.All))
 	for i, f := range feature.All {
-		names[i] = f.Name
+		names[i] = string(f.Name)
 	}
 	sort.Strings(names)
 	return unknownName(file, pos, "feature", name, names)

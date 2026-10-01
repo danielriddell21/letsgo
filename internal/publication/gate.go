@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/danielriddell21/letsgo/internal/feature"
 	gatepkg "github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
@@ -25,7 +26,7 @@ var sumdbURL = sumdb.DefaultURL
 func gate(ctx context.Context, out io.Writer, o Options) error {
 	p := o.Plan
 	d := sumdbDecision(p, o.Snapshot)
-	if !o.Snapshot && !p.Config.Draft && p.Config.ModuleDir == "" && p.Features.On("proxy-warm") {
+	if !o.Snapshot && !p.Config.Draft && p.Config.ModuleDir == "" && p.Features.On(feature.ProxyWarm) {
 		warmProxy(ctx, out, p)
 	}
 	return checkSumdb(ctx, out, p, d, o.Dir, o.Result)
@@ -35,12 +36,12 @@ func gate(ctx context.Context, out io.Writer, o Options) error {
 // runs for p.
 func sumdbDecision(p *plan.Plan, snapshot bool) gatepkg.SumdbDecision {
 	return gatepkg.DecideSumdb(gatepkg.SumdbInput{
-		Disabled:     !p.Features.On("sumdb"),
+		Disabled:     !p.Features.On(feature.Sumdb),
 		Snapshot:     snapshot,
 		Untagged:     p.Tag == "",
 		Draft:        p.Config.Draft,
 		Scoped:       p.Config.ModuleDir != "",
-		ProxyWarmOff: !p.Features.On("proxy-warm"),
+		ProxyWarmOff: !p.Features.On(feature.ProxyWarm),
 		ModulePath:   p.Module.Path,
 	})
 }

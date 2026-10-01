@@ -22,6 +22,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -422,7 +423,7 @@ func rewriteManifest(built *release.Result) error {
 // copied from their old descriptions, so a hand edit to an RC's notes is
 // never carried into the release that supersedes it.
 func buildNotes(ctx context.Context, o Options, stableTag string, p *plan.Plan, built *release.Result) (string, error) {
-	if !p.Features.On("changelog") {
+	if !p.Features.On(feature.Changelog) {
 		return "", nil
 	}
 
