@@ -55,12 +55,12 @@ func History(t *testing.T) string {
 	run := func(args ...string) {
 		t.Helper()
 		full := append(append([]string{"-C", dir}, identity...), args...)
-		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(t.Context(), "git", full...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", full, err, out)
 		}
 	}
 	commit := func(name, message string) {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		run("add", ".")
