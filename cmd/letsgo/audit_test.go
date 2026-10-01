@@ -22,3 +22,24 @@ func TestReportAuditResultSaysWhatHappened(t *testing.T) {
 		}
 	}
 }
+
+// A release the forge does not have is an error from the single-tag path.
+func TestRunAuditReportsAMissingRelease(t *testing.T) {
+	t.Chdir(moduleFixtureWith(t, "", nil))
+
+	f := emptyForge(t)
+	if err := f.runAudit([]string{"-repo", "you/foo", "-work", t.TempDir(), "v9.9.9"}); err == nil {
+		t.Error("auditing a release that does not exist succeeded")
+	}
+}
+
+// With no tag, audit sweeps the repository's releases, so a forge that cannot
+// list them is an error.
+func TestRunAuditWithoutATagListsTheRepositoryReleases(t *testing.T) {
+	t.Chdir(moduleFixtureWith(t, "", nil))
+
+	f := emptyForge(t)
+	if err := f.runAudit([]string{"-repo", "you/foo", "-work", t.TempDir()}); err == nil {
+		t.Error("sweeping a repository whose releases cannot be listed succeeded")
+	}
+}
