@@ -1,4 +1,6 @@
-package notes
+// Package notestest holds the fixtures the release-notes tests share: a
+// repository with a history, and a forge that serves a manifest.
+package notestest
 
 import (
 	"encoding/json"
@@ -13,10 +15,10 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
-// forge serves one release whose only asset (when m is non-nil) is the
+// Forge serves one release whose only asset (when m is non-nil) is the
 // manifest itself, reachable the way DownloadAsset actually fetches it: by
 // numeric asset ID through the API host, not a browser_download_url.
-func forge(t *testing.T, repoName, tag string, m *manifest.Manifest) *github.Client {
+func Forge(t *testing.T, repoName, tag string, m *manifest.Manifest) *github.Client {
 	t.Helper()
 
 	mux := http.NewServeMux()
@@ -43,9 +45,9 @@ func forge(t *testing.T, repoName, tag string, m *manifest.Manifest) *github.Cli
 	return client
 }
 
-// history writes a repository with two tags, so a local changelog Collect can
+// History writes a repository with two tags, so a local changelog Collect can
 // resolve a real "previous" release without touching the network.
-func history(t *testing.T) string {
+func History(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -53,7 +55,8 @@ func history(t *testing.T) string {
 	run := func(args ...string) {
 		t.Helper()
 		full := append(append([]string{"-C", dir}, identity...), args...)
-		if out, err := exec.CommandContext(t.Context(), "git", full...).CombinedOutput(); err != nil {
+		cmd := exec.CommandContext(t.Context(), "git", full...) // NOSONAR: a test fixture runs the developer's own git
+		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", full, err, out)
 		}
 	}

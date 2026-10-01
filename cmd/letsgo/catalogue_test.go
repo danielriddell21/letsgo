@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -20,6 +18,7 @@ import (
 	installer "github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/notes"
+	"github.com/danielriddell21/letsgo/internal/notes/notestest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish"
@@ -325,7 +324,7 @@ func notesOf(t *testing.T, disabled, required []string, client *github.Client, s
 	p := &plan.Plan{
 		Features: feature.Resolve(disabled),
 		Required: required,
-		Module:   discover.Module{Dir: historyFixture(t)},
+		Module:   discover.Module{Dir: notestest.History(t)},
 		Tag:      "v1.1.0",
 	}
 	current := &manifest.Manifest{
@@ -356,7 +355,7 @@ func diffNotesRan(t *testing.T, disabled []string) bool {
 	previous := &manifest.Manifest{
 		Schema: manifest.Schema, Version: "v1.0.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.1"},
 	}
-	notes, err := notesOf(t, quietly(disabled, "randomart"), nil, manifestForge(t, "you/demo", "v1.0.0", previous), nil)
+	notes, err := notesOf(t, quietly(disabled, "randomart"), nil, notestest.Forge(t, "you/demo", "v1.0.0", previous), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +366,7 @@ func diffNotesRan(t *testing.T, disabled []string) bool {
 func diffNotesSkipFails(t *testing.T, required bool) bool {
 	t.Helper()
 	_, err := notesOf(t, []string{"randomart"}, requiredIf(required, "diff-notes"),
-		manifestForge(t, "you/demo", "v1.0.0", nil), nil)
+		notestest.Forge(t, "you/demo", "v1.0.0", nil), nil)
 	return err != nil
 }
 
@@ -418,65 +417,4 @@ func proxyWarmRan(t *testing.T, disabled []string) bool {
 		t.Fatal(err)
 	}
 	return hits.Load() > 0
-}
-
-// manifestForge serves one release whose only asset (when m is non-nil) is the
-// manifest itself, reachable the way DownloadAsset actually fetches it: by
-// numeric asset ID through the API host, not a browser_download_url.
-func manifestForge(t *testing.T, repoName, tag string, m *manifest.Manifest) *github.Client {
-	t.Helper()
-
-	mux := http.NewServeMux()
-	release := func(w http.ResponseWriter, _ *http.Request) {
-		var assets []map[string]any
-		if m != nil {
-			assets = append(assets, map[string]any{"id": 1, "name": manifest.FileName})
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": tag, "assets": assets})
-	}
-	mux.HandleFunc("/repos/"+repoName+"/releases/tags/"+tag, release)
-	mux.HandleFunc("/repos/"+repoName+"/releases/assets/1", func(w http.ResponseWriter, _ *http.Request) {
-		data, err := m.Encode()
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _ = w.Write(data)
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-
-	client := github.New("")
-	client.SetEndpoints(srv.URL, srv.URL)
-	return client
-}
-
-// historyFixture writes a repository with two tags, so a local changelog Collect can
-// resolve a real "previous" release without touching the network.
-func historyFixture(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-
-	identity := []string{"-c", "user.name=Test", "-c", "user.email=t@example.com"}
-	run := func(args ...string) {
-		t.Helper()
-		full := append(append([]string{"-C", dir}, identity...), args...)
-		if out, err := exec.CommandContext(t.Context(), "git", full...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", full, err, out)
-		}
-	}
-	commit := func(name, message string) {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		run("add", ".")
-		run("commit", "-q", "-m", message)
-	}
-
-	run("init", "-q", "-b", "main")
-	commit("a", "feat: first release")
-	run("tag", "v1.0.0")
-	commit("b", "feat: second release")
-	run("tag", "v1.1.0")
-
-	return dir
 }
