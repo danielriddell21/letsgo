@@ -27,7 +27,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielriddell21/letsgo/internal/pluginstore"
 	pub "github.com/danielriddell21/letsgo/plugin"
 )
 
@@ -79,7 +78,7 @@ const timeout = time.Minute
 // settings. A legacy root-relative file beside letsgo.mod is still read by
 // plugins that have not moved yet, with a plan Warn suggesting they do.
 func Run(ctx context.Context, p Plugin, dir string, input, output any) error {
-	path, err := resolve(p)
+	path, err := resolve(p, dir)
 	if err != nil {
 		return err
 	}
@@ -139,47 +138,23 @@ func withoutEnv(env []string, drop ...string) []string {
 	return out
 }
 
-// resolve finds the executable and proves it is the one that was pinned.
-//
-// The store is checked first, because that is where `plugin install` now
-// puts things and it needs no PATH entry to find. A store entry that exists
-// but no longer hashes to its own path fails outright rather than falling
-// through to PATH, which would turn a tampered store into a silent
-// substitution instead of the failure it should be. Nothing in the store
-// stays trusted just for having been found there, either: PATH is re-hashed
-// against the pin exactly as before.
-func resolve(p Plugin) (string, error) {
+// resolve is Resolve, as the error Run refuses with.
+func resolve(p Plugin, dir string) (string, error) {
 	if p.Hook == "" || !p.Hook.Valid() {
 		return "", fmt.Errorf("plugin %s: %q is not a hook letsgo knows", p.Command, p.Hook)
 	}
 
-	if store, err := pluginstore.Open(""); err == nil {
-		path, ok, err := store.Lookup(p.Digest, p.Command)
-		if err != nil {
-			return "", fmt.Errorf("plugin %s: %w", p.Command, err)
-		}
-		if ok {
-			return path, nil
-		}
+	r := Resolve(p.Command, p.Digest, dir)
+	switch r.State {
+	case Installed:
+		return r.Path, nil
+	case Mismatch:
+		return "", r.mismatch(p.Command, p.Digest)
+	case Missing:
+		return "", fmt.Errorf("plugin %s: not installed: %w", p.Command, r.Err)
+	default:
+		return "", fmt.Errorf("plugin %s: %w", p.Command, r.Err)
 	}
-
-	path, err := exec.LookPath(p.Command)
-	if err != nil {
-		return "", fmt.Errorf("plugin %s: not installed: %w", p.Command, err)
-	}
-
-	digest, err := DigestOf(path)
-	if err != nil {
-		return "", err
-	}
-	if digest != p.Digest {
-		return "", fmt.Errorf(
-			"plugin %s: %s is %s, but the config pins %s;\n"+
-				"install the pinned version or update the pin — a plugin decides what gets built,\n"+
-				"so running a different one would produce a release nobody can account for",
-			p.Command, path, short(digest), short(p.Digest))
-	}
-	return path, nil
 }
 
 // DigestOf is the SHA-256 of the file at path, as "sha256:…".
