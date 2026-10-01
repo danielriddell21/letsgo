@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // notesSource is what the release notes are written from. What it skips goes

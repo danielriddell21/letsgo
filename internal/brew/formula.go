@@ -19,8 +19,8 @@ import (
 	"text/template"
 	"unicode"
 
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // Platform is one prebuilt archive the formula can install.

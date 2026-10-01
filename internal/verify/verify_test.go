@@ -18,13 +18,13 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/audit"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/randomart"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/verify"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 const mainGo = `package main
@@ -514,7 +514,7 @@ func TestVerifyScopedToAPrefixSurfacesATagsError(t *testing.T) {
 }
 
 func TestVerifyRejectsAnUnknownSchema(t *testing.T) {
-	if _, err := manifest.Decode([]byte(`{"schema":99}`)); err == nil {
+	if _, err := manifest.DecodeStrict([]byte(`{"schema":99}`)); err == nil {
 		t.Error("an unknown schema was accepted")
 	}
 }

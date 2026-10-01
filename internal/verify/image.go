@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/oci"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // checkImages asks whether each published tag still points at the image the

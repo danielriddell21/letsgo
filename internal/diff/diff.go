@@ -17,8 +17,8 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/bytesize"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/semver"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // Result is the difference between two releases.

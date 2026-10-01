@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // Compare checks a rebuilt manifest against the RC's own, and reports every

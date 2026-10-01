@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/build"
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 func stampResult(t *testing.T) *Result {

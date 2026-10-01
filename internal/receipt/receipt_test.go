@@ -6,9 +6,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/receipt"
 	"github.com/danielriddell21/letsgo/internal/verify"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 var printed = time.Date(2026, 9, 30, 14, 5, 0, 0, time.UTC)

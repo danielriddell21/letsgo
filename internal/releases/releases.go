@@ -20,8 +20,8 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/semver"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // Published is a release as the forge holds it.
@@ -243,7 +243,7 @@ func Manifest(ctx context.Context, d Downloader, p *Published) (*manifest.Manife
 	if err != nil {
 		return nil, nil, err
 	}
-	m, err := manifest.Decode(data)
+	m, err := manifest.DecodeStrict(data)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -3,7 +3,7 @@ package verify
 import (
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // reportFeatures is exercised directly here for the required-features branch,

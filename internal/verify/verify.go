@@ -24,12 +24,12 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/randomart"
 	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/internal/releases/githubsource"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // auditFileName is internal/audit.FileName, duplicated rather than imported:

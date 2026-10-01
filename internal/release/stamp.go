@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/danielriddell21/letsgo/internal/build"
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // PlanFileName is the asset a release applied from a plan carries.

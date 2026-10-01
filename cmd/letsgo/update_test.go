@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/manifest"
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
 

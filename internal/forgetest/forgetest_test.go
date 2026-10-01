@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/forgetest"
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/manifest"
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
 

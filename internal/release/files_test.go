@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/build"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/release"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 func sumOf(body string) string {

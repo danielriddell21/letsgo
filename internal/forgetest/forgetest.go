@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/archive"
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/manifest"
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
 
