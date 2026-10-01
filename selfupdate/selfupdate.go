@@ -25,12 +25,13 @@ package selfupdate
 import (
 	"context"
 	"fmt"
-	"github.com/danielriddell21/letsgo/internal/releases"
 	"io"
 	"net/http"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/danielriddell21/letsgo/internal/releases"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
