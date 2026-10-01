@@ -79,8 +79,9 @@ type Options struct {
 	// bot identity as the tap commit.
 	ReleaseToken string
 
-	// APIEndpoint overrides the forge API host. Empty means the real one.
-	APIEndpoint string
+	// NewClient builds the forge client for a token, so the caller decides
+	// where the forge is. Nil means the real one.
+	NewClient func(token string) *github.Client
 
 	// Analyse runs the gates that need program analysis rather than
 	// inspection. They take seconds rather than milliseconds, so a bare plan
@@ -1194,10 +1195,7 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 		return
 	}
 
-	client := github.New(token)
-	if opts.APIEndpoint != "" {
-		client.SetEndpoints(opts.APIEndpoint, opts.APIEndpoint)
-	}
+	client := opts.client(token)
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 	access, err := client.CheckAccess(ctx, repo)
 	if err != nil {
@@ -1223,14 +1221,29 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 	tapToken, tapSource := TapToken(ctx, opts.TapToken, opts.Token)
 	tapClient := client
 	if tapToken != token {
-		tapClient = github.New(tapToken)
-		if opts.APIEndpoint != "" {
-			tapClient.SetEndpoints(opts.APIEndpoint, opts.APIEndpoint)
-		}
+		tapClient = opts.client(tapToken)
 		p.note("tap token", tapSource, tokenNoteFrom(tapSource))
 	}
 
 	p.checkTap(ctx, tapClient, tapSource)
+}
+
+// client builds the forge client for token.
+func (o Options) client(token string) *github.Client {
+	if o.NewClient != nil {
+		return o.NewClient(token)
+	}
+	return github.New(token)
+}
+
+// ClientAt returns a client factory for a forge served at endpoint, for the
+// callers that stand one up in place of the real one.
+func ClientAt(endpoint string) func(token string) *github.Client {
+	return func(token string) *github.Client {
+		c := github.New(token)
+		c.SetEndpoints(endpoint, endpoint)
+		return c
+	}
 }
 
 // checkRelease establishes that the release can be created with whichever
@@ -1249,10 +1262,7 @@ func (p *Plan) checkRelease(
 	releaseToken, releaseSource := ReleaseToken(ctx, opts.ReleaseToken, opts.Token)
 	releaseClient, releaseAccess := client, access
 	if releaseToken != token {
-		releaseClient = github.New(releaseToken)
-		if opts.APIEndpoint != "" {
-			releaseClient.SetEndpoints(opts.APIEndpoint, opts.APIEndpoint)
-		}
+		releaseClient = opts.client(releaseToken)
 		var err error
 		releaseAccess, err = releaseClient.CheckAccess(ctx, repo)
 		if err != nil {
