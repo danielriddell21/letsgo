@@ -642,6 +642,15 @@ func TestRunRefusalConditions(t *testing.T) {
 			},
 			want: "already exists and was not promoted from",
 		},
+		{
+			name:  "target whose manifest cannot be read",
+			rcTag: "v1.3.0-rc.1",
+			setup: func(f *fakeForge) {
+				f.seedRC("v1.3.0-rc.1", []byte(`{}`))
+				f.seedRC("v1.3.0", []byte(`{}`))
+			},
+			want: "reading v1.3.0's manifest",
+		},
 	}
 
 	for _, tc := range tests {
