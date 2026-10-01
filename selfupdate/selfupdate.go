@@ -31,10 +31,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielriddell21/letsgo/internal/releases"
-
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
