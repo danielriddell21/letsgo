@@ -128,8 +128,8 @@ func Run(ctx context.Context, dir string, global *config.Global) (*Result, error
 	r := &Result{}
 	r.checkGo(ctx, root, global)
 	r.checkGit(ctx, gitBin)
-	r.checkVulncheck(cfgErr == nil && requiresVulncheck(cfg))
-	r.checkApidiff()
+	r.checkVulncheck(global, cfgErr == nil && requiresVulncheck(cfg))
+	r.checkApidiff(global)
 
 	r.checkConfig(cfgErr)
 	if cfgErr == nil {
@@ -232,22 +232,22 @@ func (r *Result) checkGit(ctx context.Context, path string) {
 
 // checkVulncheck reports whether govulncheck is installed (DR-1, DR-2),
 // escalated to Fail under `require vulncheck` (DR-9).
-func (r *Result) checkVulncheck(required bool) {
-	r.checkGateTool("govulncheck", gate.VulncheckInstall, required)
+func (r *Result) checkVulncheck(global *config.Global, required bool) {
+	r.checkGateTool(global, "govulncheck", gate.VulncheckInstall, required)
 }
 
 // checkApidiff reports whether apidiff is installed (DR-1, DR-2). Nothing in
 // the HLD asks a missing apidiff to escalate under any `require` directive.
-func (r *Result) checkApidiff() {
-	r.checkGateTool("apidiff", gate.ApidiffInstall, false)
+func (r *Result) checkApidiff(global *config.Global) {
+	r.checkGateTool(global, "apidiff", gate.ApidiffInstall, false)
 }
 
 // checkGateTool resolves a gate tool through gate.Find — the same search the
 // gate that runs it uses (DR-11) — and reports its version, read from the
 // binary's own embedded build info rather than by running it, so a version
 // check can never itself make a network call (DR-10).
-func (r *Result) checkGateTool(name, install string, required bool) {
-	path, err := gate.Find(name, install)
+func (r *Result) checkGateTool(global *config.Global, name, install string, required bool) {
+	path, err := gate.Find(global, name, install)
 	if err != nil {
 		status := Warn
 		if required {

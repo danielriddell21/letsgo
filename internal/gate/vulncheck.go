@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/danielriddell21/letsgo/internal/config"
 )
 
 // VulncheckInstall is how to obtain the tool.
@@ -43,8 +45,8 @@ func (v Vulnerability) String() string {
 // findings nobody can action and a habit of overriding the gate. govulncheck
 // traces from the program's own entry points, so a finding means this binary
 // can execute the affected code.
-func Vulncheck(ctx context.Context, dir string) ([]Vulnerability, error) {
-	report, err := VulncheckReport(ctx, dir)
+func Vulncheck(ctx context.Context, global *config.Global, dir string) ([]Vulnerability, error) {
+	report, err := VulncheckReport(ctx, global, dir)
 	if err != nil {
 		return nil, err
 	}
@@ -82,8 +84,8 @@ type Scan struct {
 // With no scans the module is checked as the host would build it. With
 // several, each is run and the findings merged, so a release shipped for many
 // targets is checked for all of them.
-func VulncheckReport(ctx context.Context, dir string, scans ...Scan) (*Report, error) {
-	bin, err := find("govulncheck", VulncheckInstall)
+func VulncheckReport(ctx context.Context, global *config.Global, dir string, scans ...Scan) (*Report, error) {
+	bin, err := Find(global, "govulncheck", VulncheckInstall)
 	if err != nil {
 		return nil, err
 	}

@@ -1153,13 +1153,14 @@ func proposeVersion(
 		apiErr  = errors.New("no earlier release to compare against")
 	)
 	if previous != "" {
-		goBin, _, _ := gobuild.Toolchain(machineConfig())
+		global := machineConfig()
+		goBin, _, _ := gobuild.Toolchain(global)
 		old, cleanup, err := checkoutForDiff(ctx, gitBin, module.Dir, previous, scope.Dir)
 		if err != nil {
 			apiErr = err
 		} else {
 			defer cleanup()
-			changes, apiErr = gate.APIDiff(ctx, goBin, old, module.Dir)
+			changes, apiErr = gate.APIDiff(ctx, global, goBin, old, module.Dir)
 		}
 	}
 

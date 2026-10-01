@@ -150,7 +150,7 @@ func fakeVulncheck(t *testing.T) (log string) {
 func TestVulncheckReportScansEachConfigurationAndMergesFindings(t *testing.T) {
 	log := fakeVulncheck(t)
 
-	report, err := VulncheckReport(context.Background(), t.TempDir(),
+	report, err := VulncheckReport(context.Background(), nil, t.TempDir(),
 		Scan{Tags: []string{"a", "b"}, Env: []string{"GOOS=linux", "GOARCH=amd64"}},
 		Scan{Env: []string{"GOOS=windows", "GOARCH=arm64"}},
 	)
@@ -182,7 +182,7 @@ func TestVulncheckReportScansEachConfigurationAndMergesFindings(t *testing.T) {
 func TestVulncheckReportWithoutScansRunsOnce(t *testing.T) {
 	log := fakeVulncheck(t)
 
-	if _, err := Vulncheck(context.Background(), t.TempDir()); err != nil {
+	if _, err := Vulncheck(context.Background(), nil, t.TempDir()); err != nil {
 		t.Fatalf("Vulncheck: %v", err)
 	}
 	calls, err := os.ReadFile(log)

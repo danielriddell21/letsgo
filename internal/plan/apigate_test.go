@@ -28,7 +28,7 @@ func library(t *testing.T, firstAPI, secondAPI, secondTag string) *repo {
 
 func requireAPIDiff(t *testing.T) {
 	t.Helper()
-	if _, err := gate.APIDiff(context.Background(), goBin(t), t.TempDir(), t.TempDir()); err != nil &&
+	if _, err := gate.APIDiff(context.Background(), nil, goBin(t), t.TempDir(), t.TempDir()); err != nil &&
 		strings.Contains(err.Error(), "not installed") {
 		t.Skip("apidiff is not installed")
 	}

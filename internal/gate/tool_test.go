@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -61,5 +62,18 @@ func TestFindWithGlobalOverrideMustBeAbsoluteAndExecutable(t *testing.T) {
 		Tools: map[string]string{"govulncheck": notExecutable},
 	}); err == nil {
 		t.Error("a non-executable path was accepted from the global config")
+	}
+}
+
+func TestFindTreatsANilGlobalAsNoOverride(t *testing.T) {
+	t.Setenv("GOBIN", "")
+	t.Setenv("GOPATH", "")
+	t.Setenv("PATH", "")
+	t.Setenv("HOME", t.TempDir())
+
+	_, err := Find(nil, "definitely-not-installed", "go install example.com/x")
+	var missing *MissingToolError
+	if !errors.As(err, &missing) {
+		t.Errorf("Find(nil, ...) error = %v, want a MissingToolError", err)
 	}
 }
