@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/manifest"
@@ -70,6 +71,10 @@ type Record struct {
 type Options struct {
 	Client *github.Client
 	Repo   github.Repo
+
+	// Global is the machine config, which may name where govulncheck is.
+	// Nil means it names nothing.
+	Global *config.Global
 
 	// Tag is the release to audit. Empty means every supported major
 	// (RunAll): see Options.Prefix.
@@ -201,7 +206,7 @@ func auditRelease(ctx context.Context, o Options, release *releases.Published) (
 		return nil, fmt.Errorf("audit: %w", err)
 	}
 
-	report, err := gate.VulncheckReport(ctx, source, scansFor(m)...)
+	report, err := gate.VulncheckReport(ctx, o.Global, source, scansFor(m)...)
 	if err != nil {
 		return nil, err
 	}

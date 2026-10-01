@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
 
@@ -50,8 +51,8 @@ func (c Change) String() string {
 //
 // Both trees are compared package by package, because apidiff works on one
 // package at a time and a module's surface is the union of its packages.
-func APIDiff(ctx context.Context, goBin, oldDir, newDir string) ([]Change, error) {
-	bin, err := find("apidiff", ApidiffInstall)
+func APIDiff(ctx context.Context, global *config.Global, goBin, oldDir, newDir string) ([]Change, error) {
+	bin, err := Find(global, "apidiff", ApidiffInstall)
 	if err != nil {
 		return nil, err
 	}

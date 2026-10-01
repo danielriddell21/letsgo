@@ -50,29 +50,24 @@ func (e *MissingToolError) Unwrap() error { return ErrToolMissing }
 // Find locates a Go tool the same way the gate that runs it does, so a
 // caller that only wants to report whether the tool is present — `letsgo
 // doctor`, notably — never disagrees with the gate about where it looked.
-func Find(tool, install string) (string, error) {
-	return find(tool, install)
-}
-
-// find locates a Go tool.
+//
+// global is the machine's config, which may name the tool outright; nil
+// means none does.
 //
 // Unlike git, which letsgo resolves only within system directories, these live
 // wherever the user installed them — GOBIN, or GOPATH/bin, both of which are
 // user-writable by design. There is no stricter search to perform: a tool the
 // user chose to install is a tool they chose to trust, and refusing to look
 // where Go puts things would mean never finding them.
-func find(tool, install string) (string, error) {
-	global, err := config.LoadGlobal()
-	if err != nil {
-		global = &config.Global{}
-	}
+func Find(global *config.Global, tool, install string) (string, error) {
 	return findWith(tool, install, global)
 }
 
-// findWith is find's core logic, taking the global config directly rather
-// than loading it, so tests can exercise the override without relying on
-// config.LoadGlobal's process-wide memoization.
+// findWith is Find's core logic.
 func findWith(tool, install string, global *config.Global) (string, error) {
+	if global == nil {
+		global = &config.Global{}
+	}
 	// An explicit override wins outright: it names the tool to run, not
 	// another place to look for it.
 	if override := global.Tools[tool]; override != "" {

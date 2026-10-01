@@ -2,6 +2,7 @@ package gate
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,4 +128,16 @@ func testGoBin(t *testing.T) string {
 		t.Skipf("no go command: %v", err)
 	}
 	return goBin
+}
+
+func TestAPIDiffReportsAMissingTool(t *testing.T) {
+	t.Setenv("GOBIN", "")
+	t.Setenv("GOPATH", "")
+	t.Setenv("PATH", "")
+	t.Setenv("HOME", t.TempDir())
+
+	_, err := APIDiff(context.Background(), nil, "go", t.TempDir(), t.TempDir())
+	if !errors.Is(err, ErrToolMissing) {
+		t.Errorf("APIDiff error = %v, want ErrToolMissing", err)
+	}
 }

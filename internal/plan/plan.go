@@ -1035,7 +1035,7 @@ func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 		return
 	}
 
-	found, err := gate.Vulncheck(ctx, p.Module.Dir)
+	found, err := gate.Vulncheck(ctx, p.Global, p.Module.Dir)
 
 	switch {
 	case errors.Is(err, gate.ErrToolMissing):
@@ -1114,7 +1114,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 	}
 	defer cleanup()
 
-	changes, err := gate.APIDiff(ctx, p.GoBin, old, p.Module.Dir)
+	changes, err := gate.APIDiff(ctx, p.Global, p.GoBin, old, p.Module.Dir)
 	switch {
 	case errors.Is(err, gate.ErrToolMissing), errors.Is(err, gate.ErrNothingExported):
 		p.skip(apiCompatibility, apiGate, "%v", err)

@@ -63,7 +63,7 @@ func TestVersionSatisfies(t *testing.T) {
 
 func TestCheckGateToolReportsAMissingToolAsWarn(t *testing.T) {
 	r := &Result{}
-	r.checkGateTool("letsgo-doctor-test-nonexistent-tool", "install it somehow", false)
+	r.checkGateTool(nil, "letsgo-doctor-test-nonexistent-tool", "install it somehow", false)
 
 	if len(r.Checks) != 1 {
 		t.Fatalf("Checks = %d, want 1", len(r.Checks))
@@ -82,7 +82,7 @@ func TestCheckGateToolReportsAMissingToolAsWarn(t *testing.T) {
 
 func TestCheckGateToolEscalatesToFailWhenRequired(t *testing.T) {
 	r := &Result{}
-	r.checkGateTool("letsgo-doctor-test-nonexistent-tool", "install it somehow", true)
+	r.checkGateTool(nil, "letsgo-doctor-test-nonexistent-tool", "install it somehow", true)
 
 	if r.Checks[0].Status != Fail {
 		t.Errorf("Status = %v, want Fail", r.Checks[0].Status)
