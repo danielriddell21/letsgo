@@ -112,12 +112,12 @@ func (s *Server) pinActions(uri, text string, r Range) ([]CodeAction, error) {
 				Data:  data,
 			})
 		}
-		if s.opts.InstallPin != nil && needsInstall(dir, pin) {
+		if s.opts.InstallPin != nil && needsInstall(dir, s.opts.PluginsDir, pin) {
 			actions = append(actions, installAction(fmt.Sprintf("Install pinned plugin: %s %s", pin.command, pin.version), installArgs{URI: uri, Line: n}))
 			installs++
 		}
 	}
-	if installs > 0 && len(pinsToInstall(dir, o, allPins)) > 1 {
+	if installs > 0 && len(pinsToInstall(dir, s.opts.PluginsDir, o, allPins)) > 1 {
 		actions = append(actions, installAction("Install all missing pinned plugins", installArgs{URI: uri, Line: allPins}))
 	}
 	return actions, nil

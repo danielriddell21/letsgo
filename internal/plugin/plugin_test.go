@@ -55,7 +55,7 @@ func TestRunSendsInputAndDecodesTheAnswer(t *testing.T) {
 		plugin.Plugin{
 			Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digest,
 		},
-		t.TempDir(), plugin.ArchiveLayoutInput{Project: "tools"}, &out)
+		t.TempDir(), "", plugin.ArchiveLayoutInput{Project: "tools"}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestRunRefusesAProgramThatDoesNotMatchThePin(t *testing.T) {
 	pinned := "sha256:" + strings.Repeat("0", 64)
 	err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: pinned},
-		t.TempDir(), plugin.ArchiveLayoutInput{}, &plugin.ArchiveLayoutOutput{})
+		t.TempDir(), "", plugin.ArchiveLayoutInput{}, &plugin.ArchiveLayoutOutput{})
 
 	if err == nil {
 		t.Fatal("a plugin that does not match its pin should not have run")
@@ -93,7 +93,7 @@ func TestRunReportsWhatThePluginPrintedOnFailure(t *testing.T) {
 
 	err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digest},
-		t.TempDir(), plugin.ArchiveLayoutInput{}, &plugin.ArchiveLayoutOutput{})
+		t.TempDir(), "", plugin.ArchiveLayoutInput{}, &plugin.ArchiveLayoutOutput{})
 
 	if err == nil {
 		t.Fatal("a failing plugin should be an error")
@@ -106,7 +106,7 @@ func TestRunReportsWhatThePluginPrintedOnFailure(t *testing.T) {
 func TestRunRejectsAnUnknownHook(t *testing.T) {
 	err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: "not-a-hook", Command: "letsgo-fake", Digest: "sha256:x"},
-		t.TempDir(), struct{}{}, &struct{}{})
+		t.TempDir(), "", struct{}{}, &struct{}{})
 	if err == nil || !strings.Contains(err.Error(), "not a hook") {
 		t.Errorf("err = %v", err)
 	}
@@ -124,7 +124,7 @@ func TestRunFindsAPluginInTheStoreWithoutPATH(t *testing.T) {
 
 	err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digest},
-		t.TempDir(), struct{}{}, &struct{}{})
+		t.TempDir(), "", struct{}{}, &struct{}{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,12 +145,12 @@ func TestRunResolvesTwoDigestsOfTheSameNameFromTheStore(t *testing.T) {
 	var outA, outB plugin.ArchiveLayoutOutput
 	if err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digestA},
-		t.TempDir(), struct{}{}, &outA); err != nil {
+		t.TempDir(), "", struct{}{}, &outA); err != nil {
 		t.Fatal(err)
 	}
 	if err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digestB},
-		t.TempDir(), struct{}{}, &outB); err != nil {
+		t.TempDir(), "", struct{}{}, &outB); err != nil {
 		t.Fatal(err)
 	}
 
@@ -179,7 +179,7 @@ func TestRunFailsOnATamperedStoreEntry(t *testing.T) {
 
 	err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digest},
-		t.TempDir(), struct{}{}, &struct{}{})
+		t.TempDir(), "", struct{}{}, &struct{}{})
 	if err == nil {
 		t.Fatal("a tampered store entry should not have run")
 	}
@@ -192,7 +192,7 @@ func TestRunFailsOnATamperedStoreEntry(t *testing.T) {
 // install` would have.
 func putInStore(t *testing.T, storeDir, digest, name, src string) {
 	t.Helper()
-	store, err := pluginstore.Open(storeDir)
+	store, err := pluginstore.Open(storeDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ echo '{"files":[]}'`)
 	var out plugin.TapFilesOutput
 	err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: plugin.HookTapFiles, Command: "letsgo-fake", Digest: digest},
-		t.TempDir(), plugin.TapFilesInput{}, &out)
+		t.TempDir(), "", plugin.TapFilesInput{}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ echo '{}'`)
 
 	err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "letsgo-fake", Digest: digest},
-		t.TempDir(), plugin.ArchiveLayoutInput{}, &plugin.ArchiveLayoutOutput{})
+		t.TempDir(), "", plugin.ArchiveLayoutInput{}, &plugin.ArchiveLayoutOutput{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -28,8 +28,8 @@ type pinStatus struct {
 //
 // dir is the directory letsgo.mod sits in, which a relative command (a
 // program inside the repository) is resolved against.
-func checkPin(dir string, pin pinLine) pinStatus {
-	r := plugin.Resolve(pin.command, pin.digest, dir)
+func checkPin(dir, pluginsDir string, pin pinLine) pinStatus {
+	r := plugin.Resolve(pin.command, pin.digest, dir, pluginsDir)
 	switch r.State {
 	case plugin.Installed:
 		if r.Stored {

@@ -19,7 +19,7 @@ func digest(content string) string {
 }
 
 func TestPutThenLookupRoundTrips(t *testing.T) {
-	store, err := pluginstore.Open(t.TempDir())
+	store, err := pluginstore.Open(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestPutThenLookupRoundTrips(t *testing.T) {
 // The whole reason this store exists: two repositories pinning two different
 // digests of the same-named plugin must not collide.
 func TestTwoDigestsOfTheSameNameCoexist(t *testing.T) {
-	store, err := pluginstore.Open(t.TempDir())
+	store, err := pluginstore.Open(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestTwoDigestsOfTheSameNameCoexist(t *testing.T) {
 }
 
 func TestLookupMissesANameTheStoreNeverSaw(t *testing.T) {
-	store, err := pluginstore.Open(t.TempDir())
+	store, err := pluginstore.Open(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestLookupMissesANameTheStoreNeverSaw(t *testing.T) {
 // An entry that has been altered on disk must never be handed back as if it
 // were still what it claims to be.
 func TestLookupFailsOnATamperedEntry(t *testing.T) {
-	store, err := pluginstore.Open(t.TempDir())
+	store, err := pluginstore.Open(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestLookupFailsOnATamperedEntry(t *testing.T) {
 }
 
 func TestPutRefusesDataThatDoesNotMatchTheDigest(t *testing.T) {
-	store, err := pluginstore.Open(t.TempDir())
+	store, err := pluginstore.Open(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestOpenUsesTheEnvOverrideWhenNoDirIsGiven(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(pluginstore.StoreEnvOverride, dir)
 
-	store, err := pluginstore.Open("")
+	store, err := pluginstore.Open("", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestOpenUsesTheEnvOverrideWhenNoDirIsGiven(t *testing.T) {
 }
 
 func TestEntriesListsEveryBinary(t *testing.T) {
-	store, err := pluginstore.Open(t.TempDir())
+	store, err := pluginstore.Open(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestEntriesListsEveryBinary(t *testing.T) {
 }
 
 func TestEntriesOnAnEmptyStoreIsNotAnError(t *testing.T) {
-	store, err := pluginstore.Open(t.TempDir())
+	store, err := pluginstore.Open(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestEntriesOnAnEmptyStoreIsNotAnError(t *testing.T) {
 // Prune removes only what keep rejects, which is the entire point: an entry
 // still referenced by some pin must survive.
 func TestPruneRemovesOnlyWhatKeepRejects(t *testing.T) {
-	store, err := pluginstore.Open(t.TempDir())
+	store, err := pluginstore.Open(t.TempDir(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestPruneRemovesOnlyWhatKeepRejects(t *testing.T) {
 
 func TestOpenReadOnlyNeverCreatesTheStore(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "absent")
-	store, err := pluginstore.OpenReadOnly(dir)
+	store, err := pluginstore.OpenReadOnly(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestOpenReadOnlyNeverCreatesTheStore(t *testing.T) {
 
 func TestOpenReadOnlyFindsWhatOpenInstalled(t *testing.T) {
 	dir := t.TempDir()
-	writable, err := pluginstore.Open(dir)
+	writable, err := pluginstore.Open(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +248,7 @@ func TestOpenReadOnlyFindsWhatOpenInstalled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	readOnly, err := pluginstore.OpenReadOnly(dir)
+	readOnly, err := pluginstore.OpenReadOnly(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

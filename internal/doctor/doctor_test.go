@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/doctor"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
@@ -72,7 +73,7 @@ func TestRunReportsGoAndGit(t *testing.T) {
 	writeGoMod(t, dir, "module example.com/doctortest\n\ngo 1.24\n")
 	gitInit(t, dir)
 
-	result, err := doctor.Run(context.Background(), dir)
+	result, err := doctor.Run(context.Background(), dir, &config.Global{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestRunReportsNoGoModCheckWhenTheDirectiveIsSatisfied(t *testing.T) {
 	writeGoMod(t, dir, "module example.com/doctortest\n\ngo 1.24\n")
 	gitInit(t, dir)
 
-	result, err := doctor.Run(context.Background(), dir)
+	result, err := doctor.Run(context.Background(), dir, &config.Global{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -128,7 +129,7 @@ func TestRunWarnsWhenGoModWantsADifferentVersion(t *testing.T) {
 	writeGoMod(t, dir, fmt.Sprintf("module example.com/doctortest\n\ngo %s\n", want))
 	gitInit(t, dir)
 
-	result, err := doctor.Run(context.Background(), dir)
+	result, err := doctor.Run(context.Background(), dir, &config.Global{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestRunWarnsWhenGoModWantsADifferentVersion(t *testing.T) {
 
 func TestRunFailsWithNoModule(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := doctor.Run(context.Background(), dir); err == nil {
+	if _, err := doctor.Run(context.Background(), dir, &config.Global{}); err == nil {
 		t.Error("want an error with no go.mod present")
 	}
 }
@@ -174,7 +175,7 @@ func TestRunFailsOnAMalformedLetsgoMod(t *testing.T) {
 	writeLetsgoMod(t, dir, "this is not a directive at all !!!\n")
 	gitInit(t, dir)
 
-	result, err := doctor.Run(context.Background(), dir)
+	result, err := doctor.Run(context.Background(), dir, &config.Global{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestRunReportsAMissingPluginPin(t *testing.T) {
 		"sha256:"+strings.Repeat("0", 64)+"\n")
 	gitInit(t, dir)
 
-	result, err := doctor.Run(context.Background(), dir)
+	result, err := doctor.Run(context.Background(), dir, &config.Global{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -218,7 +219,7 @@ func TestRunReportsANonGitHubOrigin(t *testing.T) {
 	gitInit(t, dir)
 	gitRun(t, dir, "remote", "add", "origin", "https://gitlab.com/you/doctortest.git")
 
-	result, err := doctor.Run(context.Background(), dir)
+	result, err := doctor.Run(context.Background(), dir, &config.Global{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -238,7 +239,7 @@ func TestRunReportsADirtyWorktree(t *testing.T) {
 	gitInit(t, dir)
 	writeGoMod(t, dir, "module example.com/doctortest\n\ngo 1.24\n// dirty\n")
 
-	result, err := doctor.Run(context.Background(), dir)
+	result, err := doctor.Run(context.Background(), dir, &config.Global{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -266,7 +267,7 @@ func TestRunReportsAShallowClone(t *testing.T) {
 		t.Fatalf("git clone: %v\n%s", err, out)
 	}
 
-	result, err := doctor.Run(context.Background(), shallow)
+	result, err := doctor.Run(context.Background(), shallow, &config.Global{})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

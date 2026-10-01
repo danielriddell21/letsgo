@@ -19,18 +19,19 @@ func (r *Result) checkConfig(cfgErr error) {
 	r.add(repositoryGroup, "letsgo.mod", OK, "", "parses")
 }
 
-// checkPlugins reports one check per pinned plugin (DR-5). dir is the
+// checkPlugins reports one check per pinned plugin (DR-5). pluginsDir is the
+// global config's `plugins` directive, and dir is the
 // repository root, which a relative command is anchored to.
-func (r *Result) checkPlugins(cfg *config.Config, dir string) {
+func (r *Result) checkPlugins(cfg *config.Config, dir, pluginsDir string) {
 	for _, p := range cfg.Plugins {
-		r.checkPlugin(p, dir)
+		r.checkPlugin(p, dir, pluginsDir)
 	}
 }
 
 // checkPlugin reports whether p's pin is installed and its digest matches,
 // by asking the same resolver plugin.Run executes from (DR-11).
-func (r *Result) checkPlugin(p config.Plugin, dir string) {
-	res := plugin.Resolve(p.Command, p.Digest, dir)
+func (r *Result) checkPlugin(p config.Plugin, dir, pluginsDir string) {
+	res := plugin.Resolve(p.Command, p.Digest, dir, pluginsDir)
 	switch res.State {
 	case plugin.Installed:
 		r.add(repositoryGroup, "plugin", OK, "", "%s %s: %s", p.Command, p.Version, res.Path)

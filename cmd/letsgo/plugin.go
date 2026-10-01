@@ -28,11 +28,17 @@ const pluginRepo = "danielriddell21/letsgo-plugins"
 // defaultPluginRepo is pluginRepo, unless the global config's `plugin-repo`
 // directive names another one for this machine.
 func defaultPluginRepo() string {
+	return defaultPluginRepoWith(machineConfig())
+}
+
+// machineConfig is the global config, or an empty one when it cannot be
+// read: a broken global file is plan's to report, not every command's.
+func machineConfig() *config.Global {
 	global, err := config.LoadGlobal()
 	if err != nil {
-		global = &config.Global{}
+		return &config.Global{}
 	}
-	return defaultPluginRepoWith(global)
+	return global
 }
 
 // defaultPluginRepoWith is defaultPluginRepo's core logic, taking the global
@@ -169,7 +175,7 @@ func installAllPins(ctx context.Context, w io.Writer, repo, token, linkDir strin
 
 // verifyPinned fails unless p now resolves to the binary its pin names.
 func verifyPinned(p config.Plugin) error {
-	if r := plugin.Resolve(p.Command, p.Digest, "."); r.State != plugin.Installed {
+	if r := plugin.Resolve(p.Command, p.Digest, ".", machineConfig().PluginsDir); r.State != plugin.Installed {
 		return fmt.Errorf("letsgo plugin install: %s %s installed, but it is not the digest the config pins (%s); update the pin",
 			p.Command, p.Version, plugin.Short(p.Digest))
 	}
@@ -229,7 +235,7 @@ func fetchIntoStore(ctx context.Context, options selfupdate.Options) (release *s
 		return nil, nil, "", err
 	}
 
-	store, err := pluginstore.Open("")
+	store, err := pluginstore.Open("", machineConfig().PluginsDir)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("letsgo plugin install: %w", err)
 	}
@@ -417,7 +423,7 @@ func printPluginsJSON(w io.Writer, cfg *config.Config) error {
 // reportUnreferencedStoreEntries names what letsgo plugin prune would remove,
 // so pruning is never a surprise.
 func reportUnreferencedStoreEntries(w io.Writer, cfg *config.Config) {
-	store, err := pluginstore.Open("")
+	store, err := pluginstore.Open("", machineConfig().PluginsDir)
 	if err != nil {
 		return
 	}
@@ -474,7 +480,7 @@ func pruneStore(w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	store, err := pluginstore.Open("")
+	store, err := pluginstore.Open("", machineConfig().PluginsDir)
 	if err != nil {
 		return fmt.Errorf("letsgo plugin prune: %w", err)
 	}
@@ -501,7 +507,7 @@ func pruneStore(w io.Writer) error {
 // to read. The working directory is the repository root, where letsgo.mod is
 // read from.
 func pluginStatus(p config.Plugin) (string, bool) {
-	r := plugin.Resolve(p.Command, p.Digest, ".")
+	r := plugin.Resolve(p.Command, p.Digest, ".", machineConfig().PluginsDir)
 	switch r.State {
 	case plugin.Installed:
 		return "ok  " + r.Path, true

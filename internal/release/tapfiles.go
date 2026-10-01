@@ -44,7 +44,7 @@ func applyTapFilesPlugin(ctx context.Context, p *plan.Plan, artifacts []build.Ar
 	}
 
 	in := tapFilesInput(p, artifacts, info)
-	return RunTapFiles(ctx, configured, p.RootDir, in)
+	return RunTapFiles(ctx, configured, p.RootDir, p.PluginsDir(), in)
 }
 
 // RunTapFiles runs a pinned tap-files plugin and validates its answer.
@@ -52,11 +52,11 @@ func applyTapFilesPlugin(ctx context.Context, p *plan.Plan, artifacts []build.Ar
 // Shared by a release building fresh artifacts and by yank, which rebuilds
 // the same input from a previous release's manifest: both need the same
 // execution and the same path checks.
-func RunTapFiles(ctx context.Context, configured plugin.Plugin, rootDir string, in plugin.TapFilesInput) ([]plugin.TapFile, error) {
+func RunTapFiles(ctx context.Context, configured plugin.Plugin, rootDir, pluginsDir string, in plugin.TapFilesInput) ([]plugin.TapFile, error) {
 	in.ConfigDir = filepath.Join(rootDir, ".letsgo")
 
 	var out plugin.TapFilesOutput
-	if err := plugin.Run(ctx, configured, rootDir, in, &out); err != nil {
+	if err := plugin.Run(ctx, configured, rootDir, pluginsDir, in, &out); err != nil {
 		return nil, err
 	}
 	if err := validateTapFiles(out.Files); err != nil {

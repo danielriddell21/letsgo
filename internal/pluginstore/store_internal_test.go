@@ -3,15 +3,13 @@ package pluginstore
 import (
 	"path/filepath"
 	"testing"
-
-	"github.com/danielriddell21/letsgo/internal/config"
 )
 
 // The global config's `plugins <dir>` directive is used when no explicit dir
 // and no env override are given.
-func TestOpenWithHonoursGlobalPluginsDir(t *testing.T) {
+func TestOpenHonoursGlobalPluginsDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "plugins")
-	s, err := openWith("", &config.Global{PluginsDir: dir})
+	s, err := Open("", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,9 +19,9 @@ func TestOpenWithHonoursGlobalPluginsDir(t *testing.T) {
 }
 
 // An explicit dir outranks the global config.
-func TestOpenWithExplicitDirOutranksGlobalConfig(t *testing.T) {
+func TestOpenExplicitDirOutranksGlobalConfig(t *testing.T) {
 	dir := t.TempDir()
-	s, err := openWith(dir, &config.Global{PluginsDir: "/should/not/be/used"})
+	s, err := Open(dir, "/should/not/be/used")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,11 +32,11 @@ func TestOpenWithExplicitDirOutranksGlobalConfig(t *testing.T) {
 
 // StoreEnvOverride outranks the global config: it names the store this one
 // invocation must use.
-func TestOpenWithEnvOverrideOutranksGlobalConfig(t *testing.T) {
+func TestOpenEnvOverrideOutranksGlobalConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(StoreEnvOverride, dir)
 
-	s, err := openWith("", &config.Global{PluginsDir: "/should/not/be/used"})
+	s, err := Open("", "/should/not/be/used")
 	if err != nil {
 		t.Fatal(err)
 	}

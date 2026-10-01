@@ -42,8 +42,8 @@ func (s *Server) pinnable(uri string) bool {
 // needsInstall is true for a pin that cannot run here yet: nothing installed,
 // or only a different build on PATH. Installing the pinned release fixes
 // either, because the store is consulted before PATH.
-func needsInstall(dir string, pin pinLine) bool {
-	state := checkPin(dir, pin).state
+func needsInstall(dir, pluginsDir string, pin pinLine) bool {
+	state := checkPin(dir, pluginsDir, pin).state
 	return state == pinMissing || state == pinMismatch
 }
 
@@ -58,7 +58,7 @@ func installAction(title string, args installArgs) CodeAction {
 // pinsToInstall lists the pins in the document that need installing: the one
 // on line, or every one for allPins. The same release pinned on two hooks is
 // listed once.
-func pinsToInstall(dir string, o outline, line int) []pinLine {
+func pinsToInstall(dir, pluginsDir string, o outline, line int) []pinLine {
 	var pins []pinLine
 	seen := map[string]bool{}
 	for _, n := range slices.Sorted(maps.Keys(o.byLine)) {
@@ -67,7 +67,7 @@ func pinsToInstall(dir string, o outline, line int) []pinLine {
 		}
 		pin, ok := o.pin(n)
 		key := pin.command + "@" + pin.version
-		if !ok || seen[key] || !needsInstall(dir, pin) {
+		if !ok || seen[key] || !needsInstall(dir, pluginsDir, pin) {
 			continue
 		}
 		seen[key] = true
@@ -100,7 +100,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, raw json.RawMessage) 
 		return nil, nil
 	}
 	dir := filepath.Dir(uriToPath(args.URI))
-	pins := pinsToInstall(dir, outlineOf(uriToPath(args.URI), doc.text), args.Line)
+	pins := pinsToInstall(dir, s.opts.PluginsDir, outlineOf(uriToPath(args.URI), doc.text), args.Line)
 	if len(pins) == 0 {
 		return nil, s.conn.notify("window/showMessage", showMessageParams{Type: messageInfo, Message: "letsgo: nothing to install"})
 	}
@@ -112,7 +112,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, raw json.RawMessage) 
 			problems = append(problems, fmt.Sprintf("could not install %s: %v", what, err))
 			continue
 		}
-		if checkPin(dir, pin).state != pinInstalled {
+		if checkPin(dir, s.opts.PluginsDir, pin).state != pinInstalled {
 			problems = append(problems, fmt.Sprintf("installed %s, but the release is not the digest the pin names; update the pin", what))
 			continue
 		}

@@ -48,12 +48,13 @@ type Resolution struct {
 // store stays trusted just for having been found there, either: PATH is
 // re-hashed against the pin.
 //
+// pluginsDir is the global config's `plugins` directive, or empty.
 // dir is the repository root. A command written as a relative path (a program
 // inside the repository) is anchored to it once, so the file that is hashed is
 // the file that runs, wherever the process was started. Resolve reads files
 // and runs nothing, and never creates the store.
-func Resolve(command, digest, dir string) Resolution {
-	if store, err := pluginstore.OpenReadOnly(""); err == nil {
+func Resolve(command, digest, dir, pluginsDir string) Resolution {
+	if store, err := pluginstore.OpenReadOnly("", pluginsDir); err == nil {
 		path, ok, err := store.Lookup(digest, command)
 		if err != nil {
 			return Resolution{State: Broken, Err: err}

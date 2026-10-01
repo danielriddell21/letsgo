@@ -19,6 +19,10 @@ type Options struct {
 	// Empty uses "go" on PATH.
 	GoBin string
 
+	// PluginsDir is the global config's `plugins` directive: where the plugin
+	// store lives when nothing overrides it. Empty is the default location.
+	PluginsDir string
+
 	// ResolvePin backs the "update pin" code action. Nil, like Restricted,
 	// leaves the action out: a server with nothing to look a release up with
 	// has nothing honest to offer.
@@ -274,7 +278,7 @@ func (s *Server) handleHover(ctx context.Context, raw json.RawMessage) (any, err
 	if !ok {
 		return nil, nil
 	}
-	contents, ok := hoverAt(ctx, uriToPath(p.TextDocument.URI), doc.text, p.Position, !s.opts.Restricted, s.opts.GoBin)
+	contents, ok := hoverAt(ctx, uriToPath(p.TextDocument.URI), doc.text, p.Position, !s.opts.Restricted, s.opts.GoBin, s.opts.PluginsDir)
 	if !ok {
 		return nil, nil
 	}
