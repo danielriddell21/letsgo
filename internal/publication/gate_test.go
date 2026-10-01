@@ -24,13 +24,14 @@ func TestCheckSumdbSkipsWithoutTouchingTheNetwork(t *testing.T) {
 	t.Setenv("GONOSUMCHECK", "")
 
 	tests := map[string]*plan.Plan{
-		"disabled":       {Features: feature.Resolve([]string{"sumdb"})},
-		"proxy warm off": {Features: feature.Resolve([]string{"proxy-warm"})},
-		"private module": {Module: discover.Module{Path: "github.com/you/foo"}},
+		"disabled":       {Config: &config.Config{}, Tag: "v1.0.0", Features: feature.Resolve([]string{"sumdb"})},
+		"proxy warm off": {Config: &config.Config{}, Tag: "v1.0.0", Features: feature.Resolve([]string{"proxy-warm"})},
+		"private module": {Config: &config.Config{}, Tag: "v1.0.0", Module: discover.Module{Path: "github.com/you/foo"}},
+		"draft":          {Config: &config.Config{Draft: true}, Tag: "v1.0.0", Required: []string{"sumdb"}},
 	}
 	for name, p := range tests {
 		t.Run(name, func(t *testing.T) {
-			if err := checkSumdb(context.Background(), io.Discard, p, t.TempDir(), &release.Result{}); err != nil {
+			if err := checkSumdb(context.Background(), io.Discard, p, sumdbDecision(p, false), t.TempDir(), &release.Result{}); err != nil {
 				t.Fatalf("checkSumdb = %v, want nil", err)
 			}
 		})
@@ -62,13 +63,14 @@ func TestCheckSumdbTreatsAnUnreachableDatabaseAsAWarningUnlessRequired(t *testin
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			p := &plan.Plan{
+				Config:   &config.Config{},
 				Module:   discover.Module{Path: "github.com/you/foo"},
 				Version:  "1.0.0",
 				Tag:      "v1.0.0",
 				Proxy:    server.URL,
 				Required: tt.required,
 			}
-			err := checkSumdb(context.Background(), io.Discard, p, t.TempDir(), &release.Result{})
+			err := checkSumdb(context.Background(), io.Discard, p, sumdbDecision(p, false), t.TempDir(), &release.Result{})
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("checkSumdb = %v, want error %v", err, tt.wantErr)
 			}

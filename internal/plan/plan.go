@@ -38,7 +38,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/semver"
-	"github.com/danielriddell21/letsgo/internal/sumdb"
 )
 
 // ConfigFile is the optional configuration file letsgo reads.
@@ -2366,18 +2365,20 @@ const (
 // the check itself happens during release, after the module proxy has been
 // primed and before any asset is attached.
 func (p *Plan) checkSumdb() {
+	d := gate.DecideSumdb(gate.SumdbInput{
+		Disabled:     !p.Features.On(sumdbGate),
+		Snapshot:     p.Snapshot,
+		Untagged:     p.Tag == "",
+		Draft:        p.Config.Draft,
+		Scoped:       p.Config.ModuleDir != "",
+		ProxyWarmOff: !p.Features.On("proxy-warm"),
+		ModulePath:   p.Module.Path,
+	})
 	switch {
-	case !p.Features.On(sumdbGate):
+	case d.Run:
+	case d.ByConfig:
 		p.add(sumdbCheck, Skip, disabledByConfig)
-	case p.Snapshot || p.Tag == "":
-		p.skip(sumdbCheck, sumdbGate, "not a tagged release")
-	case p.Config.ModuleDir != "":
-		p.skip(sumdbCheck, sumdbGate, "the module is not at the repository root")
-	case !p.Features.On("proxy-warm"):
-		p.skip(sumdbCheck, sumdbGate, "proxy-warm is disabled, so sum.golang.org has no record to compare")
 	default:
-		if skip, reason := sumdb.PrivateModule(p.Module.Path); skip {
-			p.skip(sumdbCheck, sumdbGate, "private module (%s)", reason)
-		}
+		p.skip(sumdbCheck, sumdbGate, "%s", d.Reason)
 	}
 }

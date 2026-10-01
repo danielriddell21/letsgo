@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	gatepkg "github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/release"
@@ -23,13 +24,25 @@ var sumdbURL = sumdb.DefaultURL
 // which is all the proxy needs.
 func gate(ctx context.Context, out io.Writer, o Options) error {
 	p := o.Plan
-	if o.Snapshot || p.Config.Draft || p.Config.ModuleDir != "" {
-		return nil
-	}
-	if p.Features.On("proxy-warm") {
+	d := sumdbDecision(p, o.Snapshot)
+	if !o.Snapshot && !p.Config.Draft && p.Config.ModuleDir == "" && p.Features.On("proxy-warm") {
 		warmProxy(ctx, out, p)
 	}
-	return checkSumdb(ctx, out, p, o.Dir, o.Result)
+	return checkSumdb(ctx, out, p, d, o.Dir, o.Result)
+}
+
+// sumdbDecision asks the shared gate decision whether the sum.golang.org check
+// runs for p.
+func sumdbDecision(p *plan.Plan, snapshot bool) gatepkg.SumdbDecision {
+	return gatepkg.DecideSumdb(gatepkg.SumdbInput{
+		Disabled:     !p.Features.On("sumdb"),
+		Snapshot:     snapshot,
+		Untagged:     p.Tag == "",
+		Draft:        p.Config.Draft,
+		Scoped:       p.Config.ModuleDir != "",
+		ProxyWarmOff: !p.Features.On("proxy-warm"),
+		ModulePath:   p.Module.Path,
+	})
 }
 
 // warmProxy primes the resolved module proxy so `go install` works
@@ -47,26 +60,20 @@ func warmProxy(ctx context.Context, out io.Writer, p *plan.Plan) {
 }
 
 // checkSumdb cross-checks the release's source archive against
-// sum.golang.org and the module proxy (SD-1 through SD-5), unless skipped for
-// a private module, a disabled proxy warm (SD-7) or `disable sumdb`.
+// sum.golang.org and the module proxy (SD-1 through SD-5), unless gatepkg.DecideSumdb
+// says it does not run.
 //
 // A gate: a mismatch fails the release before any asset is attached. Not
 // being able to check is only a warning, unless `require sumdb` says a
 // release nobody could check must not go out.
-func checkSumdb(ctx context.Context, out io.Writer, p *plan.Plan, dir string, result *release.Result) error {
-	if !p.Features.On("sumdb") {
-		fmt.Fprintln(out, "  · skipped sum.golang.org check: disabled by config")
-		return nil
-	}
-	if !p.Features.On("proxy-warm") {
-		fmt.Fprintln(out, "  · skipped sum.golang.org check: proxy warm is disabled")
+func checkSumdb(
+	ctx context.Context, out io.Writer, p *plan.Plan, d gatepkg.SumdbDecision, dir string, result *release.Result,
+) error {
+	if !d.Run {
+		fmt.Fprintf(out, "  · skipped sum.golang.org check: %s\n", d.Reason)
 		return nil
 	}
 	required := slices.Contains(p.Required, "sumdb")
-	if skip, reason := sumdb.PrivateModule(p.Module.Path); skip {
-		fmt.Fprintf(out, "  · skipped sum.golang.org check: private module (%s)\n", reason)
-		return nil
-	}
 
 	archivePath := filepath.Join(dir, result.Source.Name)
 
