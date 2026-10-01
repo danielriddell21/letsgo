@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -189,7 +190,7 @@ func agreedPlan(file *plandiff.File) func(*plan.Plan, *release.Result) error {
 // target must be where the plan found it or where it would leave it, or the
 // plan is stale and nothing is written. What it returns is the set of writes the
 // apply may make.
-func freshAgainst(ctx context.Context, file *plandiff.File, t publication.Options) (*plannedWrites, error) {
+func freshAgainst(ctx context.Context, file *plandiff.File, t publication.Options) (*apply.Writes, error) {
 	current, err := publication.Observe(ctx, t)
 	if err != nil {
 		return nil, err
@@ -200,7 +201,7 @@ func freshAgainst(ctx context.Context, file *plandiff.File, t publication.Option
 	for _, name := range alreadyDone(file.Actions, current) {
 		fmt.Printf("  = %s is already as planned; skipped\n", name)
 	}
-	return newPlannedWrites(file.Actions), nil
+	return apply.NewWrites(file.Actions), nil
 }
 
 // guardApply holds the forge to the plan and returns the clients an apply
@@ -214,8 +215,7 @@ func guardApply(ctx context.Context, file *plandiff.File, t publication.Options)
 	if err != nil {
 		return nil, nil, err
 	}
-	return guardedForge{Forge: t.Forge, tag: publication.Tag(t.Plan), writes: writes},
-		guardedTap{FileAPI: t.Tap, writes: writes}, nil
+	return writes.Forge(t.Forge, publication.Tag(t.Plan)), writes.Tap(t.Tap), nil
 }
 
 // staleness is the error for a plan whose targets have changed since it was

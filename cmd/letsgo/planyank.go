@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/diff"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
@@ -129,7 +130,7 @@ func applyYank(ctx context.Context, file *plandiff.File, tokens diffTokens) erro
 
 	fmt.Println()
 	options.Logf = func(format string, args ...any) { fmt.Printf("  "+format+"\n", args...) }
-	result, err := yank.Run(ctx, guardYank(options, newPlannedWrites(file.Actions)))
+	result, err := yank.Run(ctx, apply.NewWrites(file.Actions).Yank(options))
 	if err != nil {
 		return err
 	}
@@ -167,38 +168,6 @@ func yankStaleness(saved, current []plandiff.Action, remake string) error {
 			a.Kind, a.Target, c.Planned, a.Planned, remake)
 	}
 	return nil
-}
-
-// guardYank holds a retraction to its plan: a write the plan did not list is
-// refused, not performed.
-func guardYank(o yank.Options, writes *plannedWrites) yank.Options {
-	o.Client = guardedRelease{Forge: o.Client, tag: o.Tag, writes: writes}
-	if o.TapAPI != nil {
-		o.TapAPI = guardedTap{FileAPI: o.TapAPI, writes: writes}
-	}
-	target := o.Prefix + "go.mod"
-	o.WriteGoMod = func(path string, data []byte) error {
-		if err := writes.allows(plandiff.KindGoMod, target); err != nil {
-			return err
-		}
-		return os.WriteFile(path, data, 0o600)
-	}
-	return o
-}
-
-// guardedRelease is a yank.Forge that refuses to edit a release the plan did
-// not list.
-type guardedRelease struct {
-	yank.Forge
-	tag    string
-	writes *plannedWrites
-}
-
-func (g guardedRelease) UpdateRelease(ctx context.Context, repo github.Repo, id int64, in github.ReleaseInput) (*github.Release, error) {
-	if err := g.writes.allows(plandiff.KindRelease, g.tag); err != nil {
-		return nil, err
-	}
-	return g.Forge.UpdateRelease(ctx, repo, id, in)
 }
 
 // observeYank says what retracting would change, by running the retraction
