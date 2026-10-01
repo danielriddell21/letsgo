@@ -1,7 +1,6 @@
 package promote_test
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -515,30 +514,16 @@ func TestRunAppendsTheExtraNotes(t *testing.T) {
 	dir := demoRepo(t, "v1.3.0-rc.1")
 	forge := seededForge(t, dir, "v1.3.0-rc.1")
 
-	var gotSum []byte
-	var gotPrevious string
-	result, err := runPromoteWith(t, forge.client(), "v1.3.0-rc.1", dir, t.TempDir(), func(o *promote.Options) {
-		o.ExtraNotes = func(_ context.Context, _ *plan.Plan, previous string, current *manifest.Manifest, sum []byte) (string, error) {
-			gotPrevious, gotSum = previous, sum
-			if current.PromotedFrom == nil {
-				t.Error("the manifest handed over was not stamped with promoted_from")
-			}
-			return "\nEXTRA\n", nil
-		}
-	})
+	result, err := runPromoteWith(t, forge.client(), "v1.3.0-rc.1", dir, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !strings.HasSuffix(forge.lastCreate.Body, "\nEXTRA\n") {
-		t.Errorf("body = %q, want the extra notes last", forge.lastCreate.Body)
-	}
 	published := sha256.Sum256(mustRead(t, filepath.Join(result.Build.Dir, manifest.FileName)))
-	if !bytes.Equal(gotSum, published[:]) {
-		t.Errorf("the sum handed over is not the published manifest's: %x vs %x", gotSum, published)
-	}
-	if gotPrevious != "" {
-		t.Errorf("previous = %q, want none for a first stable release", gotPrevious)
+	for _, want := range []string{"Manifest fingerprint", "sha256:" + hex.EncodeToString(published[:])} {
+		if !strings.Contains(forge.lastCreate.Body, want) {
+			t.Errorf("body = %q, want %q", forge.lastCreate.Body, want)
+		}
 	}
 }
 
@@ -548,18 +533,11 @@ func TestRunWritesNoNotesWhenTheChangelogIsDisabled(t *testing.T) {
 	dir := demoRepoWith(t, "v1.3.0-rc.1", "disable changelog\n")
 	forge := seededForge(t, dir, "v1.3.0-rc.1")
 
-	called := false
-	_, err := runPromoteWith(t, forge.client(), "v1.3.0-rc.1", dir, t.TempDir(), func(o *promote.Options) {
-		o.ExtraNotes = func(context.Context, *plan.Plan, string, *manifest.Manifest, []byte) (string, error) {
-			called = true
-			return "x", nil
-		}
-	})
-	if err != nil {
+	if _, err := runPromoteWith(t, forge.client(), "v1.3.0-rc.1", dir, t.TempDir(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if forge.lastCreate.Body != "" || called {
-		t.Errorf("body = %q, extra notes called = %v, want neither", forge.lastCreate.Body, called)
+	if forge.lastCreate.Body != "" {
+		t.Errorf("body = %q, want none", forge.lastCreate.Body)
 	}
 }
 
@@ -687,17 +665,13 @@ func TestRunRefusalConditions(t *testing.T) {
 }
 
 func TestRunNamesTheNotesItCouldNotBuild(t *testing.T) {
-	dir := demoRepo(t, "v1.3.0-rc.1")
+	// A first stable release has no previous one for diff-notes to compare.
+	dir := demoRepoWith(t, "v1.3.0-rc.1", "require diff-notes\n")
 	forge := seededForge(t, dir, "v1.3.0-rc.1")
 
-	boom := errors.New("boom")
-	_, err := runPromoteWith(t, forge.client(), "v1.3.0-rc.1", dir, t.TempDir(), func(o *promote.Options) {
-		o.ExtraNotes = func(context.Context, *plan.Plan, string, *manifest.Manifest, []byte) (string, error) {
-			return "", boom
-		}
-	})
-	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "promote: building the notes") {
-		t.Errorf("err = %v, want it to wrap %v and name the notes", err, boom)
+	_, err := runPromoteWith(t, forge.client(), "v1.3.0-rc.1", dir, t.TempDir(), nil)
+	if err == nil || !strings.Contains(err.Error(), "promote: generating the extra notes") {
+		t.Errorf("err = %v, want it to name the extra notes", err)
 	}
 }
 

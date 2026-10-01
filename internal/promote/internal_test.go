@@ -181,7 +181,7 @@ func TestBuildNotesNamesWhatItCouldNotCollect(t *testing.T) {
 	}
 }
 
-func TestBuildNotesNamesTheExtraNotesItCouldNotDigest(t *testing.T) {
+func TestBuildNotesNamesTheManifestItCouldNotDigest(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -197,12 +197,7 @@ func TestBuildNotesNamesTheExtraNotesItCouldNotDigest(t *testing.T) {
 		}
 	}
 
-	o := Options{
-		Dir: dir, Shallow: true,
-		ExtraNotes: func(context.Context, *plan.Plan, string, *manifest.Manifest, []byte) (string, error) {
-			return "", nil
-		},
-	}
+	o := Options{Dir: dir, Shallow: true}
 	_, err := buildNotes(context.Background(), o, "v1.0.0", &plan.Plan{}, &release.Result{Dir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "promote: digesting the manifest") {
 		t.Errorf("buildNotes error = %v, want it to name the manifest digest", err)
