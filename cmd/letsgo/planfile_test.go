@@ -10,43 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
-
-func TestSavePlanWritesAReadableFile(t *testing.T) {
-	p := resolvedPlan("v1.3.0", "abc")
-	p.Repo.Owner, p.Repo.Name = "you", "demo"
-	path := filepath.Join(t.TempDir(), "letsgo.plan")
-
-	digest, err := savePlan(p, &forgeDiff{
-		Actions:        []plandiff.Action{{Op: plandiff.Add, Kind: plandiff.KindAsset, Target: "a.zip", Planned: "sha256:aa"}},
-		Manifest:       []byte(`{"version":"1.3.0"}`),
-		ManifestSHA256: "sha256:bb",
-	}, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	file, err := plandiff.Read(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := file.Digest(); got != digest {
-		t.Errorf("digest %s, printed %s", got, digest)
-	}
-	if file.Repo != "you/demo" || file.Tag != "v1.3.0" || file.Commit != "abc" || file.ManifestSHA256 != "sha256:bb" || len(file.Actions) != 1 {
-		t.Errorf("saved %+v", file)
-	}
-}
-
-func TestSavePlanReportsAnUnwritablePath(t *testing.T) {
-	_, err := savePlan(resolvedPlan("v1", "abc"), &forgeDiff{Manifest: []byte(`{}`)}, filepath.Join(t.TempDir(), "no", "dir", "p"))
-	if err == nil {
-		t.Error("savePlan succeeded into a missing directory")
-	}
-}
 
 func TestExitCodeTellsDriftFromFailure(t *testing.T) {
 	if got := exitCode(errPlanChanges); got != 2 {
@@ -157,18 +125,18 @@ func TestRunPlanRejectsExitCodeWithoutDiff(t *testing.T) {
 func TestFinishDiffSavesThePlanAndAnswersExitCode(t *testing.T) {
 	p := resolvedPlan("v1.3.0", "abc")
 	p.Repo.Owner, p.Repo.Name = "you", "demo"
-	changes := &forgeDiff{
+	changes := &apply.Diff{
 		Actions:  []plandiff.Action{{Op: plandiff.Add, Kind: plandiff.KindAsset, Target: "a.zip", Planned: "sha256:aa"}},
 		Manifest: []byte(`{}`), ManifestSHA256: "sha256:bb",
 	}
-	kept := &forgeDiff{
+	kept := &apply.Diff{
 		Actions:  []plandiff.Action{{Op: plandiff.Keep, Kind: plandiff.KindAsset, Target: "a.zip", Observed: "sha256:aa", Planned: "sha256:aa"}},
 		Manifest: []byte(`{}`), ManifestSHA256: "sha256:bb",
 	}
 	path := filepath.Join(t.TempDir(), "letsgo.plan")
 
 	for name, tc := range map[string]struct {
-		d       *forgeDiff
+		d       *apply.Diff
 		run     diffRun
 		wantErr error
 		saved   bool
@@ -194,7 +162,7 @@ func TestFinishDiffSavesThePlanAndAnswersExitCode(t *testing.T) {
 }
 
 func TestFinishDiffReportsAnUnwritablePlanPath(t *testing.T) {
-	err := finishDiff(resolvedPlan("v1", "abc"), &forgeDiff{Manifest: []byte(`{}`)},
+	err := finishDiff(resolvedPlan("v1", "abc"), &apply.Diff{Manifest: []byte(`{}`)},
 		diffRun{Out: filepath.Join(t.TempDir(), "no", "dir", "p")})
 	if err == nil {
 		t.Error("finishDiff succeeded writing into a missing directory")

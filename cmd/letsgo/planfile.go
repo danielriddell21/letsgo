@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
@@ -17,35 +17,6 @@ import (
 // `plan --exit-code`: the plan was read fine, and the exit status is the
 // answer.
 var errPlanChanges = errors.New("the plan has changes")
-
-// savePlan writes what a diff found as a plan file, and returns its digest.
-func savePlan(p *plan.Plan, d *forgeDiff, path string) (string, error) {
-	file := &plandiff.File{
-		Schema:         plandiff.FileSchema,
-		LetsgoVersion:  version,
-		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
-		Kind:           plandiff.FileKindRelease,
-		Repo:           p.Repo.Owner + "/" + p.Repo.Name,
-		Tag:            p.Tag,
-		Commit:         p.Git.Commit,
-		ManifestSHA256: d.ManifestSHA256,
-		Manifest:       json.RawMessage(d.Manifest),
-		Actions:        d.Actions,
-	}
-	return writePlan(file, path)
-}
-
-// writePlan writes a plan file and returns its digest.
-func writePlan(file *plandiff.File, path string) (string, error) {
-	if err := file.Write(path); err != nil {
-		return "", fmt.Errorf("letsgo: %w", err)
-	}
-	digest, err := file.Digest()
-	if err != nil {
-		return "", fmt.Errorf("letsgo: %w", err)
-	}
-	return digest, nil
-}
 
 // diffRun is what `letsgo plan --diff` and `-out` are asked to do.
 type diffRun struct {
@@ -105,10 +76,10 @@ func diffAndSave(ctx context.Context, p *plan.Plan, r diffRun) error {
 
 // finishDiff is everything after the forge has been read: show the actions,
 // save the plan, and answer --exit-code.
-func finishDiff(p *plan.Plan, d *forgeDiff, r diffRun) error {
+func finishDiff(p *plan.Plan, d *apply.Diff, r diffRun) error {
 	r.Then = "letsgo release"
 	r.Title = "letsgo plan"
-	return finishPlan(d.Actions, func(path string) (string, error) { return savePlan(p, d, path) }, r)
+	return finishPlan(d.Actions, func(path string) (string, error) { return apply.Save(p, d, path, version) }, r)
 }
 
 // finishPlan shows a plan's actions, saves it through save when asked, and

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/yank"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -155,7 +156,7 @@ func TestAYankPlanIsRefusedForAnotherRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	file.Repo = "someone/else"
-	if _, err := writePlan(file, path); err != nil {
+	if _, err := apply.Write(file, path); err != nil {
 		t.Fatal(err)
 	}
 

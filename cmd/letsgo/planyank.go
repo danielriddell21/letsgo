@@ -96,7 +96,7 @@ func planYank(ctx context.Context, tag string, y yankArgs, tokens diffTokens, r 
 	}
 	r.Then = "letsgo yank " + tag
 	r.Title = "letsgo plan: yank " + tag
-	return finishPlan(actions, func(path string) (string, error) { return writePlan(file, path) }, r)
+	return finishPlan(actions, func(path string) (string, error) { return apply.Write(file, path) }, r)
 }
 
 // applyYank retracts a release as a saved plan agreed: the forge and go.mod
