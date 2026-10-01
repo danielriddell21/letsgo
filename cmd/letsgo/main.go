@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -140,8 +141,29 @@ func exitCode(err error) int {
 	return 1
 }
 
-func runVersion([]string) error {
-	fmt.Println("letsgo", version)
+// capabilities are what this build offers an editor or CI, so a client asks
+// the binary instead of keeping its own table of which release added what.
+var capabilities = []string{"plan-json", "tag-json", "tag-ref", "plugin-install", "lsp", "update-pin", "did-you-mean"}
+
+func runVersion(args []string) error {
+	fs := flag.NewFlagSet("version", flag.ExitOnError)
+	jsonOutput := fs.Bool("json", false, "print the version and capabilities as JSON")
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if !*jsonOutput {
+		fmt.Println("letsgo", version)
+		return nil
+	}
+	data, err := json.MarshalIndent(struct {
+		Schema       int      `json:"schema"`
+		Version      string   `json:"version"`
+		Capabilities []string `json:"capabilities"`
+	}{1, version, capabilities}, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
 	return nil
 }
 
@@ -994,7 +1016,7 @@ func runTag(args []string) error {
 	minor := fs.Bool("minor", false, "force a minor bump")
 	patch := fs.Bool("patch", false, "force a patch bump")
 	pre := fs.Bool("pre", false, "propose a prerelease (-rc.N) instead of a stable version")
-	jsonOutput := fs.Bool("json", false, "print the proposal as JSON, without creating a tag")
+	jsonOutput := fs.Bool("json", false, "print the proposal as JSON; with --yes, create the tag and report its ref")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -1013,7 +1035,7 @@ func runTag(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !*jsonOutput && !git.Clean {
+	if (!*jsonOutput || *yes) && !git.Clean {
 		return fmt.Errorf("uncommitted changes; a tag names a commit, so commit first")
 	}
 	scope, err := discover.NewScope(git.TopLevel, module.Dir)
@@ -1036,16 +1058,26 @@ func runTag(args []string) error {
 	}
 
 	if *jsonOutput {
-		return printTagJSON(proposal)
+		return tagJSON(ctx, gitBin, module.Dir, scope.Prefix+proposal.Next, proposal, *yes)
 	}
 
 	return createTag(ctx, gitBin, module.Dir, scope.Prefix, proposal, previous, *warranted, *yes)
 }
 
-// printTagJSON is `letsgo tag --json`'s whole job: the proposal, wire-formed,
-// and nothing else — no confirmation, no write.
-func printTagJSON(proposal bump.Proposal) error {
-	data, err := proposal.JSON()
+// tagJSON is `letsgo tag --json`: the proposal, wire-formed, with the full
+// ref it names. A dry run unless create is set, in which case the tag is made
+// first and the output says so, so a caller reads the ref instead of scraping
+// prose for it.
+func tagJSON(ctx context.Context, gitBin, dir, ref string, proposal bump.Proposal, create bool) error {
+	if create {
+		if discover.TagExists(ctx, gitBin, dir, ref) {
+			return fmt.Errorf("%s already exists", ref)
+		}
+		if err := discover.CreateTag(ctx, gitBin, dir, ref, ref); err != nil {
+			return err
+		}
+	}
+	data, err := proposal.JSON(ref, create)
 	if err != nil {
 		return err
 	}
