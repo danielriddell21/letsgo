@@ -219,3 +219,12 @@ func TestBuildAndVersionRequireTheGoCommand(t *testing.T) {
 		t.Error("Build without a go command succeeded")
 	}
 }
+
+func TestToolchainDirIsTheCommandsOwnDirectory(t *testing.T) {
+	if got := toolchainDir("/opt/go/bin/go"); got != filepath.FromSlash("/opt/go/bin") {
+		t.Errorf("toolchainDir = %q", got)
+	}
+	if got := toolchainDir(""); got != "" {
+		t.Errorf("toolchainDir(\"\") = %q, want none", got)
+	}
+}
