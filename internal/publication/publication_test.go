@@ -452,3 +452,14 @@ func TestSumsFromHashesEveryOtherPublishedFile(t *testing.T) {
 		}
 	}
 }
+
+// A listed file that is not on disk is left without a digest, not invented.
+func TestSumsFromSkipsAnUnreadableFile(t *testing.T) {
+	t.Parallel()
+
+	sums := sumsFrom(t.TempDir(), &release.Result{Manifest: &manifest.Manifest{}, Files: []string{"gone"}})
+
+	if _, ok := sums["gone"]; ok {
+		t.Errorf("digest recorded for a file that is not there: %v", sums)
+	}
+}
