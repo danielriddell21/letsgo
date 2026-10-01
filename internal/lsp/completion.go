@@ -150,7 +150,7 @@ func featureCompletions(want func(feature.Feature) bool) []CompletionItem {
 		if !want(f) {
 			continue
 		}
-		items = append(items, CompletionItem{Label: f.Name, Kind: CompletionValue, Documentation: f.Summary})
+		items = append(items, CompletionItem{Label: string(f.Name), Kind: CompletionValue, Documentation: f.Summary})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Label < items[j].Label })
 	return items

@@ -1023,7 +1023,7 @@ func ReleaseToken(ctx context.Context, global *config.Global, override, tokenOve
 // "nothing in this binary can execute code with a known advisory against it".
 // That is checkable, actionable, and rare enough to be worth stopping for.
 func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
-	if !p.Features.On("vulncheck") {
+	if !p.Features.On(feature.Vulncheck) {
 		p.add("vulnerabilities", Skip, disabledByConfig)
 		return
 	}
@@ -1033,7 +1033,7 @@ func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 	switch {
 	case errors.Is(err, gate.ErrToolMissing):
 		// A gate that did not run is not a gate that passed.
-		p.skip("vulnerabilities", "vulncheck", "%v", err)
+		p.skip("vulnerabilities", feature.Vulncheck, "%v", err)
 		return
 	case err != nil:
 		p.add("vulnerabilities", Warn, "could not be checked: %v", err)
@@ -1060,10 +1060,9 @@ func (p *Plan) checkVulnerabilities(ctx context.Context, opts Options) {
 }
 
 // apiCompatibility is the check name every step of checkAPICompatibility
-// reports under. apiGate is the feature that check is gated and required by.
+// reports under. feature.APIGate is the feature that check is gated and required by.
 const (
 	apiCompatibility = "api compatibility"
-	apiGate          = "api-gate"
 )
 
 // checkAPICompatibility refuses a release whose version promises more
@@ -1074,7 +1073,7 @@ const (
 // import path, and nothing enforces it, so the mistake is made quietly and
 // found by other people.
 func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
-	if !p.Features.On(apiGate) {
+	if !p.Features.On(feature.APIGate) {
 		p.add(apiCompatibility, Skip, disabledByConfig)
 		return
 	}
@@ -1085,18 +1084,18 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 		return
 	}
 	if p.Tag == "" {
-		p.skip(apiCompatibility, apiGate, "not a tagged release")
+		p.skip(apiCompatibility, feature.APIGate, "not a tagged release")
 		return
 	}
 
 	tags, err := discover.Tags(ctx, p.GitBin, p.RootDir, p.Scope.Prefix)
 	if err != nil {
-		p.skip(apiCompatibility, apiGate, "no earlier release to compare against")
+		p.skip(apiCompatibility, feature.APIGate, "no earlier release to compare against")
 		return
 	}
 	previous, ok := p.Scope.PreviousTag(tags, p.Tag)
 	if !ok {
-		p.skip(apiCompatibility, apiGate, "no earlier release to compare against")
+		p.skip(apiCompatibility, feature.APIGate, "no earlier release to compare against")
 		return
 	}
 
@@ -1110,7 +1109,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 	changes, err := gate.APIDiff(ctx, p.Global, p.GoBin, old, p.Module.Dir)
 	switch {
 	case errors.Is(err, gate.ErrToolMissing), errors.Is(err, gate.ErrNothingExported):
-		p.skip(apiCompatibility, apiGate, "%v", err)
+		p.skip(apiCompatibility, feature.APIGate, "%v", err)
 		return
 	case err != nil:
 		p.add(apiCompatibility, Warn, "could not be checked: %v", err)
@@ -1595,9 +1594,9 @@ func (p *Plan) resolveFeatures(opts Options) {
 }
 
 // required reports whether a feature's Skip must be a Fail instead.
-func (p *Plan) required(name string) bool {
+func (p *Plan) required(name feature.Name) bool {
 	for _, n := range p.Required {
-		if n == name {
+		if n == string(name) {
 			return true
 		}
 	}
@@ -1607,9 +1606,9 @@ func (p *Plan) required(name string) bool {
 // skip records a check as Skip, unless the feature behind it is required —
 // in which case a Skip is exactly the outcome require promised would not
 // happen.
-func (p *Plan) skip(check, feature, format string, args ...any) {
-	if p.required(feature) {
-		p.addAt(p.posOf("require "+feature), check, Fail, format, args...)
+func (p *Plan) skip(check string, feat feature.Name, format string, args ...any) {
+	if p.required(feat) {
+		p.addAt(p.posOf("require "+string(feat)), check, Fail, format, args...)
 		return
 	}
 	p.add(check, Skip, format, args...)
@@ -2194,12 +2193,12 @@ func filesUnder(tracked []string, dir string) []string {
 // sections follow the changelog, so `disable changelog` leaves them unwritten;
 // a release that required one asked for exactly that not to happen.
 func (p *Plan) checkNotesRequired() {
-	if p.Features.On("changelog") {
+	if p.Features.On(feature.Changelog) {
 		return
 	}
-	for _, name := range []string{"diff-notes", "randomart"} {
+	for _, name := range []feature.Name{feature.DiffNotes, feature.Randomart} {
 		if p.required(name) && p.Features.On(name) {
-			p.addAt(p.posOf("require "+name), name, Fail, "required, but changelog is disabled, so no release notes are written")
+			p.addAt(p.posOf("require "+string(name)), string(name), Fail, "required, but changelog is disabled, so no release notes are written")
 		}
 	}
 }
@@ -2222,7 +2221,7 @@ const (
 // that letsgo say so at plan time instead of after a release that shipped
 // without it.
 func (p *Plan) checkInstallScriptRequired() {
-	if !p.required("install-script") {
+	if !p.required(feature.InstallScript) {
 		return
 	}
 
@@ -2353,11 +2352,10 @@ func summarise(targets []gobuild.Target) string {
 	return strings.Join(names, ", ")
 }
 
-// sumdbCheck is the check name checkSumdb reports under, and sumdbGate the
+// sumdbCheck is the check name checkSumdb reports under, and feature.Sumdb the
 // feature behind it.
 const (
 	sumdbCheck = "sumdb"
-	sumdbGate  = "sumdb"
 )
 
 // checkSumdb records why the sum.golang.org cross-check will not run, so a
@@ -2366,12 +2364,12 @@ const (
 // primed and before any asset is attached.
 func (p *Plan) checkSumdb() {
 	d := gate.DecideSumdb(gate.SumdbInput{
-		Disabled:     !p.Features.On(sumdbGate),
+		Disabled:     !p.Features.On(feature.Sumdb),
 		Snapshot:     p.Snapshot,
 		Untagged:     p.Tag == "",
 		Draft:        p.Config.Draft,
 		Scoped:       p.Config.ModuleDir != "",
-		ProxyWarmOff: !p.Features.On("proxy-warm"),
+		ProxyWarmOff: !p.Features.On(feature.ProxyWarm),
 		ModulePath:   p.Module.Path,
 	})
 	switch {
@@ -2379,6 +2377,6 @@ func (p *Plan) checkSumdb() {
 	case d.ByConfig:
 		p.add(sumdbCheck, Skip, disabledByConfig)
 	default:
-		p.skip(sumdbCheck, sumdbGate, "%s", d.Reason)
+		p.skip(sumdbCheck, feature.Sumdb, "%s", d.Reason)
 	}
 }

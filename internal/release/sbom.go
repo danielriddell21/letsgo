@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/sbom"
@@ -17,7 +18,7 @@ import (
 // place — there is exactly one record of what this release contains, and both
 // files are views of it.
 func writeSBOM(p *plan.Plan, m *manifest.Manifest, toolVersion, dir string) (string, string, error) {
-	if !p.Features.On("sbom") {
+	if !p.Features.On(feature.SBOM) {
 		return "", "", nil
 	}
 

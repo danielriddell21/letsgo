@@ -60,15 +60,15 @@ func resolveFeatureEntries(cfg *config.Config) []featureEntry {
 		// on only when its own directive actually appears.
 		on := set.On(f.Name)
 		if !f.Default {
-			on = enabledByDirective(cfg, f.Name)
+			on = enabledByDirective(cfg, string(f.Name))
 		}
 
 		from := "default"
-		if on != f.Default || required[f.Name] {
+		if on != f.Default || required[string(f.Name)] {
 			from = plan.ConfigFile
 		}
 		entries = append(entries, featureEntry{
-			Name: f.Name, Kind: f.Kind.String(), On: on, Required: required[f.Name],
+			Name: string(f.Name), Kind: f.Kind.String(), On: on, Required: required[string(f.Name)],
 			From: from, Hint: changeHint(f),
 		})
 	}

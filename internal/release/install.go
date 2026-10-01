@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/build"
+	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -19,7 +20,7 @@ import (
 // no forge has no release page; in both cases the honest thing is to publish
 // no installer rather than one whose URLs resolve to nothing.
 func writeInstaller(p *plan.Plan, artifacts []build.Artifact, dir string) (string, string, error) {
-	if !p.Features.On("install-script") {
+	if !p.Features.On(feature.InstallScript) {
 		return "", "", nil
 	}
 	if p.Tag == "" || !p.HasRepo || p.Repo.Host != "github.com" {

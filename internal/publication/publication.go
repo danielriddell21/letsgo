@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
+	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -159,7 +160,7 @@ func releaseOptions(o Options, logf func(format string, args ...any)) (publish.O
 		Dir:    o.Dir,
 		Files:  o.Result.Files,
 		Sums:   sums,
-		Notes:  notesMode(o.Append, p.Features.On("changelog")),
+		Notes:  notesMode(o.Append, p.Features.On(feature.Changelog)),
 		Release: github.ReleaseInput{
 			TagName:         Tag(p),
 			Name:            releaseTitle(p),

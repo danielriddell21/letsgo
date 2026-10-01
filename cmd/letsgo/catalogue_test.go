@@ -62,11 +62,11 @@ func TestEveryCatalogueEntryIsConsultedByBehaviour(t *testing.T) {
 	probes := catalogueProbes()
 
 	for _, f := range feature.All {
-		t.Run(f.Name, func(t *testing.T) {
+		t.Run(string(f.Name), func(t *testing.T) {
 			if f.Disable || f.Require {
-				p, ok := probes[f.Name]
+				p, ok := probes[string(f.Name)]
 				if !ok {
-					t.Fatalf("%s can be disabled or required, but no probe shows it being consulted", f.Name)
+					t.Fatalf("%s can be disabled or required, but no probe shows it being consulted", string(f.Name))
 				}
 				if f.Disable {
 					requireDisableChangesBehaviour(t, f, p)
@@ -96,10 +96,10 @@ func TestEveryProbeNamesACatalogueEntry(t *testing.T) {
 func requireDisableChangesBehaviour(t *testing.T, f feature.Feature, p probe) {
 	t.Helper()
 	if !p.ran(t, nil) {
-		t.Errorf("%s: its behaviour was not observed with nothing disabled", f.Name)
+		t.Errorf("%s: its behaviour was not observed with nothing disabled", string(f.Name))
 	}
-	if p.ran(t, []string{f.Name}) {
-		t.Errorf("%s: its behaviour still happened when disabled", f.Name)
+	if p.ran(t, []string{string(f.Name)}) {
+		t.Errorf("%s: its behaviour still happened when disabled", string(f.Name))
 	}
 }
 
@@ -107,15 +107,15 @@ func requireRequireChangesBehaviour(t *testing.T, f feature.Feature, p probe) {
 	t.Helper()
 	if p.skipFails == nil {
 		if p.noSkip == "" {
-			t.Fatalf("%s can be required, but its probe neither turns a skip into a failure nor says why it has none", f.Name)
+			t.Fatalf("%s can be required, but its probe neither turns a skip into a failure nor says why it has none", string(f.Name))
 		}
 		return
 	}
 	if p.skipFails(t, false) {
-		t.Errorf("%s: a skip was already a failure without `require`", f.Name)
+		t.Errorf("%s: a skip was already a failure without `require`", string(f.Name))
 	}
 	if !p.skipFails(t, true) {
-		t.Errorf("%s: `require` did not turn its skip into a failure", f.Name)
+		t.Errorf("%s: `require` did not turn its skip into a failure", string(f.Name))
 	}
 }
 
@@ -128,17 +128,17 @@ func requireConfigAgrees(t *testing.T, f feature.Feature) {
 		directive string
 		allowed   bool
 	}{{"disable", f.Disable}, {"require", f.Require}} {
-		_, err := decodeConfig(c.directive + " " + f.Name + "\n")
+		_, err := decodeConfig(c.directive + " " + string(f.Name) + "\n")
 		if c.allowed && err != nil {
-			t.Errorf("%s %s: %v", c.directive, f.Name, err)
+			t.Errorf("%s %s: %v", c.directive, string(f.Name), err)
 		}
 		if !c.allowed && err == nil {
-			t.Errorf("%s %s was accepted, but the catalogue does not allow it", c.directive, f.Name)
+			t.Errorf("%s %s was accepted, but the catalogue does not allow it", c.directive, string(f.Name))
 		}
 	}
 	if f.Disable && f.Require {
-		if _, err := decodeConfig("disable " + f.Name + "\nrequire " + f.Name + "\n"); err == nil {
-			t.Errorf("%s: disabling and requiring it together was accepted", f.Name)
+		if _, err := decodeConfig("disable " + string(f.Name) + "\nrequire " + string(f.Name) + "\n"); err == nil {
+			t.Errorf("%s: disabling and requiring it together was accepted", string(f.Name))
 		}
 	}
 }
@@ -174,17 +174,17 @@ func linuxTarget() string {
 func requireEnableActs(t *testing.T, f feature.Feature) {
 	t.Helper()
 	if !slices.Contains(config.Directives(), f.Enable) {
-		t.Errorf("%s is enabled by %q, which is not a known directive", f.Name, f.Enable)
+		t.Errorf("%s is enabled by %q, which is not a known directive", string(f.Name), f.Enable)
 	}
-	e, ok := enableDirectives[f.Name]
+	e, ok := enableDirectives[string(f.Name)]
 	if !ok {
-		t.Fatalf("%s is enabled by %q, but no probe shows the directive switching it on", f.Name, f.Enable)
+		t.Fatalf("%s is enabled by %q, but no probe shows the directive switching it on", string(f.Name), f.Enable)
 	}
 	if e.on(resolvePlan(t, "", nil, plan.Options{})) {
-		t.Errorf("%s is on with no directive", f.Name)
+		t.Errorf("%s is on with no directive", string(f.Name))
 	}
 	if !e.on(resolvePlan(t, e.config, nil, plan.Options{})) {
-		t.Errorf("%q did not turn %s on", strings.TrimSpace(e.config), f.Name)
+		t.Errorf("%q did not turn %s on", strings.TrimSpace(e.config), string(f.Name))
 	}
 }
 

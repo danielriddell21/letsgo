@@ -14,6 +14,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/diff"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -47,7 +48,7 @@ func (s Source) logf(format string, args ...any) {
 // fetched from the forge rather than demanded of the caller.
 func Release(ctx context.Context, s Source) (string, error) {
 	p := s.Plan
-	if !p.Features.On("changelog") {
+	if !p.Features.On(feature.Changelog) {
 		return "", nil
 	}
 	if p.Git.Shallow {
@@ -79,14 +80,14 @@ func Release(ctx context.Context, s Source) (string, error) {
 func Extra(ctx context.Context, s Source, previous string) (string, error) {
 	p := s.Plan
 	var notes string
-	if p.Features.On("diff-notes") {
+	if p.Features.On(feature.DiffNotes) {
 		shipped, err := s.whatShipped(ctx, previous)
 		if err != nil {
 			return "", err
 		}
 		notes += shipped
 	}
-	if p.Features.On("randomart") {
+	if p.Features.On(feature.Randomart) {
 		switch {
 		case len(s.ManifestSum) > 0:
 			notes += fingerprint(p.Tag, s.ManifestSum)

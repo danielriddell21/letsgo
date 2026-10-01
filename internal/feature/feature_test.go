@@ -35,7 +35,7 @@ func TestCatalogueMatchesSpec(t *testing.T) {
 		t.Fatalf("All has %d features, catalogue has %d", len(All), len(catalogue))
 	}
 	for _, f := range All {
-		want, ok := catalogue[f.Name]
+		want, ok := catalogue[string(f.Name)]
 		if !ok {
 			t.Errorf("%s: not in the PBS catalogue", f.Name)
 			continue
