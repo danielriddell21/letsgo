@@ -180,12 +180,7 @@ func checkGlobalKnown(file, keyword string, pos Position) error {
 	}
 	sort.Strings(names)
 
-	msg := fmt.Sprintf("unknown directive %q; valid directives are %s",
-		keyword, strings.Join(names, ", "))
-	if near := nearestKeyword(keyword, names); near != "" {
-		msg = fmt.Sprintf("unknown directive %q; did you mean %q?", keyword, near)
-	}
-	return errAt(file, pos, "%s", msg)
+	return unknownName(file, pos, "directive", keyword, names)
 }
 
 func applyGlobalGo(g *Global, file string, line *Line) error {

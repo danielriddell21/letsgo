@@ -350,12 +350,7 @@ func checkKnown(file, keyword string, pos Position) error {
 	}
 	sort.Strings(names)
 
-	msg := fmt.Sprintf("unknown directive %q; valid directives are %s",
-		keyword, strings.Join(names, ", "))
-	if near := nearestKeyword(keyword, names); near != "" {
-		msg = fmt.Sprintf("unknown directive %q; did you mean %q?", keyword, near)
-	}
-	return errAt(file, pos, "%s", msg)
+	return unknownName(file, pos, "directive", keyword, names)
 }
 
 // nearestKeyword finds the name closest to keyword, for a did-you-mean
@@ -828,7 +823,7 @@ func applyDisable(cfg *Config, file string, line *Line) error {
 	for _, name := range line.Args {
 		f, ok := feature.Lookup(name)
 		if !ok {
-			return errAt(file, line.P, "%s", unknownFeature(name))
+			return unknownFeature(file, line.P, name)
 		}
 		if f.Kind == feature.Integrity {
 			return errAt(file, line.P, "%s cannot be disabled: it is what letsgo is", name)
@@ -858,7 +853,7 @@ func applyRequire(cfg *Config, file string, line *Line) error {
 	for _, name := range line.Args {
 		f, ok := feature.Lookup(name)
 		if !ok {
-			return errAt(file, line.P, "%s", unknownFeature(name))
+			return unknownFeature(file, line.P, name)
 		}
 		if !f.Require {
 			return errAt(file, line.P, "%s cannot be required", name)
@@ -876,17 +871,26 @@ func applyRequire(cfg *Config, file string, line *Line) error {
 
 // unknownFeature reports a name that is not in the catalogue, with the same
 // did-you-mean treatment an unknown directive gets.
-func unknownFeature(name string) string {
+func unknownFeature(file string, pos Position, name string) error {
 	names := make([]string, len(feature.All))
 	for i, f := range feature.All {
 		names[i] = f.Name
 	}
 	sort.Strings(names)
+	return unknownName(file, pos, "feature", name, names)
+}
 
-	if near := nearestKeyword(name, names); near != "" {
-		return fmt.Sprintf("unknown feature %q; did you mean %q?", name, near)
+// unknownName reports a word that is not one of names, suggesting the nearest
+// when there is one. The suggestion rides on the error as data, so an editor
+// need not read it back out of the message.
+func unknownName(file string, pos Position, what, word string, names []string) error {
+	if near := nearestKeyword(word, names); near != "" {
+		return &SyntaxError{
+			File: file, Pos: pos, Wrong: word, Suggest: near,
+			Msg: fmt.Sprintf("unknown %s %q; did you mean %q?", what, word, near),
+		}
 	}
-	return fmt.Sprintf("unknown feature %q; valid features are %s", name, strings.Join(names, ", "))
+	return errAt(file, pos, "unknown %s %q; valid %ss are %s", what, word, what, strings.Join(names, ", "))
 }
 
 func containsString(list []string, s string) bool {
