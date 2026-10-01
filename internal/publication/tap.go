@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
-	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
@@ -102,79 +101,10 @@ func variantNames(p *plan.Plan) []string {
 	return names
 }
 
-// variantArchives are the archive base names belonging to a variant.
-func variantArchives(p *plan.Plan) map[string]bool {
-	out := map[string]bool{}
-	for _, g := range p.Groups {
-		if g.Variant != "" {
-			out[g.Name] = true
-		}
-	}
-	return out
-}
-
-// formulas builds one formula per archive, grouping the artifacts by the
-// archive they belong to.
-//
-// Per archive rather than per binary, because a formula names one archive per
-// platform: an archive holding eleven tools is one formula that installs
-// eleven binaries, not eleven formulas fighting over the same file.
-//
-// A variant's archives are left out. `brew` says where the release's formula
-// goes, and a variant is a second product from the same source: a windowed
-// build usually belongs in a cask rather than a formula, and writing one
-// anyway would put a package in the tap that nobody asked for.
+// formulas builds the release's formulas from its manifest, the one builder a
+// yank's rollback uses too. See brew.FormulasFor.
 func formulas(p *plan.Plan, result *release.Result, repo github.Repo, info *github.RepoInfo) []brew.Formula {
-	tag := Tag(p)
-
-	order := make([]string, 0, len(p.Groups))
-	platforms := map[string][]brew.Platform{}
-	binaries := map[string][]string{}
-	variants := variantArchives(p)
-
-	for _, a := range result.Artifacts {
-		name := formulaName(a, p.Version)
-		if variants[name] {
-			continue
-		}
-		if _, seen := platforms[name]; !seen {
-			order = append(order, name)
-			for _, b := range a.Binaries {
-				binaries[name] = append(binaries[name], b.Name)
-			}
-		}
-		platforms[name] = append(platforms[name], brew.Platform{
-			OS: a.OS, Arch: a.Arch,
-			URL:    github.DownloadURL(repo, tag, a.Archive),
-			SHA256: a.ArchiveSHA256,
-		})
-	}
-
-	out := make([]brew.Formula, 0, len(order))
-	for _, name := range order {
-		formula := brew.Formula{
-			Name:      name,
-			Binaries:  binaries[name],
-			Version:   p.Version,
-			Homepage:  "https://" + p.Repo.String(),
-			Caveats:   p.Config.BrewCaveats,
-			Platforms: platforms[name],
-		}
-		if info != nil {
-			formula.Description, formula.License = info.Description, info.License
-			if info.Homepage != "" {
-				formula.Homepage = info.Homepage
-			}
-		}
-		out = append(out, formula)
-	}
-	return out
-}
-
-// formulaName is the archive's base name, which is what the formula is called.
-func formulaName(a build.Artifact, version string) string {
-	name := strings.TrimSuffix(strings.TrimSuffix(a.Archive, ".tar.gz"), ".zip")
-	return strings.TrimSuffix(name, fmt.Sprintf("_%s_%s_%s", version, a.OS, a.Arch))
+	return brew.FormulasFor(result.Manifest, repo, info, p.Project, p.Config.BrewCaveats)
 }
 
 // TapObserver lets the tap's publishing decisions run and reports what they

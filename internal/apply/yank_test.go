@@ -146,7 +146,7 @@ func TestObserveYankPlansTheTapRollback(t *testing.T) {
 		return &manifest.Manifest{Version: version, Tag: "v" + version, Artifacts: []manifest.Artifact{artifact}}
 	}
 	render := func(version string, next bool) []byte {
-		f := yank.FormulasFrom(at(version), repo, "demo", "")[0]
+		f := brew.FormulasFor(at(version), repo, nil, "demo", "")[0]
 		if next {
 			f.Name = brew.NextName(f.Name)
 		}

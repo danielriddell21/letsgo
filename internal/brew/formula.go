@@ -18,6 +18,9 @@ import (
 	"strings"
 	"text/template"
 	"unicode"
+
+	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
 // Platform is one prebuilt archive the formula can install.
@@ -226,3 +229,74 @@ class {{.Class}} < Formula
   end
 end
 `))
+
+// FormulasFor builds a release's formulas from its manifest: one per archive,
+// every platform's build folded into it.
+//
+// The release and a yank's rollback both call this, so a formula is the same
+// bytes whichever of them wrote it. Two builders would drift, and the drift
+// would surface as a rollback quietly dropping the description a release had
+// written.
+//
+// project names a formula whose archive predates the manifest recording a
+// name. info is optional: without it the formula carries no description or
+// licence, and its homepage is the repository's page.
+//
+// A variant's archives are left out. `brew` says where the release's formula
+// goes, and a variant is a second product from the same source: a windowed
+// build usually belongs in a cask rather than a formula, and writing one
+// anyway would put a package in the tap that nobody asked for.
+func FormulasFor(m *manifest.Manifest, repo github.Repo, info *github.RepoInfo, project, caveats string) []Formula {
+	tag := m.Tag
+	if tag == "" {
+		tag = "v" + m.Version
+	}
+
+	var order []string
+	platforms := map[string][]Platform{}
+	binaries := map[string][]string{}
+
+	for _, a := range m.Artifacts {
+		if a.Variant != "" {
+			continue
+		}
+
+		// A formula is named after the archive, not after a binary inside it.
+		name := a.BaseName(m.Version)
+		if name == "" {
+			name = project
+		}
+		if _, seen := platforms[name]; !seen {
+			order = append(order, name)
+			if binaries[name] = a.BinaryNames(); len(binaries[name]) == 0 {
+				binaries[name] = []string{name}
+			}
+		}
+		platforms[name] = append(platforms[name], Platform{
+			OS: a.OS, Arch: a.Arch,
+			URL:    github.DownloadURL(repo, tag, a.Name),
+			SHA256: a.SHA256,
+		})
+	}
+	sort.Strings(order)
+
+	out := make([]Formula, 0, len(order))
+	for _, name := range order {
+		formula := Formula{
+			Name:      name,
+			Binaries:  binaries[name],
+			Version:   m.Version,
+			Homepage:  fmt.Sprintf("https://github.com/%s/%s", repo.Owner, repo.Name),
+			Caveats:   caveats,
+			Platforms: platforms[name],
+		}
+		if info != nil {
+			formula.Description, formula.License = info.Description, info.License
+			if info.Homepage != "" {
+				formula.Homepage = info.Homepage
+			}
+		}
+		out = append(out, formula)
+	}
+	return out
+}

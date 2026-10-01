@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
@@ -76,6 +75,12 @@ type Options struct {
 	// in the manifest — it describes the program rather than the artifacts —
 	// so a rollback that did not carry it would quietly drop it from the tap.
 	Caveats string
+
+	// RepoInfo is the repository's description, licence and homepage, which
+	// the release wrote into the formula. Like Caveats, the manifest does not
+	// hold it, and a rollback that left it out would strip it from the tap.
+	// Nil leaves the formula without them.
+	RepoInfo *github.RepoInfo
 
 	Logf func(format string, args ...any)
 }
@@ -243,7 +248,7 @@ func (o Options) revertTap(ctx context.Context, result *Result, logf func(string
 		return err
 	}
 
-	for _, formula := range FormulasFrom(m, o.Repo, o.Project, o.Caveats) {
+	for _, formula := range brew.FormulasFor(m, o.Repo, o.RepoInfo, o.Project, o.Caveats) {
 		published, err := brew.Publish(ctx, o.TapAPI, o.Tap, formula)
 		if err != nil {
 			return err
@@ -281,7 +286,7 @@ func (o Options) revertTap(ctx context.Context, result *Result, logf func(string
 // not this release's to undo.
 func (o Options) revertNext(ctx context.Context, m *manifest.Manifest, logf func(string, ...any)) error {
 	yanked := strings.TrimPrefix(strings.TrimPrefix(o.Tag, o.Prefix), "v")
-	for _, formula := range FormulasFrom(m, o.Repo, o.Project, o.Caveats) {
+	for _, formula := range brew.FormulasFor(m, o.Repo, o.RepoInfo, o.Project, o.Caveats) {
 		formula.Name = brew.NextName(formula.Name)
 		published, err := brew.RevertNext(ctx, o.TapAPI, o.Tap, formula, yanked)
 		if err != nil {
@@ -293,60 +298,6 @@ func (o Options) revertNext(ctx context.Context, m *manifest.Manifest, logf func
 		logf("%s %s in %s (back to %s)", published.Status, published.Path, o.Tap, o.Previous)
 	}
 	return nil
-}
-
-// FormulasFrom rebuilds a release's Homebrew formulas from its manifest.
-func FormulasFrom(m *manifest.Manifest, repo github.Repo, project, caveats string) []brew.Formula {
-	tag := m.Tag
-	if tag == "" {
-		tag = "v" + m.Version
-	}
-
-	var order []string
-	platforms := map[string][]brew.Platform{}
-
-	binaries := map[string][]string{}
-
-	for _, a := range m.Artifacts {
-		// A variant published no formula, so a retraction must not write one.
-		if a.Variant != "" {
-			continue
-		}
-
-		// A formula is named after the archive, not after a binary inside it.
-		// Archives published before the manifest recorded any of this fall
-		// back to the project's name, which for a single-command module is the
-		// same answer.
-		name := a.BaseName(m.Version)
-		if name == "" {
-			name = project
-		}
-		if _, seen := platforms[name]; !seen {
-			order = append(order, name)
-			if binaries[name] = a.BinaryNames(); len(binaries[name]) == 0 {
-				binaries[name] = []string{name}
-			}
-		}
-		platforms[name] = append(platforms[name], brew.Platform{
-			OS: a.OS, Arch: a.Arch,
-			URL:    github.DownloadURL(repo, tag, a.Name),
-			SHA256: a.SHA256,
-		})
-	}
-	sort.Strings(order)
-
-	out := make([]brew.Formula, 0, len(order))
-	for _, name := range order {
-		out = append(out, brew.Formula{
-			Name:      name,
-			Binaries:  binaries[name],
-			Version:   m.Version,
-			Homepage:  fmt.Sprintf("https://github.com/%s/%s", repo.Owner, repo.Name),
-			Caveats:   caveats,
-			Platforms: platforms[name],
-		})
-	}
-	return out
 }
 
 // NextAfter returns the tag a retraction of tag must be published as, keeping

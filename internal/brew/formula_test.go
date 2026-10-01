@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
+	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
 func sample() brew.Formula {
@@ -194,5 +196,145 @@ func TestFormulaOmitsAnEmptyCaveats(t *testing.T) {
 	}
 	if strings.Contains(string(out), "caveats") {
 		t.Errorf("a formula with no caveats should have no caveats block:\n%s", out)
+	}
+}
+
+func TestFormulasForRebuildsFromTheManifest(t *testing.T) {
+	m := &manifest.Manifest{
+		Version: "1.2.0", Tag: "v1.2.0",
+		Artifacts: []manifest.Artifact{
+			{Name: "foo_1.2.0_linux_amd64.tar.gz", OS: "linux", Arch: "amd64", Binary: "foo", SHA256: "aaa"},
+			{Name: "foo_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64", Binary: "foo", SHA256: "bbb"},
+			{Name: "foo_1.2.0_windows_amd64.zip", OS: "windows", Arch: "amd64", Binary: "foo", SHA256: "ccc"},
+		},
+	}
+
+	formulas := brew.FormulasFor(m, github.Repo{Owner: "you", Name: "foo"}, nil, "foo", "")
+	if len(formulas) != 1 {
+		t.Fatalf("got %d formulas", len(formulas))
+	}
+
+	rendered, err := formulas[0].Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(rendered)
+
+	// The digests have to be the ones that release published, which are
+	// recorded exactly once — in its own manifest.
+	for _, want := range []string{`version "1.2.0"`, "aaa", "bbb", "releases/download/v1.2.0/"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("formula is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// A retraction republishes the formulas a release published. A variant
+// published none, so rebuilding one from the manifest would create a package
+// the release never had — during a retraction, of all moments.
+func TestFormulasForSkipsAVariant(t *testing.T) {
+	m := &manifest.Manifest{
+		Version: "1.2.0", Tag: "v1.2.0",
+		Artifacts: []manifest.Artifact{
+			{Name: "foo_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64", Binary: "foo", SHA256: "aaa"},
+			{
+				Name: "foo-gui_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64",
+				Binary: "foo", SHA256: "bbb", Variant: "gui",
+			},
+		},
+	}
+
+	formulas := brew.FormulasFor(m, github.Repo{Owner: "you", Name: "foo"}, nil, "foo", "")
+	if len(formulas) != 1 {
+		names := make([]string, len(formulas))
+		for i, f := range formulas {
+			names[i] = f.Name
+		}
+		t.Fatalf("got formulas %v, want only foo", names)
+	}
+	if formulas[0].Name != "foo" {
+		t.Errorf("formula = %q, want foo", formulas[0].Name)
+	}
+}
+
+// A release writes the repository's description, licence and homepage into the
+// formula, and a rollback goes through this same builder, so it cannot drop
+// them: the two used to be separate builders, and the rollback's omitted them.
+func TestFormulasForCarriesTheRepositoryMetadataAndCaveats(t *testing.T) {
+	m := &manifest.Manifest{
+		Version: "1.2.0", Tag: "v1.2.0",
+		Artifacts: []manifest.Artifact{
+			{Name: "foo_1.2.0_linux_amd64.tar.gz", OS: "linux", Arch: "amd64", Binary: "foo", SHA256: "aaa"},
+		},
+	}
+	repo := github.Repo{Owner: "you", Name: "foo"}
+
+	bare := brew.FormulasFor(m, repo, nil, "foo", "")[0]
+	if bare.Description != "" || bare.License != "" || bare.Homepage != "https://github.com/you/foo" {
+		t.Errorf("metadata was invented: %+v", bare)
+	}
+
+	full := brew.FormulasFor(m, repo, &github.RepoInfo{
+		Description: "a tool", License: "MIT", Homepage: "https://foo.example",
+	}, "foo", "needs a display")[0]
+	if full.Description != "a tool" || full.License != "MIT" || full.Homepage != "https://foo.example" {
+		t.Errorf("metadata = %+v", full)
+	}
+	if full.Caveats != "needs a display" {
+		t.Errorf("Caveats = %q", full.Caveats)
+	}
+
+	// A repository with no homepage of its own keeps the repository's page.
+	noPage := brew.FormulasFor(m, repo, &github.RepoInfo{Description: "a tool"}, "foo", "")[0]
+	if noPage.Homepage != "https://github.com/you/foo" {
+		t.Errorf("homepage = %q", noPage.Homepage)
+	}
+}
+
+// An archive's name is its formula's, and an archive holding several tools is
+// one formula installing all of them; one that predates the manifest recording
+// a name falls back to the project's.
+func TestFormulasForNamesAndGroupsByArchive(t *testing.T) {
+	m := &manifest.Manifest{
+		Version: "1.2.0", Tag: "v1.2.0",
+		Artifacts: []manifest.Artifact{
+			{
+				Name: "toolshed_1.2.0_linux_amd64.tar.gz", OS: "linux", Arch: "amd64", SHA256: "a1",
+				Binaries: []manifest.Binary{{Name: "crabs"}, {Name: "duck"}},
+			},
+			{
+				Name: "toolshed_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64", SHA256: "a2",
+				Binaries: []manifest.Binary{{Name: "crabs"}, {Name: "duck"}},
+			},
+			{Name: "_1.2.0_linux_amd64.tar.gz", OS: "linux", Arch: "amd64", SHA256: "b1"},
+		},
+	}
+
+	got := brew.FormulasFor(m, github.Repo{Owner: "you", Name: "foo"}, nil, "legacy", "")
+
+	if len(got) != 2 || got[0].Name != "legacy" || got[1].Name != "toolshed" {
+		t.Fatalf("formulas = %+v, want legacy and toolshed", got)
+	}
+	if strings.Join(got[1].Binaries, ",") != "crabs,duck" || len(got[1].Platforms) != 2 {
+		t.Errorf("toolshed = %+v", got[1])
+	}
+	if strings.Join(got[0].Binaries, ",") != "legacy" {
+		t.Errorf("legacy binaries = %v, want the project's name", got[0].Binaries)
+	}
+}
+
+// A manifest written before tags were recorded still has a download URL.
+func TestFormulasForDerivesAMissingTag(t *testing.T) {
+	m := &manifest.Manifest{
+		Version: "1.2.0",
+		Artifacts: []manifest.Artifact{
+			{Name: "foo_1.2.0_linux_amd64.tar.gz", OS: "linux", Arch: "amd64", Binary: "foo", SHA256: "aaa"},
+		},
+	}
+
+	got := brew.FormulasFor(m, github.Repo{Owner: "you", Name: "foo"}, nil, "foo", "")
+
+	if url := got[0].Platforms[0].URL; !strings.Contains(url, "/releases/download/v1.2.0/") {
+		t.Errorf("url = %q", url)
 	}
 }

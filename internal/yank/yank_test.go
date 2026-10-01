@@ -219,64 +219,6 @@ func TestNextAfterKeepsTheScopePrefix(t *testing.T) {
 	}
 }
 
-func TestFormulasFromRebuildsFromTheManifest(t *testing.T) {
-	m := &manifest.Manifest{
-		Version: "1.2.0", Tag: "v1.2.0",
-		Artifacts: []manifest.Artifact{
-			{Name: "foo_1.2.0_linux_amd64.tar.gz", OS: "linux", Arch: "amd64", Binary: "foo", SHA256: "aaa"},
-			{Name: "foo_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64", Binary: "foo", SHA256: "bbb"},
-			{Name: "foo_1.2.0_windows_amd64.zip", OS: "windows", Arch: "amd64", Binary: "foo", SHA256: "ccc"},
-		},
-	}
-
-	formulas := yank.FormulasFrom(m, github.Repo{Owner: "you", Name: "foo"}, "foo", "")
-	if len(formulas) != 1 {
-		t.Fatalf("got %d formulas", len(formulas))
-	}
-
-	rendered, err := formulas[0].Render()
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := string(rendered)
-
-	// The digests have to be the ones that release published, which are
-	// recorded exactly once — in its own manifest.
-	for _, want := range []string{`version "1.2.0"`, "aaa", "bbb", "releases/download/v1.2.0/"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("formula is missing %q:\n%s", want, out)
-		}
-	}
-}
-
-// A retraction republishes the formulas a release published. A variant
-// published none, so rebuilding one from the manifest would create a package
-// the release never had — during a retraction, of all moments.
-func TestFormulasFromSkipsAVariant(t *testing.T) {
-	m := &manifest.Manifest{
-		Version: "1.2.0", Tag: "v1.2.0",
-		Artifacts: []manifest.Artifact{
-			{Name: "foo_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64", Binary: "foo", SHA256: "aaa"},
-			{
-				Name: "foo-gui_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64",
-				Binary: "foo", SHA256: "bbb", Variant: "gui",
-			},
-		},
-	}
-
-	formulas := yank.FormulasFrom(m, github.Repo{Owner: "you", Name: "foo"}, "foo", "")
-	if len(formulas) != 1 {
-		names := make([]string, len(formulas))
-		for i, f := range formulas {
-			names[i] = f.Name
-		}
-		t.Fatalf("got formulas %v, want only foo", names)
-	}
-	if formulas[0].Name != "foo" {
-		t.Errorf("formula = %q, want foo", formulas[0].Name)
-	}
-}
-
 // fakeTap is a Homebrew tap that remembers what was written to it.
 type fakeTap struct {
 	files    map[string][]byte
@@ -298,6 +240,44 @@ func (f *fakeTap) WriteFile(_ context.Context, _ github.Repo, in github.FileInpu
 	}
 	f.writes = append(f.writes, in)
 	return nil
+}
+
+// The release wrote the repository's description, licence and homepage into
+// the formula, so a rollback that rebuilt it without them would quietly strip
+// them from the tap.
+func TestRunRollsBackTheFormulaWithItsMetadata(t *testing.T) {
+	tap := &fakeTap{}
+	m := &manifest.Manifest{
+		Version: "1.2.0", Tag: "v1.2.0",
+		Artifacts: []manifest.Artifact{
+			{Name: "foo_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64", Binary: "foo", SHA256: "aaa"},
+		},
+	}
+
+	_, err := yank.Run(context.Background(), yank.Options{
+		Client: &fakeForge{release: &github.Release{ID: 7, TagName: "v1.3.0", Body: "notes"}},
+		Repo:   github.Repo{Owner: "you", Name: "foo"},
+		Tag:    "v1.3.0", Reason: "bad build",
+		Tap: github.Repo{Owner: "you", Name: "homebrew-tap"}, TapAPI: tap,
+		Previous: "v1.2.0", Project: "foo",
+		RepoInfo:  &github.RepoInfo{Description: "a tool", License: "MIT", Homepage: "https://foo.example"},
+		Manifests: func(context.Context, string) (*manifest.Manifest, error) { return m, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var formula string
+	for _, w := range tap.writes {
+		if w.Path == "Formula/foo.rb" {
+			formula = string(w.Content)
+		}
+	}
+	for _, want := range []string{`desc "a tool"`, `license "MIT"`, `homepage "https://foo.example"`} {
+		if !strings.Contains(formula, want) {
+			t.Errorf("the rolled-back formula is missing %s:\n%s", want, formula)
+		}
+	}
 }
 
 // tapFilesFixture writes a fake tap-files plugin that answers with body, and
@@ -545,8 +525,8 @@ func TestRunRollsBackNextOnlyWhileItNamesTheRetractedRelease(t *testing.T) {
 	previous := &manifest.Manifest{Version: "1.2.0", Tag: "v1.2.0", Artifacts: []manifest.Artifact{artifact}}
 
 	nextAt := func(version string) map[string][]byte {
-		f := yank.FormulasFrom(&manifest.Manifest{Version: version, Tag: "v" + version, Artifacts: []manifest.Artifact{artifact}},
-			github.Repo{Owner: "you", Name: "foo"}, "foo", "")[0]
+		f := brew.FormulasFor(&manifest.Manifest{Version: version, Tag: "v" + version, Artifacts: []manifest.Artifact{artifact}},
+			github.Repo{Owner: "you", Name: "foo"}, nil, "foo", "")[0]
 		f.Name = brew.NextName(f.Name)
 		content, err := f.Render()
 		if err != nil {
