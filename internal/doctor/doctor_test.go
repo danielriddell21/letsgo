@@ -333,3 +333,13 @@ func TestResultJSONOmitsAnEmptyHint(t *testing.T) {
 		t.Errorf("JSON() = %s, want no hint field when Hint is empty", data)
 	}
 }
+
+func TestRunFailsWhenGitCannotBeResolved(t *testing.T) {
+	dir := t.TempDir()
+	writeGoMod(t, dir, "module example.com/doctortest\n\ngo 1.24\n")
+	t.Setenv("LETSGO_GIT", "git") // a bare name is refused
+
+	if _, err := doctor.Run(context.Background(), dir, &config.Global{}); err == nil {
+		t.Error("Run succeeded with an unusable git command, want an error")
+	}
+}

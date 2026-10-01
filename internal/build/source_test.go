@@ -160,3 +160,12 @@ func TestSourceArchiveRequiresTrackedFiles(t *testing.T) {
 		t.Error("WriteSource succeeded with no tracked files, want an error")
 	}
 }
+
+func TestWriteSourceRequiresTheGitCommand(t *testing.T) {
+	_, err := build.WriteSource(context.Background(), build.SourceOptions{
+		ModuleDir: t.TempDir(), WorkDir: t.TempDir(),
+	})
+	if err == nil {
+		t.Error("WriteSource succeeded with no git command, want an error")
+	}
+}
