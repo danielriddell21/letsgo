@@ -253,6 +253,7 @@ func run(t *testing.T, p *published, o verify.Options) *verify.Result {
 	o.Repo = github.Repo{Owner: "you", Name: "demo"}
 	o.WorkDir = t.TempDir()
 	o.GoBin = goBin(t)
+	o.GitBin = "git"
 
 	result, err := verify.Run(context.Background(), o)
 	if err != nil {
@@ -325,7 +326,8 @@ func TestVerifyDetectsATamperedAsset(t *testing.T) {
 	corrupted := p.result.Artifacts[0].Archive
 
 	result := run(t, p, verify.Options{
-		Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		GitBin: "git",
+		Tag:    "v1.2.3", Dir: p.dir, SkipRebuild: true,
 		Client: p.serve(t, corrupted),
 	})
 
@@ -387,6 +389,7 @@ func TestVerifyNeedsAManifest(t *testing.T) {
 	client.SetEndpoints(server.URL, server.URL)
 
 	_, err := verify.Run(context.Background(), verify.Options{
+		GitBin: "git",
 		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
 		Tag: "v9.9.9", WorkDir: t.TempDir(),
 	})
@@ -436,6 +439,7 @@ func TestVerifyWithNoTagIsScopedToThePrefix(t *testing.T) {
 	client.SetEndpoints(server.URL, server.URL)
 
 	result, err := verify.Run(context.Background(), verify.Options{
+		GitBin: "git",
 		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
 		Prefix: prefix, WorkDir: t.TempDir(), SkipRebuild: true,
 	})
@@ -477,6 +481,7 @@ func TestVerifyScopedToAPrefixWithNoMatchingTagHasNoReleases(t *testing.T) {
 	client.SetEndpoints(server.URL, server.URL)
 
 	_, err := verify.Run(context.Background(), verify.Options{
+		GitBin: "git",
 		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
 		Prefix: "services/api/", WorkDir: t.TempDir(),
 	})
@@ -496,6 +501,7 @@ func TestVerifyScopedToAPrefixSurfacesATagsError(t *testing.T) {
 	client.SetEndpoints(server.URL, server.URL)
 
 	_, err := verify.Run(context.Background(), verify.Options{
+		GitBin: "git",
 		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
 		Prefix: "services/api/", WorkDir: t.TempDir(),
 	})
@@ -615,6 +621,7 @@ func TestMonorepoRootAndNestedModuleReleaseAndVerifyIndependently(t *testing.T) 
 	repo := github.Repo{Owner: "you", Name: "demo"}
 
 	rootVerify, err := verify.Run(context.Background(), verify.Options{
+		GitBin: "git",
 		GoBin:  goBin(t),
 		Client: client, Repo: repo, Tag: "v1.0.0", Dir: dir, WorkDir: t.TempDir(),
 	})
@@ -626,6 +633,7 @@ func TestMonorepoRootAndNestedModuleReleaseAndVerifyIndependently(t *testing.T) 
 	}
 
 	apiVerify, err := verify.Run(context.Background(), verify.Options{
+		GitBin: "git",
 		GoBin:  goBin(t),
 		Client: client, Repo: repo, Tag: "services/api/v1.5.0", Dir: nested, WorkDir: t.TempDir(),
 	})
@@ -640,6 +648,7 @@ func TestMonorepoRootAndNestedModuleReleaseAndVerifyIndependently(t *testing.T) 
 	// other's — the root's tag never leaks into the nested prefix, and the
 	// nested tag (however new) never outranks the root's own "latest".
 	noTagAPI, err := verify.Run(context.Background(), verify.Options{
+		GitBin: "git",
 		GoBin:  goBin(t),
 		Client: client, Repo: repo, Prefix: "services/api/", SkipRebuild: true, WorkDir: t.TempDir(),
 	})
@@ -651,6 +660,7 @@ func TestMonorepoRootAndNestedModuleReleaseAndVerifyIndependently(t *testing.T) 
 	}
 
 	noTagRoot, err := verify.Run(context.Background(), verify.Options{
+		GitBin: "git",
 		GoBin:  goBin(t),
 		Client: client, Repo: repo, Dir: dir, SkipRebuild: true, WorkDir: t.TempDir(),
 	})
@@ -701,8 +711,9 @@ func TestVerifyReportsAnAffectedAudit(t *testing.T) {
 	}
 
 	result := run(t, p, verify.Options{
-		GoBin: goBin(t),
-		Tag:   "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		GitBin: "git",
+		GoBin:  goBin(t),
+		Tag:    "v1.2.3", Dir: p.dir, SkipRebuild: true,
 		Client: p.serveWith(t, "", "audit.json", data),
 	})
 
@@ -727,8 +738,9 @@ func TestVerifyReportsACleanAudit(t *testing.T) {
 	}
 
 	result := run(t, p, verify.Options{
-		GoBin: goBin(t),
-		Tag:   "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		GitBin: "git",
+		GoBin:  goBin(t),
+		Tag:    "v1.2.3", Dir: p.dir, SkipRebuild: true,
 		Client: p.serveWith(t, "", "audit.json", data),
 	})
 
@@ -889,8 +901,9 @@ func TestVerifyPrintsTheFingerprintAfterAPass(t *testing.T) {
 func TestVerifyPrintsNoFingerprintOnAFailure(t *testing.T) {
 	p := buildRelease(t)
 	result := run(t, p, verify.Options{
-		GoBin: goBin(t),
-		Tag:   "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		GitBin: "git",
+		GoBin:  goBin(t),
+		Tag:    "v1.2.3", Dir: p.dir, SkipRebuild: true,
 		Client: p.serve(t, p.result.Artifacts[0].Archive),
 	})
 
@@ -937,8 +950,9 @@ func TestVerifyReadsTheManifestDigestAloudAfterAPass(t *testing.T) {
 func TestVerifyReadsNoWordsOnAFailure(t *testing.T) {
 	p := buildRelease(t)
 	result := run(t, p, verify.Options{
-		GoBin: goBin(t),
-		Tag:   "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		GitBin: "git",
+		GoBin:  goBin(t),
+		Tag:    "v1.2.3", Dir: p.dir, SkipRebuild: true,
 		Client: p.serve(t, p.result.Artifacts[0].Archive),
 	})
 

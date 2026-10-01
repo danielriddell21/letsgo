@@ -12,10 +12,24 @@ import (
 	"github.com/danielriddell21/letsgo/internal/config"
 )
 
-func TestGitResolvesInsideASystemDirectory(t *testing.T) {
-	bin, err := gitBinary()
+// testGit resolves git the way the composition root does, without a global
+// config.
+func testGit(t *testing.T) string {
+	t.Helper()
+	bin, _, err := GitBinary(nil)
 	if err != nil {
-		t.Fatalf("gitBinary: %v", err)
+		t.Fatalf("GitBinary: %v", err)
+	}
+	return bin
+}
+
+func TestGitBinary(t *testing.T) {
+	bin, source, err := GitBinary(&config.Global{})
+	if err != nil {
+		t.Fatalf("GitBinary: %v", err)
+	}
+	if source == "" {
+		t.Error("GitBinary reported no source")
 	}
 	if !filepath.IsAbs(bin) {
 		t.Errorf("git resolved to %q, want an absolute path", bin)
@@ -72,7 +86,7 @@ func TestPoisonedPathIsIgnored(t *testing.T) {
 	ctx := context.Background()
 	initRepo(t, repo)
 
-	g, err := FindGit(ctx, repo)
+	g, err := FindGit(ctx, testGit(t), repo)
 	if err != nil {
 		t.Fatalf("FindGit with a poisoned PATH: %v", err)
 	}
@@ -221,10 +235,7 @@ func TestGitGlobalConfigMustBeAbsoluteAndExecutable(t *testing.T) {
 
 func initRepo(t *testing.T, dir string) {
 	t.Helper()
-	bin, err := gitBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
+	bin := testGit(t)
 	for _, args := range [][]string{
 		{"init", "-q", "-b", "main"},
 		{"-c", "user.name=Test", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "first"},

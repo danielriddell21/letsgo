@@ -118,7 +118,7 @@ func checkoutCommit(ctx context.Context, o Options, commit string) (string, erro
 	}
 	// Removed first so a re-run is not blocked by a previous attempt.
 	_ = os.RemoveAll(dir)
-	return dir, discover.AddWorktree(ctx, o.Dir, dir, commit)
+	return dir, discover.AddWorktree(ctx, o.GitBin, o.Dir, dir, commit)
 }
 
 func extractSource(ctx context.Context, o Options, release *releases.Published, m *manifest.Manifest, dir string) error {

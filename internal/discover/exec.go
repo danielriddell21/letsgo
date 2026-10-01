@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/safeexec"
@@ -36,35 +35,21 @@ func systemDirs() []string { return safeexec.SystemDirs() }
 // fixedPath is systemDirs joined for use as a PATH value.
 func fixedPath() string { return safeexec.FixedPath() }
 
-var (
-	gitOnce   sync.Once
-	gitPath   string
-	gitSource string
-	gitErr    error
-)
-
-// gitBinary resolves git to an absolute path within a system directory. The
-// result is cached because it cannot change during a run.
-func gitBinary() (string, error) {
-	path, _, err := GitSource()
-	return path, err
+// GitBinary resolves git for this run: the env override, then the global
+// config's git, then a system directory. It reports where the choice came
+// from so plan --explain can say why.
+//
+// Nothing is cached: the caller resolves once at the composition root and
+// passes the path on, so two runs in one process can use different settings.
+// A nil global is the same as no config file.
+func GitBinary(global *config.Global) (path, source string, err error) {
+	if global == nil {
+		global = &config.Global{}
+	}
+	return resolveGit(os.Getenv(gitEnvOverride), global, systemDirs())
 }
 
-// GitSource resolves git, like gitBinary, and also reports where the choice
-// came from — the env override, the global config file, or the system
-// directory search — so plan --explain can say why.
-func GitSource() (path, source string, err error) {
-	gitOnce.Do(func() {
-		global, globalErr := config.LoadGlobal()
-		if globalErr != nil {
-			global = &config.Global{}
-		}
-		gitPath, gitSource, gitErr = resolveGit(os.Getenv(gitEnvOverride), global, systemDirs())
-	})
-	return gitPath, gitSource, gitErr
-}
-
-// resolveGit is the lookup itself, kept separate from the caching so that it
+// resolveGit is the lookup itself, kept separate from the environment so that it
 // can be tested with an arbitrary override, global config and search path.
 func resolveGit(override string, global *config.Global, dirs []string) (path, source string, err error) {
 	if override != "" {

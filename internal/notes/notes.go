@@ -56,6 +56,7 @@ func Release(ctx context.Context, s Source) (string, error) {
 
 	previous, commits, err := changelog.Collect(ctx, changelog.Source{
 		Dir:     p.Module.Dir,
+		GitBin:  p.GitBin,
 		Tag:     p.Tag,
 		Prefix:  p.Scope.Prefix,
 		Shallow: p.Git.Shallow,

@@ -48,7 +48,7 @@ func (r *Result) checkPlugin(p config.Plugin, dir, pluginsDir string) {
 // checkHistory reports a shallow clone or a scope with no tags yet (DR-6) —
 // either one means the changelog and version-bump logic have less history to
 // work with than they would on a full clone.
-func (r *Result) checkHistory(ctx context.Context, dir string, git discover.Git, scope discover.Scope) {
+func (r *Result) checkHistory(ctx context.Context, gitBin, dir string, git discover.Git, scope discover.Scope) {
 	const hint = "use fetch-depth: 0"
 
 	if git.Shallow {
@@ -56,7 +56,7 @@ func (r *Result) checkHistory(ctx context.Context, dir string, git discover.Git,
 		return
 	}
 
-	tags, err := discover.Tags(ctx, dir, scope.Prefix)
+	tags, err := discover.Tags(ctx, gitBin, dir, scope.Prefix)
 	if err != nil {
 		r.add(repositoryGroup, "history", Fail, "", "%v", err)
 		return
@@ -72,8 +72,8 @@ func (r *Result) checkHistory(ctx context.Context, dir string, git discover.Git,
 // publish steps only know how to talk to GitHub, so a release from this
 // clone would skip them. A missing or unparseable origin is not a problem
 // doctor reports — plan.Resolve treats it the same way, best-effort.
-func (r *Result) checkRemote(ctx context.Context, dir string) {
-	repo, err := discover.FindRepo(ctx, dir)
+func (r *Result) checkRemote(ctx context.Context, gitBin, dir string) {
+	repo, err := discover.FindRepo(ctx, gitBin, dir)
 	if err != nil {
 		return
 	}

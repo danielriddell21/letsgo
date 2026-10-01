@@ -175,7 +175,7 @@ func TestFindReleaseNamesTheListingItCouldNotRead(t *testing.T) {
 func TestBuildNotesNamesWhatItCouldNotCollect(t *testing.T) {
 	t.Parallel()
 
-	_, err := buildNotes(context.Background(), Options{Dir: t.TempDir()}, "v1.0.0", &plan.Plan{}, &release.Result{})
+	_, err := buildNotes(context.Background(), Options{Dir: t.TempDir(), GitBin: "git"}, "v1.0.0", &plan.Plan{}, &release.Result{})
 	if err == nil || !strings.Contains(err.Error(), "promote: collecting the commits") {
 		t.Errorf("buildNotes error = %v, want it to name the commits", err)
 	}
@@ -197,7 +197,7 @@ func TestBuildNotesNamesTheManifestItCouldNotDigest(t *testing.T) {
 		}
 	}
 
-	o := Options{Dir: dir, Shallow: true}
+	o := Options{Dir: dir, GitBin: "git", Shallow: true}
 	_, err := buildNotes(context.Background(), o, "v1.0.0", &plan.Plan{}, &release.Result{Dir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "promote: digesting the manifest") {
 		t.Errorf("buildNotes error = %v, want it to name the manifest digest", err)

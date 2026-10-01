@@ -688,6 +688,7 @@ func (f forge) runVerify(args []string) error {
 		Dir: run.Dir, WorkDir: run.WorkDir, SkipRebuild: *noRebuild,
 		UserAgent: "letsgo/" + version,
 		GoBin:     goBin,
+		GitBin:    run.GitBin,
 	})
 	if err != nil {
 		return err
@@ -741,6 +742,7 @@ func hideFromUsage(fs *flag.FlagSet, name string) {
 type moduleRepo struct {
 	Module discover.Module
 	Git    discover.Git
+	GitBin string
 	Repo   github.Repo
 	Scope  discover.Scope
 	Token  string
@@ -757,13 +759,17 @@ func (f forge) resolveModuleRepo(ctx context.Context, token string) (moduleRepo,
 	if err != nil {
 		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
 	}
-	found, err := discover.FindRepo(ctx, module.Dir)
+	gitBin, err := gitBinary()
+	if err != nil {
+		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
+	}
+	found, err := discover.FindRepo(ctx, gitBin, module.Dir)
 	if err != nil {
 		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
 	}
 	repo := github.Repo{Owner: found.Owner, Name: found.Name}
 
-	git, err := discover.FindGit(ctx, module.Dir)
+	git, err := discover.FindGit(ctx, gitBin, module.Dir)
 	if err != nil {
 		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
 	}
@@ -778,7 +784,7 @@ func (f forge) resolveModuleRepo(ctx context.Context, token string) (moduleRepo,
 	}
 	client := f.client(tokenValue)
 
-	return moduleRepo{Module: module, Git: git, Repo: repo, Scope: scope, Token: tokenValue, Client: client}, nil
+	return moduleRepo{Module: module, Git: git, GitBin: gitBin, Repo: repo, Scope: scope, Token: tokenValue, Client: client}, nil
 }
 
 // scratchRun bundles what a command needs to act on a release with an
@@ -791,6 +797,7 @@ type scratchRun struct {
 	Prefix  string
 	WorkDir string
 	Client  *github.Client
+	GitBin  string
 	cleanup func()
 }
 
@@ -802,11 +809,15 @@ type scratchRun struct {
 // is empty; cleanup removes it, and is a no-op when work was given
 // explicitly.
 func (f forge) resolveScratchRun(ctx context.Context, repoFlag, token, work, tmpPrefix string) (scratchRun, error) {
-	repo, dir, err := targetRepo(ctx, repoFlag)
+	gitBin, err := gitBinary()
 	if err != nil {
 		return scratchRun{}, err
 	}
-	prefix, err := scopePrefix(ctx, repoFlag, dir)
+	repo, dir, err := targetRepo(ctx, gitBin, repoFlag)
+	if err != nil {
+		return scratchRun{}, err
+	}
+	prefix, err := scopePrefix(ctx, gitBin, repoFlag, dir)
 	if err != nil {
 		return scratchRun{}, err
 	}
@@ -824,7 +835,7 @@ func (f forge) resolveScratchRun(ctx context.Context, repoFlag, token, work, tmp
 	tokenValue, _ := plan.Token(ctx, token)
 	client := f.client(tokenValue)
 
-	return scratchRun{Repo: repo, Dir: dir, Prefix: prefix, WorkDir: workDir, Client: client, cleanup: cleanup}, nil
+	return scratchRun{Repo: repo, Dir: dir, Prefix: prefix, WorkDir: workDir, Client: client, GitBin: gitBin, cleanup: cleanup}, nil
 }
 
 // targetRepo resolves which repository a command is asking about and, where
@@ -833,7 +844,7 @@ func (f forge) resolveScratchRun(ctx context.Context, repoFlag, token, work, tmp
 // Inspecting someone else's release is the point, so a repository outside the
 // current directory is allowed; it simply has no local checkout, and the
 // callers that need one say so.
-func targetRepo(ctx context.Context, explicit string) (github.Repo, string, error) {
+func targetRepo(ctx context.Context, gitBin, explicit string) (github.Repo, string, error) {
 	if explicit != "" {
 		owner, name, ok := strings.Cut(explicit, "/")
 		if !ok || owner == "" || name == "" {
@@ -846,7 +857,7 @@ func targetRepo(ctx context.Context, explicit string) (github.Repo, string, erro
 	if err != nil {
 		return github.Repo{}, "", fmt.Errorf("%w (use --repo to verify a release elsewhere)", err)
 	}
-	found, err := discover.FindRepo(ctx, module.Dir)
+	found, err := discover.FindRepo(ctx, gitBin, module.Dir)
 	if err != nil {
 		return github.Repo{}, "", err
 	}
@@ -860,11 +871,11 @@ func targetRepo(ctx context.Context, explicit string) (github.Repo, string, erro
 //
 // A repository named explicitly by --repo has no local module to scope by:
 // inspecting a release elsewhere always means the whole repository.
-func scopePrefix(ctx context.Context, explicit, dir string) (string, error) {
+func scopePrefix(ctx context.Context, gitBin, explicit, dir string) (string, error) {
 	if explicit != "" || dir == "" {
 		return "", nil
 	}
-	git, err := discover.FindGit(ctx, dir)
+	git, err := discover.FindGit(ctx, gitBin, dir)
 	if err != nil {
 		return "", fmt.Errorf("letsgo: %w", err)
 	}
@@ -907,12 +918,15 @@ func (f forge) runDiff(args []string) error {
 	)
 	from, to := fs.Arg(0), fs.Arg(1)
 	if !isManifestPath(from) || !isManifestPath(to) {
-		var err error
-		var dir string
-		if repo, dir, err = targetRepo(ctx, *repoFlag); err != nil {
+		gitBin, err := gitBinary()
+		if err != nil {
 			return err
 		}
-		prefix, err := scopePrefix(ctx, *repoFlag, dir)
+		var dir string
+		if repo, dir, err = targetRepo(ctx, gitBin, *repoFlag); err != nil {
+			return err
+		}
+		prefix, err := scopePrefix(ctx, gitBin, *repoFlag, dir)
 		if err != nil {
 			return err
 		}
@@ -991,7 +1005,11 @@ func runTag(args []string) error {
 	if err != nil {
 		return err
 	}
-	git, err := discover.FindGit(ctx, module.Dir)
+	gitBin, err := gitBinary()
+	if err != nil {
+		return err
+	}
+	git, err := discover.FindGit(ctx, gitBin, module.Dir)
 	if err != nil {
 		return err
 	}
@@ -1003,13 +1021,13 @@ func runTag(args []string) error {
 		return err
 	}
 
-	tags, err := discover.Tags(ctx, module.Dir, scope.Prefix)
+	tags, err := discover.Tags(ctx, gitBin, module.Dir, scope.Prefix)
 	if err != nil {
 		return err
 	}
 	previous, _ := scope.LatestStableTag(tags, git.Tags...)
 
-	proposal, err := proposeVersion(ctx, module, scope, previous, forced(*major, *minor, *patch))
+	proposal, err := proposeVersion(ctx, gitBin, module, scope, previous, forced(*major, *minor, *patch))
 	if err != nil {
 		return err
 	}
@@ -1021,7 +1039,7 @@ func runTag(args []string) error {
 		return printTagJSON(proposal)
 	}
 
-	return createTag(ctx, module.Dir, scope.Prefix, proposal, previous, *warranted, *yes)
+	return createTag(ctx, gitBin, module.Dir, scope.Prefix, proposal, previous, *warranted, *yes)
 }
 
 // printTagJSON is `letsgo tag --json`'s whole job: the proposal, wire-formed,
@@ -1038,7 +1056,7 @@ func printTagJSON(proposal bump.Proposal) error {
 // createTag reports the proposal as text, then creates the tag unless
 // --warranted finds nothing to signal a release or the operator declines.
 func createTag(
-	ctx context.Context, dir, prefix string, proposal bump.Proposal, previous string, warranted, yes bool,
+	ctx context.Context, gitBin, dir, prefix string, proposal bump.Proposal, previous string, warranted, yes bool,
 ) error {
 	tag := prefix + proposal.Next
 
@@ -1052,7 +1070,7 @@ func createTag(
 		return nil
 	}
 
-	if discover.TagExists(ctx, dir, tag) {
+	if discover.TagExists(ctx, gitBin, dir, tag) {
 		return fmt.Errorf("%s already exists", tag)
 	}
 	if !yes && !confirm(tag) {
@@ -1060,7 +1078,7 @@ func createTag(
 		return nil
 	}
 
-	if err := discover.CreateTag(ctx, dir, tag, tag); err != nil {
+	if err := discover.CreateTag(ctx, gitBin, dir, tag, tag); err != nil {
 		return err
 	}
 	fmt.Printf("\n  tagged %s\n  push it with: git push origin %s\n", tag, tag)
@@ -1107,7 +1125,7 @@ func forced(major, minor, patch bool) bump.Level {
 // version bump.Propose computes is a plain "vX.Y.Z", so scope.Prefix is
 // stripped before it reaches the semver parser.
 func proposeVersion(
-	ctx context.Context, module discover.Module, scope discover.Scope, previous string, force bump.Level,
+	ctx context.Context, gitBin string, module discover.Module, scope discover.Scope, previous string, force bump.Level,
 ) (bump.Proposal, error) {
 	previousVersion := strings.TrimPrefix(previous, scope.Prefix)
 
@@ -1120,7 +1138,7 @@ func proposeVersion(
 	if err != nil {
 		return bump.Proposal{}, err
 	}
-	commits, err := discover.Commits(ctx, module.Dir, previous, "HEAD", nested...)
+	commits, err := discover.Commits(ctx, gitBin, module.Dir, previous, "HEAD", nested...)
 	if err != nil {
 		return bump.Proposal{}, err
 	}
@@ -1136,7 +1154,7 @@ func proposeVersion(
 	)
 	if previous != "" {
 		goBin, _, _ := gobuild.Toolchain(machineConfig())
-		old, cleanup, err := checkoutForDiff(ctx, module.Dir, previous, scope.Dir)
+		old, cleanup, err := checkoutForDiff(ctx, gitBin, module.Dir, previous, scope.Dir)
 		if err != nil {
 			apiErr = err
 		} else {
@@ -1154,18 +1172,18 @@ func proposeVersion(
 // module's own directory within it — a worktree always holds the whole
 // repository, so a module nested in it (relDir, slash-separated) is compared
 // at <worktree>/relDir, never at the worktree's own root.
-func checkoutForDiff(ctx context.Context, repoDir, tag, relDir string) (string, func(), error) {
+func checkoutForDiff(ctx context.Context, gitBin, repoDir, tag, relDir string) (string, func(), error) {
 	base, err := os.MkdirTemp("", "letsgo-tag-")
 	if err != nil {
 		return "", nil, fmt.Errorf("letsgo: scratch directory: %w", err)
 	}
 	worktree := filepath.Join(base, "previous")
-	if err := discover.AddWorktree(ctx, repoDir, worktree, tag); err != nil {
+	if err := discover.AddWorktree(ctx, gitBin, repoDir, worktree, tag); err != nil {
 		_ = os.RemoveAll(base)
 		return "", nil, err
 	}
 	return filepath.Join(worktree, filepath.FromSlash(relDir)), func() {
-		_ = discover.RemoveWorktree(ctx, repoDir, worktree)
+		_ = discover.RemoveWorktree(ctx, gitBin, repoDir, worktree)
 		_ = os.RemoveAll(base)
 	}, nil
 }
@@ -1194,6 +1212,12 @@ func reportProposal(p bump.Proposal, previous string) {
 	for _, note := range p.Notes {
 		fmt.Printf("\n  ! %s\n", note)
 	}
+}
+
+// gitBinary resolves the git command from the machine's global config.
+func gitBinary() (string, error) {
+	path, _, err := discover.GitBinary(machineConfig())
+	return path, err
 }
 
 func confirm(version string) bool {

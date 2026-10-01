@@ -46,7 +46,7 @@ func TestCheckoutTagReturnsTheModulesOwnDirectory(t *testing.T) {
 	checkoutGitRun(t, dir, "tag", "services/api/v1.0.0")
 
 	ctx := context.Background()
-	old, cleanup, err := checkoutTag(ctx, dir, "services/api/v1.0.0", "services/api")
+	old, cleanup, err := checkoutTag(ctx, "git", dir, "services/api/v1.0.0", "services/api")
 	if err != nil {
 		t.Fatalf("checkoutTag: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestCheckoutTagWithNoScopeReturnsTheWorktreeItself(t *testing.T) {
 	checkoutGitRun(t, dir, "tag", "v1.0.0")
 
 	ctx := context.Background()
-	old, cleanup, err := checkoutTag(ctx, dir, "v1.0.0", "")
+	old, cleanup, err := checkoutTag(ctx, "git", dir, "v1.0.0", "")
 	if err != nil {
 		t.Fatalf("checkoutTag: %v", err)
 	}

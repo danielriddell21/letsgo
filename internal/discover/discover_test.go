@@ -665,7 +665,7 @@ func TestFindGit(t *testing.T) {
 
 	ctx := context.Background()
 
-	g, err := FindGit(ctx, dir)
+	g, err := FindGit(ctx, testGit(t), dir)
 	if err != nil {
 		t.Fatalf("FindGit: %v", err)
 	}
@@ -688,7 +688,7 @@ func TestFindGit(t *testing.T) {
 		t.Error("a fresh repository should not be shallow")
 	}
 
-	repo, err := FindRepo(ctx, dir)
+	repo, err := FindRepo(ctx, testGit(t), dir)
 	if err != nil {
 		t.Fatalf("FindRepo: %v", err)
 	}
@@ -697,12 +697,12 @@ func TestFindGit(t *testing.T) {
 	}
 
 	// A tag on HEAD is the release being made, not the one before it.
-	if prev, err := PreviousTag(ctx, dir, ""); err != nil || prev != "" {
+	if prev, err := PreviousTag(ctx, testGit(t), dir, ""); err != nil || prev != "" {
 		t.Errorf("PreviousTag = %q, %v; want empty for a first release", prev, err)
 	}
 
 	write(t, dir, "README.md", "changed\n")
-	dirty, err := FindGit(ctx, dir)
+	dirty, err := FindGit(ctx, testGit(t), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -714,7 +714,7 @@ func TestFindGit(t *testing.T) {
 	run("commit", "-q", "-m", "second")
 	run("tag", "v1.1.0")
 
-	if prev, err := PreviousTag(ctx, dir, ""); err != nil || prev != "v1.0.0" {
+	if prev, err := PreviousTag(ctx, testGit(t), dir, ""); err != nil || prev != "v1.0.0" {
 		t.Errorf("PreviousTag = %q, %v; want v1.0.0", prev, err)
 	}
 }
@@ -728,7 +728,7 @@ func TestFindGitPopulatesATopLevelThatAgreesWithItself(t *testing.T) {
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-q", "-m", "first")
 
-	g, err := FindGit(context.Background(), dir)
+	g, err := FindGit(context.Background(), testGit(t), dir)
 	if err != nil {
 		t.Fatalf("FindGit: %v", err)
 	}
@@ -774,7 +774,7 @@ func TestPreviousTagIgnoresPrefixedTags(t *testing.T) {
 	run("commit", "-q", "-m", "third")
 
 	ctx := context.Background()
-	if prev, err := PreviousTag(ctx, dir, ""); err != nil || prev != "v1.0.0" {
+	if prev, err := PreviousTag(ctx, testGit(t), dir, ""); err != nil || prev != "v1.0.0" {
 		t.Errorf("PreviousTag = %q, %v; want v1.0.0, not the nested module's tag", prev, err)
 	}
 }
@@ -792,7 +792,7 @@ func TestTagsReturnsEveryMatchingTagInScope(t *testing.T) {
 	run("tag", "v1.1.0")
 
 	ctx := context.Background()
-	got, err := Tags(ctx, dir, "")
+	got, err := Tags(ctx, testGit(t), dir, "")
 	if err != nil {
 		t.Fatalf("Tags: %v", err)
 	}
@@ -814,7 +814,7 @@ func TestTagsIsEmptyNotAnErrorForAFirstRelease(t *testing.T) {
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-q", "-m", "first")
 
-	got, err := Tags(context.Background(), dir, "")
+	got, err := Tags(context.Background(), testGit(t), dir, "")
 	if err != nil || got != nil {
 		t.Errorf("Tags = %v, %v; want nil, nil", got, err)
 	}
@@ -874,7 +874,7 @@ func TestCommitsExcludesTheGivenDirectories(t *testing.T) {
 	run("commit", "-q", "-m", "third: touches the root")
 
 	ctx := context.Background()
-	commits, err := Commits(ctx, dir, "", "HEAD", "services/api")
+	commits, err := Commits(ctx, testGit(t), dir, "", "HEAD", "services/api")
 	if err != nil {
 		t.Fatalf("Commits: %v", err)
 	}

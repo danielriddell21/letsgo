@@ -470,6 +470,7 @@ func runPromoteWithWorkDir(t *testing.T, client *github.Client, rcTag, dir, work
 func runPromoteWith(t *testing.T, client *github.Client, rcTag, dir, workDir string, tweak func(*promote.Options)) (*promote.Result, error) {
 	t.Helper()
 	o := promote.Options{
+		GitBin: "git",
 		Client: client, Repo: github.Repo{Owner: "you", Name: "demo"},
 		RCTag: rcTag, Dir: dir, ModuleDir: dir,
 		ToolVersion: "test", WorkDir: workDir, Logf: t.Logf,

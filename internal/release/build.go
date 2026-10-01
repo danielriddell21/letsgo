@@ -78,6 +78,7 @@ func Build(
 
 	source, err := build.WriteSource(ctx, build.SourceOptions{
 		ModuleDir: p.RootDir,
+		GitBin:    p.GitBin,
 		Name:      p.Project,
 		Version:   p.Version,
 		ModTime:   p.Git.CommitTime,

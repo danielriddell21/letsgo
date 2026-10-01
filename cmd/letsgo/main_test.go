@@ -454,7 +454,7 @@ func TestRunDiffPrintsEachFormat(t *testing.T) {
 func TestCheckoutForDiffReturnsTheModulesOwnDirectory(t *testing.T) {
 	repoDir, _ := scopedModuleFixture(t)
 
-	old, cleanup, err := checkoutForDiff(context.Background(), repoDir, "services/api/v1.2.3", "services/api")
+	old, cleanup, err := checkoutForDiff(context.Background(), "git", repoDir, "services/api/v1.2.3", "services/api")
 	if err != nil {
 		t.Fatalf("checkoutForDiff: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestCheckoutForDiffReturnsTheModulesOwnDirectory(t *testing.T) {
 func TestScopePrefixResolvesTheModulesOwnPrefix(t *testing.T) {
 	_, moduleDir := scopedModuleFixture(t)
 
-	prefix, err := scopePrefix(context.Background(), "", moduleDir)
+	prefix, err := scopePrefix(context.Background(), "git", "", moduleDir)
 	if err != nil {
 		t.Fatalf("scopePrefix: %v", err)
 	}
@@ -488,7 +488,7 @@ func TestScopePrefixResolvesTheModulesOwnPrefix(t *testing.T) {
 func TestScopePrefixIsEmptyWhenRepoIsExplicit(t *testing.T) {
 	_, moduleDir := scopedModuleFixture(t)
 
-	prefix, err := scopePrefix(context.Background(), "you/elsewhere", moduleDir)
+	prefix, err := scopePrefix(context.Background(), "git", "you/elsewhere", moduleDir)
 	if err != nil {
 		t.Fatalf("scopePrefix: %v", err)
 	}
@@ -502,7 +502,7 @@ func TestScopePrefixIsEmptyWhenRepoIsExplicit(t *testing.T) {
 func TestScopePrefixFailsOutsideAGitRepository(t *testing.T) {
 	dir := t.TempDir()
 
-	if _, err := scopePrefix(context.Background(), "", dir); err == nil {
+	if _, err := scopePrefix(context.Background(), "git", "", dir); err == nil {
 		t.Error("scopePrefix succeeded outside a git repository")
 	}
 }
@@ -516,7 +516,7 @@ func TestProposeVersionStripsThePrefixBeforeParsingSemver(t *testing.T) {
 	module := discover.Module{Path: "github.com/you/foo/services/api", Dir: moduleDir}
 	scope := discover.Scope{Dir: "services/api", Prefix: "services/api/"}
 
-	proposal, err := proposeVersion(context.Background(), module, scope, "services/api/v1.2.3", bump.None)
+	proposal, err := proposeVersion(context.Background(), "git", module, scope, "services/api/v1.2.3", bump.None)
 	if err != nil {
 		t.Fatalf("proposeVersion: %v", err)
 	}
@@ -563,7 +563,7 @@ func TestProposeVersionExcludesANestedModulesOwnCommits(t *testing.T) {
 	run("commit", "-q", "-m", "feat!: nested module's own breaking change")
 
 	module := discover.Module{Path: "github.com/you/foo", Dir: dir}
-	proposal, err := proposeVersion(context.Background(), module, discover.Scope{}, "v1.0.0", bump.None)
+	proposal, err := proposeVersion(context.Background(), "git", module, discover.Scope{}, "v1.0.0", bump.None)
 	if err != nil {
 		t.Fatalf("proposeVersion: %v", err)
 	}

@@ -243,7 +243,7 @@ func imageTags(ctx context.Context, p *plan.Plan) (tags, floating []string, err 
 // consider advancing (a channel that has ever existed keeps being tracked,
 // so a channel's followers move to stable once it's newer).
 func channelHistory(ctx context.Context, p *plan.Plan) ([]string, error) {
-	tags, err := discover.Tags(ctx, p.RootDir, p.Scope.Prefix)
+	tags, err := discover.Tags(ctx, p.GitBin, p.RootDir, p.Scope.Prefix)
 	if err != nil {
 		return nil, err
 	}

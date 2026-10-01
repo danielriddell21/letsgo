@@ -60,6 +60,7 @@ func sourceRepo(t *testing.T) string {
 func writeSource(t *testing.T, repo, work string) build.Source {
 	t.Helper()
 	src, err := build.WriteSource(context.Background(), build.SourceOptions{
+		GitBin:    "git",
 		ModuleDir: repo,
 		Name:      "foo",
 		Version:   "1.2.3",
@@ -152,6 +153,7 @@ func TestSourceArchiveRequiresTrackedFiles(t *testing.T) {
 	}
 
 	_, err := build.WriteSource(context.Background(), build.SourceOptions{
+		GitBin:    "git",
 		ModuleDir: dir, Name: "foo", Version: "1.0.0", ModTime: commitTime, WorkDir: t.TempDir(),
 	})
 	if err == nil {

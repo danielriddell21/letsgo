@@ -85,7 +85,8 @@ func TestCollectUsesLocalHistoryWhenComplete(t *testing.T) {
 	dir := repoWithHistory(t)
 
 	previous, commits, err := changelog.Collect(context.Background(), changelog.Source{
-		Dir: dir, Tag: "v1.1.0",
+		GitBin: "git",
+		Dir:    dir, Tag: "v1.1.0",
 	})
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
@@ -129,7 +130,8 @@ func TestCollectSkipsAPrereleaseWhenPickingTheLocalPrevious(t *testing.T) {
 	run("tag", "v1.2.0")
 
 	previous, _, err := changelog.Collect(context.Background(), changelog.Source{
-		Dir: dir, Tag: "v1.2.0",
+		GitBin: "git",
+		Dir:    dir, Tag: "v1.2.0",
 	})
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
@@ -170,7 +172,8 @@ func TestCollectExcludesANestedModulesOwnCommits(t *testing.T) {
 	run("tag", "v1.2.0")
 
 	previous, commits, err := changelog.Collect(context.Background(), changelog.Source{
-		Dir: dir, Tag: "v1.2.0",
+		GitBin: "git",
+		Dir:    dir, Tag: "v1.2.0",
 	})
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
@@ -231,7 +234,8 @@ func TestCollectFallsBackToTheForgeWhenShallow(t *testing.T) {
 	client.SetEndpoints(server.URL, server.URL)
 
 	previous, commits, err := changelog.Collect(context.Background(), changelog.Source{
-		Dir: t.TempDir(), Tag: "v1.1.0", Shallow: true,
+		GitBin: "git",
+		Dir:    t.TempDir(), Tag: "v1.1.0", Shallow: true,
 		Client: client, Repo: github.Repo{Owner: "you", Name: "foo"},
 	})
 	if err != nil {
@@ -303,7 +307,8 @@ func TestCollectListsFullHistoryForAFirstRelease(t *testing.T) {
 	client.SetEndpoints(server.URL, server.URL)
 
 	previous, commits, err := changelog.Collect(context.Background(), changelog.Source{
-		Dir: t.TempDir(), Tag: "v1.0.0", Shallow: true,
+		GitBin: "git",
+		Dir:    t.TempDir(), Tag: "v1.0.0", Shallow: true,
 		Client: client, Repo: github.Repo{Owner: "you", Name: "foo"},
 	})
 	if err != nil {
@@ -363,7 +368,8 @@ func TestCollectScopesTheForgePreviousTagToItsOwnPrefix(t *testing.T) {
 	client.SetEndpoints(server.URL, server.URL)
 
 	previous, _, err := changelog.Collect(context.Background(), changelog.Source{
-		Dir: t.TempDir(), Tag: "services/api/v1.1.0", Prefix: "services/api/", Shallow: true,
+		GitBin: "git",
+		Dir:    t.TempDir(), Tag: "services/api/v1.1.0", Prefix: "services/api/", Shallow: true,
 		Client: client, Repo: github.Repo{Owner: "you", Name: "foo"},
 	})
 	if err != nil {
@@ -398,7 +404,8 @@ func TestCollectScopesAFirstReleaseCommitListToItsOwnPath(t *testing.T) {
 	client.SetEndpoints(server.URL, server.URL)
 
 	_, _, err := changelog.Collect(context.Background(), changelog.Source{
-		Dir: t.TempDir(), Tag: "services/api/v1.0.0", Prefix: "services/api/", Shallow: true,
+		GitBin: "git",
+		Dir:    t.TempDir(), Tag: "services/api/v1.0.0", Prefix: "services/api/", Shallow: true,
 		Client: client, Repo: github.Repo{Owner: "you", Name: "foo"},
 	})
 	if err != nil {
@@ -415,7 +422,8 @@ func TestFirstReleaseListsHistoryLocallyToo(t *testing.T) {
 	dir := firstReleaseRepo(t)
 
 	previous, commits, err := changelog.Collect(context.Background(), changelog.Source{
-		Dir: dir, Tag: "v1.0.0",
+		GitBin: "git",
+		Dir:    dir, Tag: "v1.0.0",
 	})
 	if err != nil {
 		t.Fatal(err)

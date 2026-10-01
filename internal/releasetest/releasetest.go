@@ -59,7 +59,7 @@ func NewRepo(t *testing.T) *Repo {
 // identity so commits are reproducible across machines and CI runners.
 func (r *Repo) Git(args ...string) {
 	r.t.Helper()
-	gitBin, _, err := discover.GitSource()
+	gitBin, _, err := discover.GitBinary(nil)
 	if err != nil {
 		r.t.Fatal(err)
 	}

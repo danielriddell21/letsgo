@@ -322,6 +322,7 @@ func builtFile(name string) func(*testing.T, []string) bool {
 func notesOf(t *testing.T, disabled, required []string, client *github.Client, sum []byte) (string, error) {
 	t.Helper()
 	p := &plan.Plan{
+		GitBin:   "git",
 		Features: feature.Resolve(disabled),
 		Required: required,
 		Module:   discover.Module{Dir: notestest.History(t)},
@@ -397,6 +398,7 @@ func proxyWarmRan(t *testing.T, disabled []string) bool {
 	t.Cleanup(server.Close)
 
 	p := &plan.Plan{
+		GitBin: "git",
 		// sumdb is off so that the release reaches nothing but the proxy.
 		Features: feature.Resolve(quietly(disabled, "sumdb")),
 		Config:   &config.Config{},
