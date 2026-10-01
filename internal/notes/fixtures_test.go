@@ -1,6 +1,4 @@
-// Package notestest holds the fixtures the release-notes tests share: a
-// repository with a history, and a forge that serves a manifest.
-package notestest
+package notes
 
 import (
 	"encoding/json"
@@ -15,10 +13,10 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
-// Forge serves one release whose only asset (when m is non-nil) is the
+// forge serves one release whose only asset (when m is non-nil) is the
 // manifest itself, reachable the way DownloadAsset actually fetches it: by
 // numeric asset ID through the API host, not a browser_download_url.
-func Forge(t *testing.T, repoName, tag string, m *manifest.Manifest) *github.Client {
+func forge(t *testing.T, repoName, tag string, m *manifest.Manifest) *github.Client {
 	t.Helper()
 
 	mux := http.NewServeMux()
@@ -45,9 +43,9 @@ func Forge(t *testing.T, repoName, tag string, m *manifest.Manifest) *github.Cli
 	return client
 }
 
-// History writes a repository with two tags, so a local changelog Collect can
+// history writes a repository with two tags, so a local changelog Collect can
 // resolve a real "previous" release without touching the network.
-func History(t *testing.T) string {
+func history(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 

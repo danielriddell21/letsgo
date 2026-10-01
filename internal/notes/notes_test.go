@@ -11,7 +11,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/manifest"
-	"github.com/danielriddell21/letsgo/internal/notes/notestest"
 	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -53,7 +52,7 @@ func TestWhatShippedSkipsAPreviousReleaseWithNoManifest(t *testing.T) {
 	var logged []string
 	s := Source{
 		Plan:     &plan.Plan{},
-		Client:   notestest.Forge(t, "you/demo", "v1.0.0", nil), // no manifest: no asset to find
+		Client:   forge(t, "you/demo", "v1.0.0", nil), // no manifest: no asset to find
 		Repo:     repo,
 		Manifest: manifestOf("v1.1.0", "go1.26.2"),
 		Logf:     func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
@@ -74,7 +73,7 @@ func TestWhatShippedSkipsAPreviousReleaseWithNoManifest(t *testing.T) {
 // The skip notice is a courtesy: a caller with nowhere to put it still ships.
 func TestWhatShippedSkipsQuietlyWithoutALogger(t *testing.T) {
 	s := Source{
-		Plan: &plan.Plan{}, Client: notestest.Forge(t, "you/demo", "v1.0.0", nil), Repo: repo,
+		Plan: &plan.Plan{}, Client: forge(t, "you/demo", "v1.0.0", nil), Repo: repo,
 		Manifest: manifestOf("v1.1.0", "go1.26.2"),
 	}
 	if out, err := s.whatShipped(context.Background(), "v1.0.0"); err != nil || out != "" {
@@ -91,7 +90,7 @@ func TestWhatShippedFailsWhenRequiredAndNothingToCompare(t *testing.T) {
 		t.Error("a first release should fail when diff-notes is required")
 	}
 
-	s.Client = notestest.Forge(t, "you/demo", "v1.0.0", nil)
+	s.Client = forge(t, "you/demo", "v1.0.0", nil)
 	if _, err := s.whatShipped(context.Background(), "v1.0.0"); err == nil {
 		t.Error("a previous release with no manifest should fail when diff-notes is required")
 	}
@@ -100,7 +99,7 @@ func TestWhatShippedFailsWhenRequiredAndNothingToCompare(t *testing.T) {
 func TestWhatShippedRendersTheCollapsedSection(t *testing.T) {
 	s := Source{
 		Plan:     &plan.Plan{},
-		Client:   notestest.Forge(t, "you/demo", "v1.0.0", manifestOf("v1.0.0", "go1.26.1")),
+		Client:   forge(t, "you/demo", "v1.0.0", manifestOf("v1.0.0", "go1.26.1")),
 		Repo:     repo,
 		Manifest: manifestOf("v1.1.0", "go1.26.2"),
 	}
@@ -122,12 +121,12 @@ func TestWhatShippedRendersTheCollapsedSection(t *testing.T) {
 func TestReleaseAppendsWhatShippedUsingTheChangelogsPreviousRelease(t *testing.T) {
 	p := &plan.Plan{
 		Features: feature.Resolve(nil),
-		Module:   discover.Module{Dir: notestest.History(t)},
+		Module:   discover.Module{Dir: history(t)},
 		Tag:      "v1.1.0",
 	}
 	got, err := Release(context.Background(), Source{
 		Plan:     p,
-		Client:   notestest.Forge(t, "you/demo", "v1.0.0", manifestOf("v1.0.0", "go1.26.1")),
+		Client:   forge(t, "you/demo", "v1.0.0", manifestOf("v1.0.0", "go1.26.1")),
 		Repo:     repo,
 		Manifest: manifestOf("v1.1.0", "go1.26.2"),
 	})
@@ -150,7 +149,7 @@ func TestReleaseAppendsWhatShippedUsingTheChangelogsPreviousRelease(t *testing.T
 func TestReleaseOmitsWhatShippedWhenDisabled(t *testing.T) {
 	p := &plan.Plan{
 		Features: feature.Resolve([]string{"diff-notes"}),
-		Module:   discover.Module{Dir: notestest.History(t)},
+		Module:   discover.Module{Dir: history(t)},
 		Tag:      "v1.1.0",
 	}
 	got, err := Release(context.Background(), Source{Plan: p, Manifest: manifestOf("v1.1.0", "go1.26.2")})
@@ -168,7 +167,7 @@ func TestReleaseOmitsWhatShippedWhenDisabled(t *testing.T) {
 func TestReleaseEndsWithTheManifestFingerprint(t *testing.T) {
 	p := &plan.Plan{
 		Features: feature.Resolve([]string{"diff-notes"}),
-		Module:   discover.Module{Dir: notestest.History(t)},
+		Module:   discover.Module{Dir: history(t)},
 		Tag:      "v1.1.0",
 	}
 	sum := sha256.Sum256([]byte("manifest"))
@@ -196,7 +195,7 @@ func TestReleaseEndsWithTheManifestFingerprint(t *testing.T) {
 func TestReleaseOmitsTheFingerprintWhenDisabled(t *testing.T) {
 	p := &plan.Plan{
 		Features: feature.Resolve([]string{"diff-notes", "randomart"}),
-		Module:   discover.Module{Dir: notestest.History(t)},
+		Module:   discover.Module{Dir: history(t)},
 		Tag:      "v1.1.0",
 	}
 	sum := sha256.Sum256([]byte("manifest"))
@@ -235,10 +234,10 @@ func TestReleasePropagatesFailures(t *testing.T) {
 	required := &plan.Plan{
 		Features: feature.Resolve([]string{"randomart"}),
 		Required: []string{"diff-notes"},
-		Module:   discover.Module{Dir: notestest.History(t)},
+		Module:   discover.Module{Dir: history(t)},
 		Tag:      "v1.1.0",
 	}
-	s := Source{Plan: required, Client: notestest.Forge(t, "you/demo", "v1.0.0", nil), Repo: repo}
+	s := Source{Plan: required, Client: forge(t, "you/demo", "v1.0.0", nil), Repo: repo}
 	if _, err := Release(context.Background(), s); err == nil {
 		t.Error("a required diff-notes with nothing to compare should fail")
 	}
@@ -253,7 +252,7 @@ func TestReleaseSaysWhenItReadsAShallowCloneFromTheForge(t *testing.T) {
 	p.Git.Shallow = true
 	var logged []string
 	_, _ = Release(context.Background(), Source{
-		Plan: p, Client: notestest.Forge(t, "you/demo", "v1.0.0", nil), Repo: repo,
+		Plan: p, Client: forge(t, "you/demo", "v1.0.0", nil), Repo: repo,
 		Logf: func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
 	})
 	if len(logged) == 0 || !strings.Contains(logged[0], "shallow clone") {
