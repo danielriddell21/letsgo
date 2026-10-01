@@ -13,8 +13,14 @@ import (
 func TestResolveReportsEachState(t *testing.T) {
 	noStore(t)
 	dir, digest := fake(t, `echo '{}'`)
-	onPath := func(t *testing.T) { t.Setenv("PATH", dir) }
-	empty := func(t *testing.T) { t.Setenv("PATH", t.TempDir()) }
+	onPath := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("PATH", dir)
+	}
+	empty := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("PATH", t.TempDir())
+	}
 
 	tests := map[string]struct {
 		setup  func(*testing.T)
