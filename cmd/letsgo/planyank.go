@@ -124,7 +124,7 @@ func applyYank(ctx context.Context, file *plandiff.File, tokens diffTokens) erro
 	if err := yankStaleness(file.Actions, current, "letsgo plan -yank "+file.Tag+" -out"); err != nil {
 		return err
 	}
-	for _, name := range alreadyDone(file.Actions, current) {
+	for _, name := range apply.AlreadyDone(file.Actions, current) {
 		fmt.Printf("  = %s is already as planned; skipped\n", name)
 	}
 
@@ -152,7 +152,7 @@ func touches(actions []plandiff.Action, kind plandiff.Kind) bool {
 // no rebuild, so without this a release body or go.mod that came out
 // differently would be written without anyone having agreed it.
 func yankStaleness(saved, current []plandiff.Action, remake string) error {
-	if err := staleness(saved, current, remake); err != nil {
+	if err := apply.Stale(saved, current, remake); err != nil {
 		return err
 	}
 	now := make(map[string]plandiff.Action, len(current))

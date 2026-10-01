@@ -1,4 +1,4 @@
-package main
+package apply
 
 import (
 	"crypto/sha256"
@@ -32,9 +32,9 @@ func writingManifest(op plandiff.Op) []plandiff.Action {
 
 func TestStampAppliedLeavesAReleaseWithoutAPlanAlone(t *testing.T) {
 	result := stampFixture(t)
-	got, err := stampApplied(nil, result)
+	got, err := Stamp(nil, result)
 	if err != nil || got != nil || result.Manifest.Plan != nil {
-		t.Errorf("stampApplied(nil) = %v, %v; plan %+v", got, err, result.Manifest.Plan)
+		t.Errorf("Stamp(nil) = %v, %v; plan %+v", got, err, result.Manifest.Plan)
 	}
 }
 
@@ -44,7 +44,7 @@ func TestStampAppliedLeavesAPlanThatKeepsTheManifestAlone(t *testing.T) {
 	result := stampFixture(t)
 	file := &plandiff.File{Actions: writingManifest(plandiff.Keep)}
 
-	got, err := stampApplied(file, result)
+	got, err := Stamp(file, result)
 	if err != nil || got != file || result.Manifest.Plan != nil {
 		t.Errorf("stampApplied = %v, %v; plan %+v, want no stamp", got, err, result.Manifest.Plan)
 	}
@@ -60,7 +60,7 @@ func TestStampAppliedRecordsAndAttachesThePlan(t *testing.T) {
 		Manifest: []byte(`{}`), Actions: writingManifest(plandiff.Add),
 	}
 
-	got, err := stampApplied(file, result)
+	got, err := Stamp(file, result)
 	if err != nil {
 		t.Fatalf("stampApplied: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestStampAppliedReportsAnUnwritableRelease(t *testing.T) {
 	result.Dir = filepath.Join(t.TempDir(), "missing")
 	file := &plandiff.File{Manifest: []byte(`{}`), Actions: writingManifest(plandiff.Add)}
 
-	if _, err := stampApplied(file, result); err == nil {
+	if _, err := Stamp(file, result); err == nil {
 		t.Error("stampApplied succeeded with nowhere to write")
 	}
 }
@@ -104,7 +104,7 @@ func TestHoldAndStampRefusesARebuildThatIsNotThePlan(t *testing.T) {
 	result := stampFixture(t)
 	file := &plandiff.File{Tag: "v1.0.0", Actions: writingManifest(plandiff.Add)}
 
-	if _, err := holdAndStamp(file, resolvedPlan("v2.0.0", "abc"), result); err == nil {
+	if _, err := HoldAndStamp(file, resolvedPlan("v2.0.0", "abc"), result, discard); err == nil {
 		t.Error("holdAndStamp accepted a rebuild of another tag")
 	}
 	if result.Manifest.Plan != nil {
@@ -119,8 +119,15 @@ func TestHoldAndStampStampsARebuildThatMatchesThePlan(t *testing.T) {
 	file := planFileFor("v1.3.0", "abc", `{"version":"1.3.0"}`, digest)
 	file.Actions = writingManifest(plandiff.Add)
 
-	got, err := holdAndStamp(file, resolvedPlan("v1.3.0", "abc"), result)
+	got, err := HoldAndStamp(file, resolvedPlan("v1.3.0", "abc"), result, discard)
 	if err != nil || got == nil || result.Manifest.Plan == nil {
 		t.Fatalf("holdAndStamp = %v, %v; want the release stamped", got, err)
+	}
+}
+
+func TestStampReportsAPlanItCannotEncode(t *testing.T) {
+	file := &plandiff.File{Manifest: []byte(`{`), Actions: writingManifest(plandiff.Add)}
+	if _, err := Stamp(file, stampFixture(t)); err == nil {
+		t.Error("Stamp encoded a plan whose manifest is not JSON")
 	}
 }

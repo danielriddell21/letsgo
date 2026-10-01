@@ -6,13 +6,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/bump"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
-	"github.com/danielriddell21/letsgo/internal/release"
 )
 
 func releasePlan() *plan.Plan {
@@ -22,20 +20,6 @@ func releasePlan() *plan.Plan {
 		Repo:    discover.Repo{Host: "github.com", Owner: "you", Name: "foo"},
 		HasRepo: true,
 		Config:  &config.Config{},
-	}
-}
-
-func built(artifacts ...build.Artifact) *release.Result {
-	return &release.Result{Artifacts: artifacts}
-}
-
-func artifact(archive, goos, goarch, sum string, binaries ...string) build.Artifact {
-	built := make([]build.Binary, len(binaries))
-	for i, b := range binaries {
-		built[i] = build.Binary{Name: b}
-	}
-	return build.Artifact{
-		Archive: archive, OS: goos, Arch: goarch, ArchiveSHA256: sum, Binaries: built,
 	}
 }
 
