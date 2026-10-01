@@ -906,23 +906,30 @@ func runDiff(args []string) error {
 	var (
 		client *github.Client
 		repo   github.Repo
+		scope  discover.Scope
 	)
 	from, to := fs.Arg(0), fs.Arg(1)
 	if !isManifestPath(from) || !isManifestPath(to) {
 		var err error
-		if repo, _, err = targetRepo(ctx, *repoFlag); err != nil {
+		var dir string
+		if repo, dir, err = targetRepo(ctx, *repoFlag); err != nil {
 			return err
 		}
+		prefix, err := scopePrefix(ctx, *repoFlag, dir)
+		if err != nil {
+			return err
+		}
+		scope = discover.Scope{Prefix: prefix}
 		tokenValue, _ := plan.Token(*token)
 		client = github.New(tokenValue)
 		client.UserAgent = "letsgo/" + version
 	}
 
-	before, err := loadManifest(ctx, client, repo, from)
+	before, err := loadManifest(ctx, client, repo, scope, from)
 	if err != nil {
 		return err
 	}
-	after, err := loadManifest(ctx, client, repo, to)
+	after, err := loadManifest(ctx, client, repo, scope, to)
 	if err != nil {
 		return err
 	}
@@ -950,11 +957,11 @@ func printDiff(result *diff.Result, format string) error {
 
 // loadManifest resolves one side of a diff, which is either a file on disk or
 // a tag on the forge. An empty reference means the latest release.
-func loadManifest(ctx context.Context, client *github.Client, repo github.Repo, ref string) (*manifest.Manifest, error) {
+func loadManifest(ctx context.Context, client *github.Client, repo github.Repo, scope discover.Scope, ref string) (*manifest.Manifest, error) {
 	if isManifestPath(ref) {
 		return manifest.Read(ref)
 	}
-	return diff.Fetch(ctx, client, repo, ref)
+	return diff.Fetch(ctx, client, repo, scope, ref)
 }
 
 // isManifestPath reports whether a reference names a local manifest rather
@@ -1314,7 +1321,7 @@ func whatShipped(
 		}
 		return "", nil
 	}
-	before, err := diff.Fetch(ctx, client, repo, previous)
+	before, err := diff.Fetch(ctx, client, repo, discover.Scope{}, previous)
 	if err != nil {
 		if strict {
 			return "", fmt.Errorf("diff-notes is required, but %s has no manifest to compare: %w", previous, err)

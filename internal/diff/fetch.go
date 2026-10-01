@@ -15,10 +15,10 @@ import (
 //
 // An empty tag means the most recent release, so that comparing against "what
 // is out there now" does not require knowing what that is.
-func Fetch(ctx context.Context, c *github.Client, repo github.Repo, tag string) (*manifest.Manifest, error) {
+func Fetch(ctx context.Context, c *github.Client, repo github.Repo, scope discover.Scope, tag string) (*manifest.Manifest, error) {
 	src := &githubsource.Source{Client: c, Repo: repo}
 
-	release, err := find(ctx, src, repo, tag)
+	release, err := find(ctx, src, repo, scope, tag)
 	if err != nil {
 		return nil, err
 	}
@@ -33,9 +33,9 @@ func Fetch(ctx context.Context, c *github.Client, repo github.Repo, tag string) 
 	return m, err
 }
 
-func find(ctx context.Context, src releases.LatestSource, repo github.Repo, tag string) (*releases.Published, error) {
+func find(ctx context.Context, src releases.LatestSource, repo github.Repo, scope discover.Scope, tag string) (*releases.Published, error) {
 	if tag == "" {
-		release, err := releases.Latest(ctx, src, discover.Scope{})
+		release, err := releases.Latest(ctx, src, scope)
 		if err != nil {
 			return nil, err
 		}

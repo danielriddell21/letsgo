@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/diff"
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -48,7 +49,7 @@ func yankOptions(m moduleRepo, t yankTarget, tokens diffTokens) yank.Options {
 		Caveats:  brewCaveats(m.Module.Dir),
 		Previous: t.Previous,
 		Manifests: func(ctx context.Context, tag string) (*manifest.Manifest, error) {
-			return diff.Fetch(ctx, m.Client, m.Repo, tag)
+			return diff.Fetch(ctx, m.Client, m.Repo, discover.Scope{}, tag)
 		},
 	}
 	if !t.KeepTap {
