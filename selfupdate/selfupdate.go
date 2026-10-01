@@ -24,17 +24,16 @@ package selfupdate
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
@@ -143,7 +142,7 @@ func Check(ctx context.Context, o Options) (*Update, error) {
 	if err != nil {
 		return nil, err
 	}
-	if o.Tag == "" && !newer(o.Current, release.TagName, o.Prefix) {
+	if o.Tag == "" && !newer(o.Current, release.Tag, o.Prefix) {
 		return nil, nil
 	}
 
@@ -156,27 +155,27 @@ func Check(ctx context.Context, o Options) (*Update, error) {
 	if !ok {
 		if o.Binary != "" {
 			return nil, fmt.Errorf("selfupdate: %s has no %s/%s build of %s",
-				release.TagName, o.OS, o.Arch, o.Binary)
+				release.Tag, o.OS, o.Arch, o.Binary)
 		}
-		return nil, fmt.Errorf("selfupdate: %s has no %s/%s build", release.TagName, o.OS, o.Arch)
+		return nil, fmt.Errorf("selfupdate: %s has no %s/%s build", release.Tag, o.OS, o.Arch)
 	}
 
-	asset, ok := release.asset(artifact.Name)
+	asset, ok := release.Asset(artifact.Name)
 	if !ok {
 		return nil, fmt.Errorf("selfupdate: %s describes %s but does not attach it",
-			release.TagName, artifact.Name)
+			release.Tag, artifact.Name)
 	}
 
 	return &Update{
 		Version:      m.Version,
-		Tag:          release.TagName,
+		Tag:          release.Tag,
 		Notes:        release.Body,
-		URL:          release.HTMLURL,
+		URL:          release.URL,
 		Archive:      artifact.Name,
 		SHA256:       artifact.SHA256,
 		BinarySHA256: artifact.BinarySHA256,
 		Binary:       binaryName(artifact, m.Project, o.OS),
-		downloadURL:  asset.BrowserDownloadURL,
+		downloadURL:  asset.URL,
 		options:      o,
 	}, nil
 }
@@ -286,161 +285,53 @@ func read(resp *http.Response) ([]byte, error) {
 	return data, nil
 }
 
-type release struct {
-	TagName string  `json:"tag_name"`
-	Body    string  `json:"body"`
-	HTMLURL string  `json:"html_url"`
-	Draft   bool    `json:"draft"`
-	Assets  []asset `json:"assets"`
-}
-
-type asset struct {
-	Name               string `json:"name"`
-	BrowserDownloadURL string `json:"browser_download_url"`
-}
-
-func (r *release) asset(name string) (asset, bool) {
-	for _, a := range r.Assets {
-		if a.Name == name {
-			return a, true
-		}
-	}
-	return asset{}, false
-}
-
 // resolveRelease fetches the release asked for: one exact tag, a channel, or
 // the newest stable release.
-func resolveRelease(ctx context.Context, o Options) (*release, error) {
-	if o.Tag != "" {
-		return releaseByTag(ctx, o)
-	}
-	if o.Channel != "" {
-		return channelRelease(ctx, o)
-	}
-	return latestRelease(ctx, o)
-}
-
-func releaseByTag(ctx context.Context, o Options) (*release, error) {
-	return releaseForTag(ctx, o, o.Tag)
-}
-
-func releaseForTag(ctx context.Context, o Options, tag string) (*release, error) {
-	resp, err := o.get(ctx, fmt.Sprintf("%s/repos/%s/releases/tags/%s", o.api(), o.Repo, url.PathEscape(tag)))
-	if err != nil {
-		return nil, err
-	}
-	data, err := read(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	var out release
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("selfupdate: parsing release %s: %w", tag, err)
-	}
-	if out.TagName == "" {
-		return nil, fmt.Errorf("selfupdate: %s has no release %s", o.Repo, tag)
-	}
-	return &out, nil
-}
-
-// latestRelease finds the newest stable release, scoped to o.Prefix when it
-// is set. The forge's own "latest release" has no concept of a monorepo's
-// scopes, so a scoped module instead lists releases and applies the same
-// draft, prerelease and yanked rules the forge applies to the unscoped one.
-func latestRelease(ctx context.Context, o Options) (*release, error) {
-	if o.Prefix == "" {
-		return unscopedLatestRelease(ctx, o)
-	}
-
-	best, err := bestRelease(ctx, o, func(v semver.Version) bool { return !v.IsPrerelease() })
-	if err != nil {
-		return nil, err
-	}
-	if best == nil {
-		return nil, fmt.Errorf("selfupdate: %s has no releases", o.Repo)
-	}
-	return best, nil
-}
-
-func unscopedLatestRelease(ctx context.Context, o Options) (*release, error) {
-	resp, err := o.get(ctx, fmt.Sprintf("%s/repos/%s/releases/latest", o.api(), o.Repo))
-	if err != nil {
-		return nil, err
-	}
-	data, err := read(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	var out release
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("selfupdate: parsing the latest release: %w", err)
-	}
-	if out.TagName == "" {
-		return nil, fmt.Errorf("selfupdate: %s has no releases", o.Repo)
-	}
-	return &out, nil
-}
-
-// retractionMarker is the prefix yank.Run writes at the top of a retracted
-// release's body (internal/yank's own "notice" constant); it is duplicated
-// here rather than imported so that this package does not pull the whole
-// publishing toolchain into every program that self-updates.
-const retractionMarker = "> [!CAUTION]"
-
-func isRetracted(body string) bool {
-	return strings.HasPrefix(body, retractionMarker)
-}
-
-// channelRelease finds the release a channel should follow: the highest of
-// the newest stable release and the newest release on the channel itself
-// (PR-17), excluding drafts and yanked releases. Unlike latestRelease, this
-// always lists releases rather than tags — a tag carries no draft or
-// retraction state, and both matter here.
-func channelRelease(ctx context.Context, o Options) (*release, error) {
-	best, err := bestRelease(ctx, o, func(v semver.Version) bool { return channelMatch(v, o.Channel) })
-	if err != nil {
-		return nil, err
-	}
-	if best == nil {
-		return nil, fmt.Errorf("selfupdate: %s has no releases on the %s channel", o.Repo, o.Channel)
-	}
-	return best, nil
-}
-
-// bestRelease is the highest-versioned release within o.Prefix's scope that
-// keep accepts, excluding drafts and yanked releases. It is nil when nothing
-// qualifies.
-func bestRelease(ctx context.Context, o Options, keep func(semver.Version) bool) (*release, error) {
-	releases, err := listReleases(ctx, o)
-	if err != nil {
-		return nil, err
-	}
-
+func resolveRelease(ctx context.Context, o Options) (*releases.Published, error) {
+	src := &source{o: o}
 	scope := discover.Scope{Prefix: o.Prefix}
-	var best *release
-	var bestVersion semver.Version
 
-	for i := range releases {
-		r := &releases[i]
-		if r.Draft || isRetracted(r.Body) {
-			continue
+	if o.Tag != "" {
+		r, err := releases.ByTag(ctx, src, o.Tag)
+		if err != nil {
+			return nil, err
 		}
-		rest, ok := scope.MatchesTag(r.TagName)
-		if !ok {
-			continue
+		if r == nil {
+			return nil, fmt.Errorf("selfupdate: %s has no release %s", o.Repo, o.Tag)
 		}
-		v, ok := semver.Parse(rest)
-		if !ok || !keep(v) {
-			continue
-		}
-		if best == nil || semver.Compare(v, bestVersion) > 0 {
-			best, bestVersion = r, v
-		}
+		return r, nil
 	}
-	return best, nil
+
+	if o.Channel != "" {
+		r, err := releases.Best(ctx, src, scope, func(v semver.Version) bool { return channelMatch(v, o.Channel) })
+		if err != nil {
+			return nil, err
+		}
+		if r == nil {
+			return nil, fmt.Errorf("selfupdate: %s has no releases on the %s channel", o.Repo, o.Channel)
+		}
+		return r, nil
+	}
+
+	// The forge's own "latest" has no concept of a monorepo's scopes, so a
+	// scoped module lists releases instead and applies the same rules.
+	var r *releases.Published
+	var err error
+	if o.Prefix == "" {
+		r, err = src.LatestRelease(ctx)
+	} else {
+		r, err = releases.Best(ctx, src, scope, stable)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return nil, fmt.Errorf("selfupdate: %s has no releases", o.Repo)
+	}
+	return r, nil
 }
+
+func stable(v semver.Version) bool { return !v.IsPrerelease() }
 
 // Latest reports the newest stable release, without looking at what it
 // contains: no manifest is fetched and nothing is compared with
@@ -454,14 +345,14 @@ func Latest(ctx context.Context, o Options) (string, error) {
 	if o.Repo == "" {
 		return "", fmt.Errorf("selfupdate: no repository given")
 	}
-	best, err := bestRelease(ctx, o, func(v semver.Version) bool { return !v.IsPrerelease() })
+	best, err := releases.Best(ctx, &source{o: o}, discover.Scope{Prefix: o.Prefix}, stable)
 	if err != nil {
 		return "", err
 	}
 	if best == nil {
 		return "", fmt.Errorf("selfupdate: %s has no stable releases", o.Repo)
 	}
-	rest, _ := (discover.Scope{Prefix: o.Prefix}).MatchesTag(best.TagName)
+	rest, _ := (discover.Scope{Prefix: o.Prefix}).MatchesTag(best.Tag)
 	return strings.TrimPrefix(rest, "v"), nil
 }
 
@@ -479,46 +370,14 @@ func channelMatch(v semver.Version, channel string) bool {
 	return name == channel
 }
 
-// listReleases fetches up to 100 releases, each already carrying what
-// channelRelease needs to judge it (tag, body, draft) and, for the one that
-// wins, what Check needs to offer it (assets) — so the winner needs no
-// second round trip.
-func listReleases(ctx context.Context, o Options) ([]release, error) {
-	resp, err := o.get(ctx, fmt.Sprintf("%s/repos/%s/releases?per_page=100", o.api(), o.Repo))
-	if err != nil {
-		return nil, err
-	}
-	data, err := read(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	var out []release
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("selfupdate: parsing releases: %w", err)
-	}
-	return out, nil
-}
-
-func fetchManifest(ctx context.Context, o Options, r *release) (*manifest.Manifest, error) {
-	a, ok := r.asset(manifest.FileName)
-	if !ok {
+func fetchManifest(ctx context.Context, o Options, r *releases.Published) (*manifest.Manifest, error) {
+	m, _, err := releases.Manifest(ctx, &source{o: o}, r)
+	if releases.IsNoManifest(err) {
 		return nil, fmt.Errorf(
 			"selfupdate: release %s has no %s, so there is nothing describing what to download\n"+
 				"  only releases published by letsgo can be self-updated",
-			r.TagName, manifest.FileName)
+			r.Tag, manifest.FileName)
 	}
-
-	resp, err := o.get(ctx, a.BrowserDownloadURL)
-	if err != nil {
-		return nil, err
-	}
-	data, err := read(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	m, err := manifest.Decode(data)
 	if err != nil {
 		return nil, fmt.Errorf("selfupdate: %w", err)
 	}

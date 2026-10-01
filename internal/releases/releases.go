@@ -30,6 +30,7 @@ type Published struct {
 	Tag        string
 	Name       string
 	Body       string
+	URL        string // the release page
 	Draft      bool
 	Prerelease bool
 	Immutable  bool
@@ -144,6 +145,37 @@ func Latest(ctx context.Context, src LatestSource, scope discover.Scope) (*Publi
 		return nil, nil
 	}
 	return src.ReleaseByTag(ctx, tag)
+}
+
+// Best finds the highest-versioned release in scope that keep accepts,
+// skipping drafts, retracted releases and out-of-scope tags. Nil when nothing
+// qualifies. keep sees the version with the scope's prefix removed.
+func Best(ctx context.Context, src ListSource, scope discover.Scope, keep func(semver.Version) bool) (*Published, error) {
+	all, err := src.ListReleases(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var best *Published
+	var bestVersion semver.Version
+	for i := range all {
+		r := &all[i]
+		if r.Draft || r.Retracted() {
+			continue
+		}
+		rest, ok := scope.MatchesTag(r.Tag)
+		if !ok {
+			continue
+		}
+		v, ok := semver.Parse(rest)
+		if !ok || !keep(v) {
+			continue
+		}
+		if best == nil || semver.Compare(v, bestVersion) > 0 {
+			best, bestVersion = r, v
+		}
+	}
+	return best, nil
 }
 
 // PerMajor returns the newest stable release of each major version in scope,

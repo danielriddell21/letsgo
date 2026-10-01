@@ -70,6 +70,7 @@ func convert(r *github.Release) releases.Published {
 		Tag:        r.TagName,
 		Name:       r.Name,
 		Body:       r.Body,
+		URL:        r.HTMLURL,
 		Draft:      r.Draft,
 		Prerelease: r.Prerelease,
 		Immutable:  r.Immutable,

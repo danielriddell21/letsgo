@@ -700,3 +700,73 @@ func TestCheckScopedWithNoChannelSkipsPrereleasesDraftsAndYanked(t *testing.T) {
 		t.Fatalf("update = %+v, want %sv1.1.0, the newest stable release in scope", update, prefix)
 	}
 }
+
+// A forge answering with something that is not a release must be reported,
+// not read as a release or as the absence of one.
+func TestCheckRejectsAMalformedForgeAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, tag, prefix, want string
+	}{
+		{"unparseable list", "not json", "", "services/api/", "parsing releases"},
+		{"tag with no release", "{}", "v1.0.0", "", "has no release v1.0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(server.Close)
+
+			_, err := selfupdate.Check(context.Background(), selfupdate.Options{
+				Repo: "you/tool", Current: "1.0.0", APIEndpoint: server.URL, OS: "linux", Arch: "amd64",
+				Tag: tc.tag, Prefix: tc.prefix,
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// Every step of a check must report its own failure: a listing the forge
+// cuts short, a manifest that will not download and one that is not a manifest.
+func TestCheckReportsEachStepsFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		channel string
+		handler func(w http.ResponseWriter)
+		want    string
+	}{
+		{"listing cut short", "beta", func(w http.ResponseWriter) {
+			w.Header().Set("Content-Length", "100")
+			_, _ = w.Write([]byte("[{"))
+		}, "reading response"},
+		{"manifest does not download", "", func(w http.ResponseWriter) {
+			w.WriteHeader(http.StatusNotFound)
+		}, "404"},
+		{"manifest is not one", "", func(w http.ResponseWriter) {
+			_, _ = w.Write([]byte("not json"))
+		}, "selfupdate:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var server *httptest.Server
+			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/repos/you/tool/releases/latest":
+					_, _ = fmt.Fprintf(w, `{"tag_name":"v2.0.0","assets":[{"name":"letsgo.json","browser_download_url":%q}]}`,
+						server.URL+"/letsgo.json")
+				default:
+					tc.handler(w)
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			_, err := selfupdate.Check(context.Background(), selfupdate.Options{
+				Repo: "you/tool", Current: "1.0.0", APIEndpoint: server.URL, OS: "linux", Arch: "amd64",
+				Channel: tc.channel,
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}

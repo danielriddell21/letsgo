@@ -10,6 +10,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/releases"
+	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
 // fake is an in-memory forge. It mirrors the forge's rules that callers lean
@@ -287,4 +288,35 @@ func tagOf(p *releases.Published) string {
 		return ""
 	}
 	return p.Tag
+}
+
+func TestBest(t *testing.T) {
+	all := []releases.Published{
+		rel("api/v1.0.0"),
+		rel("api/v1.2.0-beta.1"),
+		rel("api/v1.1.0", yanked),
+		rel("api/v1.3.0", draft),
+		rel("v9.0.0"), // out of scope
+		rel("api/not-a-version"),
+	}
+	scope := discover.Scope{Dir: "api", Prefix: "api/"}
+
+	got, err := releases.Best(t.Context(), &fake{all: all}, scope, func(semver.Version) bool { return true })
+	if err != nil || got == nil || got.Tag != "api/v1.2.0-beta.1" {
+		t.Fatalf("Best(any) = %v, %v, want the beta", got, err)
+	}
+
+	got, err = releases.Best(t.Context(), &fake{all: all}, scope, func(v semver.Version) bool { return !v.IsPrerelease() })
+	if err != nil || got == nil || got.Tag != "api/v1.0.0" {
+		t.Fatalf("Best(stable) = %v, %v, want v1.0.0", got, err)
+	}
+
+	got, err = releases.Best(t.Context(), &fake{all: all}, scope, func(semver.Version) bool { return false })
+	if err != nil || got != nil {
+		t.Fatalf("Best(none) = %v, %v, want nil", got, err)
+	}
+
+	if _, err := releases.Best(t.Context(), &fake{listErr: errors.New("boom")}, scope, nil); err == nil {
+		t.Fatal("a listing error was swallowed")
+	}
 }
