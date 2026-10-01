@@ -41,7 +41,7 @@ func rebuild(ctx context.Context, o Options, result *Result, release *releases.P
 	result.SourceFrom = from
 	result.add("source", Pass, "%s", from)
 
-	checkToolchain(ctx, result, m)
+	checkToolchain(ctx, o.GoBin, result, m)
 
 	moduleDir := filepath.Join(source, filepath.FromSlash(m.ModuleDir))
 
@@ -142,8 +142,8 @@ func extractSource(ctx context.Context, o Options, release *releases.Published, 
 	return untar(data, dir)
 }
 
-func checkToolchain(ctx context.Context, result *Result, m *manifest.Manifest) {
-	local, err := gobuild.Version(ctx, "")
+func checkToolchain(ctx context.Context, goBin string, result *Result, m *manifest.Manifest) {
+	local, err := gobuild.Version(ctx, goBin)
 	if err != nil {
 		result.add("toolchain", Warn, "%v", err)
 		return
@@ -177,6 +177,7 @@ func compareRebuilt(
 
 	for _, group := range groups {
 		produced, err := build.Run(ctx, build.Options{
+			GoBin:        o.GoBin,
 			ModuleDir:    moduleDir,
 			FilesDir:     moduleDir,
 			Commands:     group.commands,

@@ -116,7 +116,11 @@ func TestRunReportsNoGoModCheckWhenTheDirectiveIsSatisfied(t *testing.T) {
 }
 
 func TestRunWarnsWhenGoModWantsADifferentVersion(t *testing.T) {
-	local, err := gobuild.Version(context.Background(), "")
+	goBin, _, err := gobuild.Toolchain(nil)
+	if err != nil {
+		t.Skipf("no go command: %v", err)
+	}
+	local, err := gobuild.Version(context.Background(), goBin)
 	if err != nil {
 		t.Fatalf("gobuild.Version: %v", err)
 	}

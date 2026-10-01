@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/gate"
+	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
@@ -27,7 +28,7 @@ func library(t *testing.T, firstAPI, secondAPI, secondTag string) *repo {
 
 func requireAPIDiff(t *testing.T) {
 	t.Helper()
-	if _, err := gate.APIDiff(context.Background(), t.TempDir(), t.TempDir()); err != nil &&
+	if _, err := gate.APIDiff(context.Background(), goBin(t), t.TempDir(), t.TempDir()); err != nil &&
 		strings.Contains(err.Error(), "not installed") {
 		t.Skip("apidiff is not installed")
 	}
@@ -193,4 +194,13 @@ func TestAPIGateSkipsAModuleWithNothingImportable(t *testing.T) {
 			t.Errorf("mod %q: api compatibility = %+v, want a skip naming the reason", mod, c)
 		}
 	}
+}
+
+func goBin(t *testing.T) string {
+	t.Helper()
+	bin, _, err := gobuild.Toolchain(nil)
+	if err != nil {
+		t.Skipf("no go command: %v", err)
+	}
+	return bin
 }

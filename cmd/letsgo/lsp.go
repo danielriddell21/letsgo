@@ -33,7 +33,7 @@ func runLSP(args []string) error {
 		// A go binary that can't be resolved is not fatal: build-target
 		// completion just comes back empty, the same as it does in
 		// restricted mode.
-		goBin, _ = gobuild.Toolchain()
+		goBin, _, _ = gobuild.Toolchain(machineConfig())
 	}
 
 	server := lsp.NewServer(os.Stdin, os.Stdout, lsp.Options{Restricted: *restricted, GoBin: goBin, PluginsDir: machineConfig().PluginsDir, ResolvePin: resolvePin, InstallPin: installPin})

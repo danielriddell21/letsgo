@@ -23,6 +23,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/diff"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
+	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -681,10 +682,12 @@ func (f forge) runVerify(args []string) error {
 	}
 	defer run.cleanup()
 
+	goBin, _, _ := gobuild.Toolchain(machineConfig())
 	result, err := verify.Run(ctx, verify.Options{
 		Client: run.Client, Repo: run.Repo, Tag: fs.Arg(0), Prefix: run.Prefix,
 		Dir: run.Dir, WorkDir: run.WorkDir, SkipRebuild: *noRebuild,
 		UserAgent: "letsgo/" + version,
+		GoBin:     goBin,
 	})
 	if err != nil {
 		return err
@@ -1132,12 +1135,13 @@ func proposeVersion(
 		apiErr  = errors.New("no earlier release to compare against")
 	)
 	if previous != "" {
+		goBin, _, _ := gobuild.Toolchain(machineConfig())
 		old, cleanup, err := checkoutForDiff(ctx, module.Dir, previous, scope.Dir)
 		if err != nil {
 			apiErr = err
 		} else {
 			defer cleanup()
-			changes, apiErr = gate.APIDiff(ctx, old, module.Dir)
+			changes, apiErr = gate.APIDiff(ctx, goBin, old, module.Dir)
 		}
 	}
 

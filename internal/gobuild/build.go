@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -56,7 +57,7 @@ type Request struct {
 	// LDFlags are appended after the default "-s -w", typically -X assignments.
 	LDFlags []string
 
-	// GoBin overrides the toolchain binary. Defaults to "go" on PATH.
+	// GoBin is the go command, as resolved by Toolchain.
 	GoBin string
 
 	// Toolchain pins the Go version, e.g. "go1.24.7". The toolchain is a
@@ -82,12 +83,8 @@ func Build(ctx context.Context, req Request) error {
 		return fmt.Errorf("gobuild: Output is required")
 	}
 
-	gobin := req.GoBin
-	if gobin == "" {
-		var err error
-		if gobin, err = Toolchain(); err != nil {
-			return err
-		}
+	if req.GoBin == "" {
+		return fmt.Errorf("gobuild: GoBin is required")
 	}
 
 	ldflags := append([]string{"-s", "-w"}, req.LDFlags...)
@@ -119,9 +116,9 @@ func Build(ctx context.Context, req Request) error {
 		req.Package,
 	)
 
-	cmd := exec.CommandContext(ctx, gobin, args...)
+	cmd := exec.CommandContext(ctx, req.GoBin, args...)
 	cmd.Dir = req.Dir
-	cmd.Env = environ(req.Target, req.Toolchain)
+	cmd.Env = environ(req.Target, req.Toolchain, req.GoBin)
 
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
@@ -170,7 +167,7 @@ var passthrough = []string{
 	"NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
 }
 
-func environ(t Target, toolchain string) []string {
+func environ(t Target, toolchain, goBin string) []string {
 	env := make(map[string]string, len(passthrough)+6)
 
 	for _, key := range passthrough {
@@ -211,7 +208,7 @@ func environ(t Target, toolchain string) []string {
 	// Rebuilt rather than inherited. A subprocess handed the caller's PATH can
 	// be redirected by a writable directory on it, and the toolchain execs
 	// plenty of its own helpers.
-	env["PATH"] = safeexec.FixedPath(toolchainDir())
+	env["PATH"] = safeexec.FixedPath(toolchainDir(goBin))
 
 	if toolchain != "" {
 		env["GOTOOLCHAIN"] = toolchain
@@ -231,17 +228,23 @@ func environ(t Target, toolchain string) []string {
 // input and belongs in the release manifest.
 func Version(ctx context.Context, goBin string) (string, error) {
 	if goBin == "" {
-		var err error
-		if goBin, err = Toolchain(); err != nil {
-			return "", err
-		}
+		return "", fmt.Errorf("gobuild: the go command is required")
 	}
 
 	cmd := exec.CommandContext(ctx, goBin, "env", "GOVERSION")
-	cmd.Env = Env(Host(), "")
+	cmd.Env = Env(Host(), "", goBin)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("gobuild: reading GOVERSION: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// toolchainDir is the directory holding the go command, which the subprocess
+// needs on PATH so the toolchain can find its own helpers.
+func toolchainDir(goBin string) string {
+	if goBin == "" {
+		return ""
+	}
+	return filepath.Dir(goBin)
 }

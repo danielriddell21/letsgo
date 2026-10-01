@@ -252,6 +252,7 @@ func run(t *testing.T, p *published, o verify.Options) *verify.Result {
 	}
 	o.Repo = github.Repo{Owner: "you", Name: "demo"}
 	o.WorkDir = t.TempDir()
+	o.GoBin = goBin(t)
 
 	result, err := verify.Run(context.Background(), o)
 	if err != nil {
@@ -614,6 +615,7 @@ func TestMonorepoRootAndNestedModuleReleaseAndVerifyIndependently(t *testing.T) 
 	repo := github.Repo{Owner: "you", Name: "demo"}
 
 	rootVerify, err := verify.Run(context.Background(), verify.Options{
+		GoBin:  goBin(t),
 		Client: client, Repo: repo, Tag: "v1.0.0", Dir: dir, WorkDir: t.TempDir(),
 	})
 	if err != nil {
@@ -624,6 +626,7 @@ func TestMonorepoRootAndNestedModuleReleaseAndVerifyIndependently(t *testing.T) 
 	}
 
 	apiVerify, err := verify.Run(context.Background(), verify.Options{
+		GoBin:  goBin(t),
 		Client: client, Repo: repo, Tag: "services/api/v1.5.0", Dir: nested, WorkDir: t.TempDir(),
 	})
 	if err != nil {
@@ -637,6 +640,7 @@ func TestMonorepoRootAndNestedModuleReleaseAndVerifyIndependently(t *testing.T) 
 	// other's — the root's tag never leaks into the nested prefix, and the
 	// nested tag (however new) never outranks the root's own "latest".
 	noTagAPI, err := verify.Run(context.Background(), verify.Options{
+		GoBin:  goBin(t),
 		Client: client, Repo: repo, Prefix: "services/api/", SkipRebuild: true, WorkDir: t.TempDir(),
 	})
 	if err != nil {
@@ -647,6 +651,7 @@ func TestMonorepoRootAndNestedModuleReleaseAndVerifyIndependently(t *testing.T) 
 	}
 
 	noTagRoot, err := verify.Run(context.Background(), verify.Options{
+		GoBin:  goBin(t),
 		Client: client, Repo: repo, Dir: dir, SkipRebuild: true, WorkDir: t.TempDir(),
 	})
 	if err != nil {
@@ -696,7 +701,8 @@ func TestVerifyReportsAnAffectedAudit(t *testing.T) {
 	}
 
 	result := run(t, p, verify.Options{
-		Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		GoBin: goBin(t),
+		Tag:   "v1.2.3", Dir: p.dir, SkipRebuild: true,
 		Client: p.serveWith(t, "", "audit.json", data),
 	})
 
@@ -721,7 +727,8 @@ func TestVerifyReportsACleanAudit(t *testing.T) {
 	}
 
 	result := run(t, p, verify.Options{
-		Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		GoBin: goBin(t),
+		Tag:   "v1.2.3", Dir: p.dir, SkipRebuild: true,
 		Client: p.serveWith(t, "", "audit.json", data),
 	})
 
@@ -882,7 +889,8 @@ func TestVerifyPrintsTheFingerprintAfterAPass(t *testing.T) {
 func TestVerifyPrintsNoFingerprintOnAFailure(t *testing.T) {
 	p := buildRelease(t)
 	result := run(t, p, verify.Options{
-		Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		GoBin: goBin(t),
+		Tag:   "v1.2.3", Dir: p.dir, SkipRebuild: true,
 		Client: p.serve(t, p.result.Artifacts[0].Archive),
 	})
 
@@ -929,7 +937,8 @@ func TestVerifyReadsTheManifestDigestAloudAfterAPass(t *testing.T) {
 func TestVerifyReadsNoWordsOnAFailure(t *testing.T) {
 	p := buildRelease(t)
 	result := run(t, p, verify.Options{
-		Tag: "v1.2.3", Dir: p.dir, SkipRebuild: true,
+		GoBin: goBin(t),
+		Tag:   "v1.2.3", Dir: p.dir, SkipRebuild: true,
 		Client: p.serve(t, p.result.Artifacts[0].Archive),
 	})
 
@@ -945,4 +954,13 @@ func TestVerifyReadsNoWordsOnAFailure(t *testing.T) {
 	if strings.Contains(string(js), "manifest_words") {
 		t.Errorf("JSON = %s, want no manifest_words", js)
 	}
+}
+
+func goBin(t *testing.T) string {
+	t.Helper()
+	bin, _, err := gobuild.Toolchain(nil)
+	if err != nil {
+		t.Skipf("no go command: %v", err)
+	}
+	return bin
 }

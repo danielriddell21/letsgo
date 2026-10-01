@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/safeexec"
@@ -14,13 +13,6 @@ import (
 // ToolchainEnvOverride names an absolute path to a go command, for
 // installations the search below cannot find.
 const ToolchainEnvOverride = "LETSGO_GO"
-
-var (
-	toolchainOnce   sync.Once
-	toolchainPath   string
-	toolchainSource string
-	toolchainErr    error
-)
 
 // Toolchain resolves the go command to an absolute path.
 //
@@ -43,32 +35,17 @@ var (
 // outright where that matters more than following the user's toolchain
 // manager, and the global config's `go` directive pins it machine-wide
 // between the two.
-func Toolchain() (string, error) {
-	path, _, err := ToolchainSource()
-	return path, err
-}
-
-// ToolchainSource resolves the go command, like Toolchain, and also reports
-// where the choice came from — the env override, the global config file, or
-// the fixed GOROOT/PATH search — so plan --explain can say why.
-func ToolchainSource() (path, source string, err error) {
-	toolchainOnce.Do(func() {
-		toolchainPath, toolchainSource, toolchainErr = resolveToolchain()
-	})
-	return toolchainPath, toolchainSource, toolchainErr
-}
-
-func resolveToolchain() (path, source string, err error) {
-	global, globalErr := config.LoadGlobal()
-	if globalErr != nil {
+//
+// It also reports where the choice came from — the env override, the global
+// config file, or the fixed GOROOT/PATH search — so plan --explain can say
+// why. Nothing is memoized: the caller holds the answer and passes it on.
+func Toolchain(global *config.Global) (path, source string, err error) {
+	if global == nil {
 		global = &config.Global{}
 	}
 	return resolveToolchainWith(global)
 }
 
-// resolveToolchainWith is resolveToolchain's core logic, taking the global
-// config directly rather than loading it, so tests can exercise the global
-// tier without relying on config.LoadGlobal's process-wide memoization.
 func resolveToolchainWith(global *config.Global) (path, source string, err error) {
 	name := safeexec.Exe("go")
 
@@ -115,21 +92,11 @@ func resolveToolchainWith(global *config.Global) (path, source string, err error
 	return absolute, "PATH", nil
 }
 
-// toolchainDir is the directory holding the resolved go command, which the
-// subprocess needs on PATH so the toolchain can find its own helpers.
-func toolchainDir() string {
-	path, err := Toolchain()
-	if err != nil {
-		return ""
-	}
-	return filepath.Dir(path)
-}
-
 // Env returns the environment for a go subprocess: the allowlist below, plus
-// a PATH containing only system directories and the toolchain's own.
+// a PATH containing only system directories and goBin's own directory.
 //
 // Exported so that everything invoking the toolchain — building, listing
 // packages, reading versions — does so under the same conditions.
-func Env(t Target, toolchain string) []string {
-	return environ(t, toolchain)
+func Env(t Target, toolchain, goBin string) []string {
+	return environ(t, toolchain, goBin)
 }

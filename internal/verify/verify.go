@@ -73,6 +73,9 @@ type Check struct {
 
 // Options describe a verification.
 type Options struct {
+	// GoBin is the go command a rebuild runs, as gobuild.Toolchain resolved it.
+	GoBin string
+
 	Client *github.Client
 	Repo   github.Repo
 

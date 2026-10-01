@@ -50,13 +50,13 @@ func (c Change) String() string {
 //
 // Both trees are compared package by package, because apidiff works on one
 // package at a time and a module's surface is the union of its packages.
-func APIDiff(ctx context.Context, oldDir, newDir string) ([]Change, error) {
+func APIDiff(ctx context.Context, goBin, oldDir, newDir string) ([]Change, error) {
 	bin, err := find("apidiff", ApidiffInstall)
 	if err != nil {
 		return nil, err
 	}
 
-	packages, err := exportedPackages(ctx, newDir)
+	packages, err := exportedPackages(ctx, goBin, newDir)
 	if err != nil {
 		return nil, err
 	}
@@ -103,8 +103,8 @@ type pkgRef struct {
 // Importable reports whether anyone outside the module could import any of its
 // packages. A module of commands and internal packages has no API to break, so
 // the gate has nothing to look at, whatever tools are installed.
-func Importable(ctx context.Context, dir string) (bool, error) {
-	packages, err := exportedPackages(ctx, dir)
+func Importable(ctx context.Context, goBin, dir string) (bool, error) {
+	packages, err := exportedPackages(ctx, goBin, dir)
 	if err != nil {
 		return false, err
 	}
@@ -114,18 +114,13 @@ func Importable(ctx context.Context, dir string) (bool, error) {
 // exportedPackages lists the packages a dependant could import: everything
 // except commands and anything under internal, neither of which anyone
 // outside the module can depend on.
-func exportedPackages(ctx context.Context, dir string) ([]pkgRef, error) {
-	// Resolved to an absolute path and run with a fixed PATH, so neither this
+func exportedPackages(ctx context.Context, goBin, dir string) ([]pkgRef, error) {
+	// goBin is an absolute path, run with a fixed PATH, so neither this
 	// command nor anything it execs can be chosen by a writable directory on
 	// the caller's PATH.
-	goBin, err := gobuild.Toolchain()
-	if err != nil {
-		return nil, err
-	}
-
 	cmd := exec.CommandContext(ctx, goBin, "list", "-f", "{{.ImportPath}}\t{{.Name}}\t{{.Dir}}", "./...")
 	cmd.Dir = dir
-	cmd.Env = gobuild.Env(gobuild.Host(), "")
+	cmd.Env = gobuild.Env(gobuild.Host(), "", goBin)
 
 	out, err := output(cmd, false)
 	if err != nil {

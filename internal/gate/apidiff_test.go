@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
 
 const apidiffReport = `Incompatible changes:
@@ -104,16 +106,25 @@ func TestImportable(t *testing.T) {
 	write("main.go", "package main\n\nfunc main() {}\n")
 	write("internal/x/x.go", "package x\n")
 
-	if ok, err := Importable(context.Background(), dir); err != nil || ok {
+	if ok, err := Importable(context.Background(), testGoBin(t), dir); err != nil || ok {
 		t.Fatalf("Importable = %v, %v, want false for commands and internal packages", ok, err)
 	}
 
 	write("lib/lib.go", "package lib\n")
-	if ok, err := Importable(context.Background(), dir); err != nil || !ok {
+	if ok, err := Importable(context.Background(), testGoBin(t), dir); err != nil || !ok {
 		t.Fatalf("Importable = %v, %v, want true once a public package exists", ok, err)
 	}
 
-	if _, err := Importable(context.Background(), filepath.Join(dir, "missing")); err == nil {
+	if _, err := Importable(context.Background(), testGoBin(t), filepath.Join(dir, "missing")); err == nil {
 		t.Error("Importable should fail for a directory that does not exist")
 	}
+}
+
+func testGoBin(t *testing.T) string {
+	t.Helper()
+	goBin, _, err := gobuild.Toolchain(nil)
+	if err != nil {
+		t.Skipf("no go command: %v", err)
+	}
+	return goBin
 }
