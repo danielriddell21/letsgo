@@ -161,7 +161,7 @@ func runVersion(args []string) error {
 		Capabilities []string `json:"capabilities"`
 	}{1, version, capabilities}, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("letsgo version: %w", err)
 	}
 	fmt.Println(string(data))
 	return nil
