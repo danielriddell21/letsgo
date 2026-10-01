@@ -7,6 +7,9 @@ import (
 )
 
 func TestTagAndWorktreeLifecycle(t *testing.T) {
+	// Annotated tags need a committer identity, which CI runners lack.
+	t.Setenv("GIT_COMMITTER_NAME", "Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.com")
 	ctx := context.Background()
 	bin := testGit(t)
 	dir := t.TempDir()
