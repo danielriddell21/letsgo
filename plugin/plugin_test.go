@@ -282,7 +282,7 @@ func TestReadConfig(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(data) != tt.want || path != tt.wantPath {
+			if string(data) != tt.want || path != filepath.FromSlash(tt.wantPath) {
 				t.Errorf("ReadConfig() = %q from %q, want %q from %q", data, path, tt.want, tt.wantPath)
 			}
 		})
