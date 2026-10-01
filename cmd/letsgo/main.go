@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/bump"
 	"github.com/danielriddell21/letsgo/internal/changelog"
@@ -406,7 +407,7 @@ func applyPlanFile(a releaseArgs, path string) error {
 	if err != nil {
 		return fmt.Errorf("letsgo: %w", err)
 	}
-	fmt.Printf("  applying %s (%s) for %s\n", path, short12(strings.TrimPrefix(digest, "sha256:")), file.Tag)
+	fmt.Printf("  applying %s (%s) for %s\n", path, apply.Short12(strings.TrimPrefix(digest, "sha256:")), file.Tag)
 
 	if file.Kind == plandiff.FileKindYank {
 		return applyYank(context.Background(), file, diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken})
@@ -531,7 +532,7 @@ func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error
 	}
 	fmt.Printf("\n  built %d files\n", len(result.Files))
 
-	if applied, err = holdAndStamp(applied, p, result); err != nil {
+	if applied, err = apply.HoldAndStamp(applied, p, result, say); err != nil {
 		return err
 	}
 
@@ -567,7 +568,7 @@ func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error
 		Plan: p, Result: result, Dir: dir, Repo: repo, Forge: releaseClient, Tap: tapClient,
 		Info: info, Notes: notes, Token: tokenValue, Snapshot: a.snapshot, Out: os.Stdout,
 	}
-	forge, tapAPI, err := guardApply(ctx, applied, targets)
+	forge, tapAPI, err := apply.Guard(ctx, applied, targets, say)
 	if err != nil {
 		return err
 	}
