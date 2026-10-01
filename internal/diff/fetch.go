@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/internal/releases/githubsource"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // Fetch loads the manifest a published release describes itself with.

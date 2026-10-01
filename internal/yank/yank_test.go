@@ -12,10 +12,10 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/yank"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // fakeForge is a release API that remembers what it was asked to change.

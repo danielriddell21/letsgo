@@ -3,7 +3,7 @@ package verify
 import (
 	"context"
 
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // checkProvenance asks the forge what it has recorded about how each artifact

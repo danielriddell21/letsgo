@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/danielriddell21/letsgo/internal/build"
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // Digest is the sha256 of one of the release's files as it is on disk now.

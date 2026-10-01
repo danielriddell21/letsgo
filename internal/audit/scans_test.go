@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/gate"
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 func artifact(tags, goos, goarch string) manifest.Artifact {

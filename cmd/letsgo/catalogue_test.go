@@ -16,7 +16,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	installer "github.com/danielriddell21/letsgo/internal/install"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/notes/notestest"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -25,6 +24,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/sbom"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // probe is how one catalogue entry is shown to be consulted: by what the

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/releases"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 func failingOptions(t *testing.T) Options {

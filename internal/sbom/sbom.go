@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // FileName is the SBOM's published name.

@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 
 	"github.com/danielriddell21/letsgo/internal/feature"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/sbom"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // writeSBOM generates the dependency document and returns its name and digest.

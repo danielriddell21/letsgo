@@ -18,9 +18,9 @@ import (
 	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/releases"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // maxSourceFile bounds one entry extracted from a source archive. The archive

@@ -24,7 +24,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publication"
@@ -33,6 +32,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/receipt"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/verify"
+	"github.com/danielriddell21/letsgo/manifest"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
 
@@ -969,7 +969,7 @@ func printDiff(result *diff.Result, format string) error {
 // a tag on the forge. An empty reference means the latest release.
 func loadManifest(ctx context.Context, client *github.Client, repo github.Repo, scope discover.Scope, ref string) (*manifest.Manifest, error) {
 	if isManifestPath(ref) {
-		return manifest.Read(ref)
+		return manifest.ReadStrict(ref)
 	}
 	return diff.Fetch(ctx, client, repo, scope, ref)
 }

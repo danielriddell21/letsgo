@@ -32,9 +32,9 @@ import (
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/internal/semver"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // maxDownload bounds what will be read from a release. An archive of a Go

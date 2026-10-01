@@ -18,12 +18,12 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/gobuild"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/promote"
 	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 const mainGo = `package main
@@ -404,7 +404,7 @@ func TestRunRefusesAMismatchedRebuild(t *testing.T) {
 	dir := demoRepo(t, "v1.3.0-rc.1")
 
 	rc := buildRC(t, dir)
-	m, err := manifest.Decode(mustRead(t, filepath.Join(rc.Dir, manifest.FileName)))
+	m, err := manifest.DecodeStrict(mustRead(t, filepath.Join(rc.Dir, manifest.FileName)))
 	if err != nil {
 		t.Fatal(err)
 	}

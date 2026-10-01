@@ -21,11 +21,11 @@ import (
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/internal/releases/githubsource"
 	"github.com/danielriddell21/letsgo/internal/verify"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // Schema is the audit.json format version this letsgo writes.

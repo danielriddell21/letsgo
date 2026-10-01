@@ -15,9 +15,9 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/sbom"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // Options and Artifact are the pipeline's own types, re-exported so that test

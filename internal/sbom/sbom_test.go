@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/sbom"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 func options() sbom.Options {

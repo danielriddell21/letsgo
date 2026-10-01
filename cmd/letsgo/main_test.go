@@ -19,9 +19,9 @@ import (
 	"github.com/danielriddell21/letsgo/internal/bump"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // demoMainGo is a program small enough to build in a test, but one that

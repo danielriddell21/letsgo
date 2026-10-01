@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
-	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/internal/semver"
+	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // fake is an in-memory forge. It mirrors the forge's rules that callers lean
@@ -227,7 +227,7 @@ func TestPerMajorIsScoped(t *testing.T) {
 
 func TestManifest(t *testing.T) {
 	good := []byte(`{"schema":1}`)
-	if _, err := manifest.Decode(good); err != nil {
+	if _, err := manifest.DecodeStrict(good); err != nil {
 		t.Skipf("fixture is not a valid manifest here: %v", err)
 	}
 
