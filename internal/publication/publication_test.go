@@ -427,3 +427,28 @@ func TestObserveNamesWhatItCouldNotRead(t *testing.T) {
 		})
 	}
 }
+
+// SHA256SUMS, the SBOM and install.sh record no digest anywhere, so a re-planned
+// one the same size as the last would be kept on a resumed publish if the
+// upload were compared by size.
+func TestSumsFromHashesEveryOtherPublishedFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	files := map[string]string{"SHA256SUMS": "sums", "foo.spdx.json": "sbom", "install.sh": "#!/bin/sh"}
+	var names []string
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, name)
+	}
+
+	sums := sumsFrom(dir, &release.Result{Manifest: &manifest.Manifest{}, Files: names})
+
+	for name, body := range files {
+		want := sha256.Sum256([]byte(body))
+		if got := sums[name]; got != hex.EncodeToString(want[:]) {
+			t.Errorf("%s digest = %q, want %x", name, got, want)
+		}
+	}
+}

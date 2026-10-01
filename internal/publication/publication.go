@@ -203,6 +203,18 @@ func sumsFrom(dir string, r *release.Result) map[string]string {
 	if sum, err := fileSHA256(filepath.Join(dir, manifest.FileName)); err == nil {
 		sums[manifest.FileName] = sum
 	}
+
+	// Anything else published (SHA256SUMS, the SBOM, install.sh) has no
+	// recorded digest; without one an upload is compared by size alone, which
+	// keeps a stale file whose content changed but whose length did not.
+	for _, name := range r.Files {
+		if _, ok := sums[name]; ok {
+			continue
+		}
+		if sum, err := fileSHA256(filepath.Join(dir, name)); err == nil {
+			sums[name] = sum
+		}
+	}
 	return sums
 }
 
