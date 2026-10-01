@@ -457,12 +457,12 @@ func TestCommandsCoverTheUsage(t *testing.T) {
 		"plan", "build", "release", "verify", "diff",
 		"yank", "update", "plugin", "tag", "fmt", "version", "help",
 	} {
-		if commands[name] == nil {
+		if commands(unwired)[name] == nil {
 			t.Errorf("no command registered for %q", name)
 		}
 	}
 	for _, alias := range []string{"--version", "-version", "-v"} {
-		if commands[alias] == nil {
+		if commands(unwired)[alias] == nil {
 			t.Errorf("no command registered for %q", alias)
 		}
 	}

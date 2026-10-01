@@ -66,8 +66,8 @@ func (r *diffRun) toMarkdown(on bool) func() {
 // diffAndSave prints what a release would change, saves the plan when asked,
 // and, for --exit-code, reports a plan that has changes through the exit
 // status.
-func diffAndSave(ctx context.Context, p *plan.Plan, r diffRun) error {
-	d, err := planDiff(ctx, p, r.Tokens)
+func (f forge) diffAndSave(ctx context.Context, p *plan.Plan, r diffRun) error {
+	d, err := f.planDiff(ctx, p, r.Tokens)
 	if err != nil {
 		return err
 	}

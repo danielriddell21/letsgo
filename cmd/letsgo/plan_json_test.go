@@ -16,7 +16,7 @@ func TestRunPlanPrintsJSONWhenRequested(t *testing.T) {
 	t.Chdir(dir)
 
 	out := captureStdout(t, func() {
-		_ = runPlan([]string{"--json"})
+		_ = unwired.runPlan([]string{"--json"})
 	})
 
 	for _, want := range []string{`"schema": 1`, `"project"`, `"checks"`} {
@@ -41,7 +41,7 @@ func TestRunPlanJSONReturnsErrorOnAFailingPlan(t *testing.T) {
 
 	var err error
 	out := captureStdout(t, func() {
-		err = runPlan([]string{"--json"})
+		err = unwired.runPlan([]string{"--json"})
 	})
 
 	if !errors.Is(err, errPlanFailed) {
@@ -57,7 +57,7 @@ func TestRunPlanPrintsTextReportByDefault(t *testing.T) {
 	t.Chdir(dir)
 
 	out := captureStdout(t, func() {
-		_ = runPlan(nil)
+		_ = unwired.runPlan(nil)
 	})
 
 	if strings.Contains(out, `"schema"`) {

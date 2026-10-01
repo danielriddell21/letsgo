@@ -22,29 +22,30 @@ type yankForge struct {
 	mu      sync.Mutex
 	release github.Release
 	patches int
+	wired   forge
 }
 
 // yankForgeFor serves the release v1.2.3 of you/demo and points the commands
 // at it.
 func yankForgeFor(t *testing.T) *yankForge {
 	t.Helper()
-	forge := &yankForge{release: github.Release{ID: 7, TagName: "v1.2.3", Body: "### Features\n\n- a thing\n"}}
+	yf := &yankForge{release: github.Release{ID: 7, TagName: "v1.2.3", Body: "### Features\n\n- a thing\n"}}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		forge.mu.Lock()
-		defer forge.mu.Unlock()
+		yf.mu.Lock()
+		defer yf.mu.Unlock()
 
 		switch {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/releases/tags/v1.2.3"):
-			_ = json.NewEncoder(w).Encode(forge.release)
+			_ = json.NewEncoder(w).Encode(yf.release)
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/tags"):
 			_, _ = w.Write([]byte(`[{"name":"v1.2.3"},{"name":"v1.2.2"}]`))
 		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/releases/7"):
-			forge.patches++
+			yf.patches++
 			var in github.ReleaseInput
 			_ = json.NewDecoder(r.Body).Decode(&in)
-			forge.release.Body, forge.release.Prerelease = in.Body, in.Prerelease
-			_ = json.NewEncoder(w).Encode(forge.release)
+			yf.release.Body, yf.release.Prerelease = in.Body, in.Prerelease
+			_ = json.NewEncoder(w).Encode(yf.release)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
@@ -52,28 +53,23 @@ func yankForgeFor(t *testing.T) *yankForge {
 	}))
 	t.Cleanup(srv.Close)
 
-	previous := newForgeClient
-	t.Cleanup(func() { newForgeClient = previous })
-	newForgeClient = func(token string) *github.Client {
-		client := github.New(token)
-		client.SetEndpoints(srv.URL, srv.URL)
-		return client
-	}
+	yf.wired = forge{endpoint: srv.URL}
 	t.Setenv("GITHUB_TOKEN", "test-token")
-	return forge
+	return yf
 }
 
 // A yank is planned, saved, and applied, and the apply does what the plan
 // listed and nothing else.
 func TestAYankPlanIsAppliedExactlyAsPlanned(t *testing.T) {
 	forge := yankForgeFor(t)
+	f := forge.wired
 	dir := moduleFixture(t)
 	t.Chdir(dir)
 	path := filepath.Join(t.TempDir(), "y.plan")
 
 	var err error
 	out := captureStdout(t, func() {
-		err = runPlan([]string{"-yank", "v1.2.3", "-reason", "bad build", "-out", path, "--exit-code"})
+		err = f.runPlan([]string{"-yank", "v1.2.3", "-reason", "bad build", "-out", path, "--exit-code"})
 	})
 	if !errors.Is(err, errPlanChanges) {
 		t.Fatalf("plan -yank = %v, want the plan to have changes\n%s", err, out)
@@ -98,7 +94,7 @@ func TestAYankPlanIsAppliedExactlyAsPlanned(t *testing.T) {
 		t.Errorf("saved %+v", file)
 	}
 
-	out = captureStdout(t, func() { err = runApply([]string{path}) })
+	out = captureStdout(t, func() { err = f.runApply([]string{path}) })
 	if err != nil {
 		t.Fatalf("apply = %v\n%s", err, out)
 	}
@@ -113,7 +109,7 @@ func TestAYankPlanIsAppliedExactlyAsPlanned(t *testing.T) {
 	}
 
 	// Applying it again finds everything as planned, and writes nothing.
-	out = captureStdout(t, func() { err = runApply([]string{path}) })
+	out = captureStdout(t, func() { err = f.runApply([]string{path}) })
 	if err != nil {
 		t.Fatalf("second apply = %v\n%s", err, out)
 	}
@@ -126,17 +122,18 @@ func TestAYankPlanIsAppliedExactlyAsPlanned(t *testing.T) {
 // agreed, so nothing is written.
 func TestAYankPlanIsRefusedOnceGoModHasChanged(t *testing.T) {
 	forge := yankForgeFor(t)
+	f := forge.wired
 	dir := moduleFixture(t)
 	t.Chdir(dir)
 	path := filepath.Join(t.TempDir(), "y.plan")
 
-	_ = captureStdout(t, func() { _ = runPlan([]string{"-yank", "v1.2.3", "-out", path}) })
+	_ = captureStdout(t, func() { _ = f.runPlan([]string{"-yank", "v1.2.3", "-out", path}) })
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/demo\n\ngo 1.25\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	var err error
-	_ = captureStdout(t, func() { err = runApply([]string{path}) })
+	_ = captureStdout(t, func() { err = f.runApply([]string{path}) })
 	if err == nil || !strings.Contains(err.Error(), "stale") || !strings.Contains(err.Error(), "plan -yank v1.2.3 -out") {
 		t.Fatalf("apply = %v, want a stale plan", err)
 	}
@@ -146,10 +143,11 @@ func TestAYankPlanIsRefusedOnceGoModHasChanged(t *testing.T) {
 }
 
 func TestAYankPlanIsRefusedForAnotherRepository(t *testing.T) {
-	yankForgeFor(t)
+	yf := yankForgeFor(t)
+	f := yf.wired
 	t.Chdir(moduleFixture(t))
 	path := filepath.Join(t.TempDir(), "y.plan")
-	_ = captureStdout(t, func() { _ = runPlan([]string{"-yank", "v1.2.3", "-out", path}) })
+	_ = captureStdout(t, func() { _ = f.runPlan([]string{"-yank", "v1.2.3", "-out", path}) })
 
 	file, err := plandiff.Read(path)
 	if err != nil {
@@ -160,23 +158,24 @@ func TestAYankPlanIsRefusedForAnotherRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_ = captureStdout(t, func() { err = runApply([]string{path}) })
+	_ = captureStdout(t, func() { err = f.runApply([]string{path}) })
 	if err == nil || !strings.Contains(err.Error(), "someone/else") {
 		t.Errorf("apply = %v, want the repository named", err)
 	}
 }
 
 func TestPlanYankHasNoJSONForm(t *testing.T) {
-	if err := runPlan([]string{"-yank", "v1.2.3", "-json"}); err == nil || !strings.Contains(err.Error(), "JSON") {
+	if err := unwired.runPlan([]string{"-yank", "v1.2.3", "-json"}); err == nil || !strings.Contains(err.Error(), "JSON") {
 		t.Errorf("err = %v", err)
 	}
 }
 
 func TestPlanYankNamesAReleaseThatDoesNotExist(t *testing.T) {
-	yankForgeFor(t)
+	yf := yankForgeFor(t)
+	f := yf.wired
 	t.Chdir(moduleFixture(t))
 	var err error
-	_ = captureStdout(t, func() { err = runPlan([]string{"-yank", "v9.9.9"}) })
+	_ = captureStdout(t, func() { err = f.runPlan([]string{"-yank", "v9.9.9"}) })
 	if err == nil {
 		t.Error("planned the retraction of a release that does not exist")
 	}
@@ -192,11 +191,12 @@ func readText(t *testing.T, path string) string {
 }
 
 func TestPlanYankFormatMarkdown(t *testing.T) {
-	yankForgeFor(t)
+	yf := yankForgeFor(t)
+	f := yf.wired
 	t.Chdir(moduleFixture(t))
 
 	var err error
-	out := captureStdout(t, func() { err = runPlan([]string{"-yank", "v1.2.3", "--format", "md"}) })
+	out := captureStdout(t, func() { err = f.runPlan([]string{"-yank", "v1.2.3", "--format", "md"}) })
 	if err != nil {
 		t.Fatalf("plan -yank --format md = %v\n%s", err, out)
 	}

@@ -15,7 +15,7 @@ import (
 // runPromote rebuilds a prerelease as a stable release: see
 // docs/hld/promote.md and docs/pbs/promote.md for the five steps this
 // performs, and internal/promote for the implementation.
-func runPromote(args []string) error {
+func (f forge) runPromote(args []string) error {
 	fs := flag.NewFlagSet("promote", flag.ExitOnError)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	tapToken := fs.String("tap-token", "", tapTokenUsage)
@@ -34,7 +34,7 @@ func runPromote(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	m, err := resolveModuleRepo(ctx, *token)
+	m, err := f.resolveModuleRepo(ctx, *token)
 	if err != nil {
 		return err
 	}
@@ -44,8 +44,8 @@ func runPromote(args []string) error {
 	// `letsgo release` splits them: the RC and the stable release are the
 	// same forge object regardless, but the tap may live in a repository the
 	// plain token cannot write to.
-	releaseClient := releaseClientFor(ctx, client, *releaseToken, *token)
-	tapClient := tapClientFor(ctx, client, *tapToken, *token)
+	releaseClient := f.releaseClientFor(ctx, client, *releaseToken, *token)
+	tapClient := f.tapClientFor(ctx, client, *tapToken, *token)
 
 	workDir := *work
 	if workDir == "" {

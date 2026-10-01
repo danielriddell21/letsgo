@@ -16,14 +16,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/release"
 )
 
-// newForgeClient is how a command reaches the forge. A variable so that a test
-// can point it at a server of its own.
-var newForgeClient = func(token string) *github.Client {
-	client := github.New(token)
-	client.UserAgent = "letsgo/" + version
-	return client
-}
-
 // diffTokens are the credentials planDiff reads the forge with.
 type diffTokens struct {
 	Token, TapToken, ReleaseToken string
@@ -31,7 +23,7 @@ type diffTokens struct {
 
 // planDiff builds the release into a scratch directory and reads the forge to
 // say what releasing would change.
-func planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*apply.Diff, error) {
+func (f forge) planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*apply.Diff, error) {
 	if !p.HasRepo {
 		return nil, fmt.Errorf("letsgo: --diff needs a repository on a forge to compare against")
 	}
@@ -43,7 +35,7 @@ func planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*apply.Diff
 	defer func() { _ = os.RemoveAll(dir) }()
 
 	tokenValue, _ := plan.Token(ctx, tokens.Token)
-	client := newForgeClient(tokenValue)
+	client := f.client(tokenValue)
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 
 	var info *github.RepoInfo
@@ -74,8 +66,8 @@ func planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*apply.Diff
 
 	actions, err := publication.Observe(ctx, publication.Options{
 		Plan:  p,
-		Forge: releaseClientFor(ctx, client, tokens.ReleaseToken, tokens.Token),
-		Tap:   tapClientFor(ctx, client, tokens.TapToken, tokens.Token),
+		Forge: f.releaseClientFor(ctx, client, tokens.ReleaseToken, tokens.Token),
+		Tap:   f.tapClientFor(ctx, client, tokens.TapToken, tokens.Token),
 		Token: tokenValue, Repo: repo, Dir: dir, Result: result, Notes: notes, Info: info,
 	})
 	if err != nil {

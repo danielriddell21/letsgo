@@ -69,37 +69,39 @@ run a command with -h for its options.
 `
 
 // commands is the whole surface of the tool: one verb to the function that
-// runs it.
+// runs it, with the forge the commands that need one are wired to.
 //
 // A table rather than a switch, so that adding a verb is an entry here and not
 // a change to the program's entry point. It is also why the aliases sit beside
 // the names they alias instead of sharing a case.
-var commands = map[string]func([]string) error{
-	"plan":     runPlan,
-	"build":    runBuild,
-	"release":  runRelease,
-	"apply":    runApply,
-	"verify":   runVerify,
-	"doctor":   runDoctor,
-	"audit":    runAudit,
-	"diff":     runDiff,
-	"promote":  runPromote,
-	"yank":     runYank,
-	"update":   runUpdate,
-	"plugin":   runPlugin,
-	"tag":      runTag,
-	"fmt":      runFmt,
-	"features": runFeatures,
-	"lsp":      runLSP,
+func commands(f forge) map[string]func([]string) error {
+	return map[string]func([]string) error{
+		"plan":     f.runPlan,
+		"build":    runBuild,
+		"release":  f.runRelease,
+		"apply":    f.runApply,
+		"verify":   f.runVerify,
+		"doctor":   runDoctor,
+		"audit":    f.runAudit,
+		"diff":     f.runDiff,
+		"promote":  f.runPromote,
+		"yank":     f.runYank,
+		"update":   runUpdate,
+		"plugin":   runPlugin,
+		"tag":      runTag,
+		"fmt":      runFmt,
+		"features": runFeatures,
+		"lsp":      runLSP,
 
-	"version":   runVersion,
-	"--version": runVersion,
-	"-version":  runVersion,
-	"-v":        runVersion,
+		"version":   runVersion,
+		"--version": runVersion,
+		"-version":  runVersion,
+		"-v":        runVersion,
 
-	"help":   runHelp,
-	"-h":     runHelp,
-	"--help": runHelp,
+		"help":   runHelp,
+		"-h":     runHelp,
+		"--help": runHelp,
+	}
 }
 
 func main() {
@@ -110,7 +112,7 @@ func main() {
 
 	command, args := os.Args[1], os.Args[2:]
 
-	run, ok := commands[command]
+	run, ok := commands(forge{})[command]
 	if !ok {
 		fmt.Fprintf(os.Stderr, "letsgo: unknown command %q\n\n%s", command, usage)
 		os.Exit(2)
@@ -214,7 +216,7 @@ var errVerifyFailed = errors.New("verification failed")
 // errDoctorFailed likewise: the report already names every failing check.
 var errDoctorFailed = errors.New("doctor found a problem")
 
-func runPlan(args []string) error {
+func (f forge) runPlan(args []string) error {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)
 	explain := fs.Bool("explain", false, "show where each resolved value came from")
 	jsonOutput := fs.Bool("json", false, "print the plan as JSON")
@@ -245,7 +247,7 @@ func runPlan(args []string) error {
 	defer run.toMarkdown(markdown)()
 
 	if *yankTag != "" {
-		return planYankCommand(*yankTag, yankFlags, *jsonOutput, diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken}, run)
+		return f.planYankCommand(*yankTag, yankFlags, *jsonOutput, diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken}, run)
 	}
 
 	saving := *planOut != ""
@@ -283,7 +285,7 @@ func runPlan(args []string) error {
 	if diffing {
 		run.Tokens = diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken}
 		run.Started = started
-		return diffAndSave(ctx, p, run)
+		return f.diffAndSave(ctx, p, run)
 	}
 	fmt.Printf("\n  plan ok in %s · run `letsgo build` to produce artifacts\n", elapsed)
 	return nil
@@ -361,7 +363,7 @@ func (a *releaseArgs) bindCredentials(fs *flag.FlagSet) {
 	fs.BoolVar(&a.allowBreaking, "allow-breaking", false, "publish an incompatible API change without a major version bump")
 }
 
-func runRelease(args []string) error {
+func (f forge) runRelease(args []string) error {
 	fs := flag.NewFlagSet("release", flag.ExitOnError)
 	var a releaseArgs
 	a.bindCredentials(fs)
@@ -371,7 +373,7 @@ func runRelease(args []string) error {
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	return doRelease(context.Background(), a, nil)
+	return f.doRelease(context.Background(), a, nil)
 }
 
 // runApply publishes a release exactly as a saved plan agreed it: the same
@@ -379,7 +381,7 @@ func runRelease(args []string) error {
 //
 // With no file it makes the plan itself, shows it, and asks before applying
 // it, so a local apply is as considered as one from a plan made earlier.
-func runApply(args []string) error {
+func (f forge) runApply(args []string) error {
 	fs := flag.NewFlagSet("apply", flag.ExitOnError)
 	var a releaseArgs
 	a.bindCredentials(fs)
@@ -392,13 +394,13 @@ func runApply(args []string) error {
 	}
 
 	if fs.NArg() == 0 {
-		return applyFresh(context.Background(), a, *autoApprove)
+		return f.applyFresh(context.Background(), a, *autoApprove)
 	}
-	return applyPlanFile(a, fs.Arg(0))
+	return f.applyPlanFile(a, fs.Arg(0))
 }
 
 // applyPlanFile applies the plan saved at path.
-func applyPlanFile(a releaseArgs, path string) error {
+func (f forge) applyPlanFile(a releaseArgs, path string) error {
 	file, err := plandiff.Read(path)
 	if err != nil {
 		return fmt.Errorf("letsgo: %w", err)
@@ -410,9 +412,9 @@ func applyPlanFile(a releaseArgs, path string) error {
 	fmt.Printf("  applying %s (%s) for %s\n", path, apply.Short12(strings.TrimPrefix(digest, "sha256:")), file.Tag)
 
 	if file.Kind == plandiff.FileKindYank {
-		return applyYank(context.Background(), file, diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken})
+		return f.applyYank(context.Background(), file, diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken})
 	}
-	return doRelease(context.Background(), a, file)
+	return f.doRelease(context.Background(), a, file)
 }
 
 // stdinIsTerminal reports whether there is someone to ask. It is a variable so
@@ -428,7 +430,7 @@ var stdinIsTerminal = func() bool {
 // The agreement is either a yes at the prompt or -auto-approve. With neither
 // possible the command stops before it has built anything, because a question
 // nobody can answer is not consent.
-func applyFresh(ctx context.Context, a releaseArgs, autoApprove bool) error {
+func (f forge) applyFresh(ctx context.Context, a releaseArgs, autoApprove bool) error {
 	if !autoApprove && !stdinIsTerminal() {
 		return errors.New("letsgo: apply with no plan file asks before it publishes, and there is no terminal to ask on; pass -auto-approve, or save a plan with `letsgo plan -out` and apply that")
 	}
@@ -440,7 +442,7 @@ func applyFresh(ctx context.Context, a releaseArgs, autoApprove bool) error {
 	defer func() { _ = os.RemoveAll(dir) }()
 	path := filepath.Join(dir, "release.plan")
 
-	changed, err := planForApply(ctx, a, path)
+	changed, err := f.planForApply(ctx, a, path)
 	if err != nil {
 		return err
 	}
@@ -455,32 +457,18 @@ func applyFresh(ctx context.Context, a releaseArgs, autoApprove bool) error {
 		}
 	}
 	fmt.Println()
-	return applyPlanFile(a, path)
-}
-
-// forgeAPIEndpoint overrides the forge API host for the gates a plan checks
-// before it reads the forge, and for diff. Empty means the real one; a test points it at a
-// fake.
-var forgeAPIEndpoint string
-
-// forgeClientFactory builds plan's forge clients against forgeAPIEndpoint, or
-// the real forge when it is empty.
-func forgeClientFactory() func(string) *github.Client {
-	if forgeAPIEndpoint == "" {
-		return nil
-	}
-	return plan.ClientAt(forgeAPIEndpoint)
+	return f.applyPlanFile(a, path)
 }
 
 // planForApply resolves and diffs a release as `letsgo plan -out` does, shows
 // it, and saves it at path. It reports whether there is anything to apply.
-func planForApply(ctx context.Context, a releaseArgs, path string) (bool, error) {
+func (f forge) planForApply(ctx context.Context, a releaseArgs, path string) (bool, error) {
 	started := time.Now()
 	tokens := diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken}
 	p, err := plan.Resolve(ctx, plan.Options{
 		Dir: ".", Publish: true, Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken,
 		Analyse: true, AllowVulnerable: a.allowVulnerable, AllowBreaking: a.allowBreaking,
-		NewClient: forgeClientFactory(), DisableProxyWarm: a.skipWarm,
+		NewClient: f.client, DisableProxyWarm: a.skipWarm,
 	})
 	if err != nil {
 		return false, err
@@ -491,7 +479,7 @@ func planForApply(ctx context.Context, a releaseArgs, path string) (bool, error)
 		return false, errPlanFailed
 	}
 
-	d, err := planDiff(ctx, p, tokens)
+	d, err := f.planDiff(ctx, p, tokens)
 	if err != nil {
 		return false, err
 	}
@@ -510,11 +498,11 @@ func planForApply(ctx context.Context, a releaseArgs, path string) (bool, error)
 // doRelease builds and publishes a release. applied, when set, is the plan the
 // release must keep to: it is held to before anything is published, and only
 // what it lists is written.
-func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error {
+func (f forge) doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error {
 	started := time.Now()
 
 	tokenValue, _ := plan.Token(ctx, a.token)
-	client := newForgeClient(tokenValue)
+	client := f.client(tokenValue)
 
 	// A rehearsal needs no forge and no token, so the gates that check for
 	// them are not run. The repository's description and licence are read
@@ -553,12 +541,12 @@ func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error
 	// another repository need not be one that can also write to this one. They
 	// are the same client when no tap token is configured, which is what makes
 	// the split opt-in rather than a migration.
-	tapClient := tapClientFor(ctx, client, a.tapToken, a.token)
+	tapClient := f.tapClientFor(ctx, client, a.tapToken, a.token)
 
 	// The release itself gets its own client the same way, so it can be
 	// published under the same bot identity as the tap commit instead of
 	// whatever token ran the workflow.
-	releaseClient := releaseClientFor(ctx, client, a.releaseToken, a.token)
+	releaseClient := f.releaseClientFor(ctx, client, a.releaseToken, a.token)
 
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 
@@ -670,7 +658,7 @@ func wantsRepoInfo(p *plan.Plan) bool {
 	return p.Tap != (github.Repo{}) && p.HasRepo
 }
 
-func runVerify(args []string) error {
+func (f forge) runVerify(args []string) error {
 	fs := flag.NewFlagSet("verify", flag.ExitOnError)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	repoFlag := fs.String("repo", "", "repository to verify as owner/name (default: this repository's origin)")
@@ -687,7 +675,7 @@ func runVerify(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	run, err := resolveScratchRun(ctx, *repoFlag, *token, *work, "letsgo-verify-")
+	run, err := f.resolveScratchRun(ctx, *repoFlag, *token, *work, "letsgo-verify-")
 	if err != nil {
 		return err
 	}
@@ -761,7 +749,7 @@ type moduleRepo struct {
 // can do anything else: find the module, its repository, its git checkout,
 // its scope, and a forge client authenticated with token (or the default
 // env vars, when token is empty).
-func resolveModuleRepo(ctx context.Context, token string) (moduleRepo, error) {
+func (f forge) resolveModuleRepo(ctx context.Context, token string) (moduleRepo, error) {
 	module, err := discover.FindModule(".")
 	if err != nil {
 		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
@@ -785,7 +773,7 @@ func resolveModuleRepo(ctx context.Context, token string) (moduleRepo, error) {
 	if tokenValue == "" {
 		return moduleRepo{}, fmt.Errorf("letsgo: no token; set %s", envList())
 	}
-	client := newForgeClient(tokenValue)
+	client := f.client(tokenValue)
 
 	return moduleRepo{Module: module, Git: git, Repo: repo, Scope: scope, Token: tokenValue, Client: client}, nil
 }
@@ -810,7 +798,7 @@ type scratchRun struct {
 // workDir is created under a temporary directory named tmpPrefix when work
 // is empty; cleanup removes it, and is a no-op when work was given
 // explicitly.
-func resolveScratchRun(ctx context.Context, repoFlag, token, work, tmpPrefix string) (scratchRun, error) {
+func (f forge) resolveScratchRun(ctx context.Context, repoFlag, token, work, tmpPrefix string) (scratchRun, error) {
 	repo, dir, err := targetRepo(ctx, repoFlag)
 	if err != nil {
 		return scratchRun{}, err
@@ -831,8 +819,7 @@ func resolveScratchRun(ctx context.Context, repoFlag, token, work, tmpPrefix str
 	}
 
 	tokenValue, _ := plan.Token(ctx, token)
-	client := github.New(tokenValue)
-	client.UserAgent = "letsgo/" + version
+	client := f.client(tokenValue)
 
 	return scratchRun{Repo: repo, Dir: dir, Prefix: prefix, WorkDir: workDir, Client: client, cleanup: cleanup}, nil
 }
@@ -890,7 +877,7 @@ func scopePrefix(ctx context.Context, explicit, dir string) (string, error) {
 // Both sides are read from manifests rather than from the repository, so this
 // works against releases of projects that are not checked out, and says what
 // the artifacts actually did rather than what the commit messages claimed.
-func runDiff(args []string) error {
+func (f forge) runDiff(args []string) error {
 	fs := flag.NewFlagSet("diff", flag.ExitOnError)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	repoFlag := fs.String("repo", "", "repository to compare in as owner/name (default: this repository's origin)")
@@ -928,11 +915,7 @@ func runDiff(args []string) error {
 		}
 		scope = discover.Scope{Prefix: prefix}
 		tokenValue, _ := plan.Token(context.Background(), *token)
-		client = github.New(tokenValue)
-		client.UserAgent = "letsgo/" + version
-		if forgeAPIEndpoint != "" {
-			client.SetEndpoints(forgeAPIEndpoint, forgeAPIEndpoint)
-		}
+		client = f.client(tokenValue)
 	}
 
 	before, err := loadManifest(ctx, client, repo, scope, from)
