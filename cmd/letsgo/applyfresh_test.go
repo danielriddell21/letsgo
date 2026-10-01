@@ -10,68 +10,6 @@ import (
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
 
-func guardFor(t *testing.T, actions ...plandiff.Action) (guardedForge, guardedTap, *publish.Recorder) {
-	t.Helper()
-	recorder := publish.NewRecorder(nil)
-	recorder.Existing = &github.Release{ID: 1}
-	writes := newPlannedWrites(actions)
-	return guardedForge{Forge: recorder, tag: "v1.2.3", writes: writes}, guardedTap{FileAPI: recorder, writes: writes}, recorder
-}
-
-func TestGuardedForgeAllowsWhatThePlanLists(t *testing.T) {
-	forge, tap, recorder := guardFor(t,
-		plandiff.Action{Op: plandiff.Add, Kind: plandiff.KindRelease, Target: "v1.2.3"},
-		plandiff.Action{Op: plandiff.Change, Kind: plandiff.KindAsset, Target: "a.tgz"},
-		plandiff.Action{Op: plandiff.Add, Kind: plandiff.KindTap, Target: "Formula/foo.rb"},
-	)
-	ctx, repo := t.Context(), github.Repo{Owner: "you", Name: "foo"}
-
-	if _, err := forge.CreateRelease(ctx, repo, github.ReleaseInput{TagName: "v1.2.3"}); err != nil {
-		t.Errorf("CreateRelease: %v", err)
-	}
-	if _, err := forge.UpdateRelease(ctx, repo, 1, github.ReleaseInput{TagName: "v1.2.3"}); err != nil {
-		t.Errorf("UpdateRelease: %v", err)
-	}
-	if err := forge.DeleteAsset(ctx, repo, 7); err != nil {
-		t.Errorf("DeleteAsset: %v", err)
-	}
-	if _, err := forge.UploadAsset(ctx, repo, 1, "a.tgz", 0, strings.NewReader("")); err != nil {
-		t.Errorf("UploadAsset: %v", err)
-	}
-	if err := tap.WriteFile(ctx, repo, github.FileInput{Path: "Formula/foo.rb"}); err != nil {
-		t.Errorf("WriteFile: %v", err)
-	}
-	if len(recorder.Calls) == 0 {
-		t.Error("nothing reached the forge")
-	}
-}
-
-func TestGuardedForgeRefusesWhatThePlanDoesNotList(t *testing.T) {
-	// The plan leaves the release and its one asset as they are.
-	forge, tap, recorder := guardFor(t,
-		plandiff.Action{Op: plandiff.Keep, Kind: plandiff.KindAsset, Target: "a.tgz"},
-	)
-	ctx, repo := t.Context(), github.Repo{Owner: "you", Name: "foo"}
-
-	for name, err := range map[string]error{
-		"create":  second(forge.CreateRelease(ctx, repo, github.ReleaseInput{})),
-		"update":  second(forge.UpdateRelease(ctx, repo, 1, github.ReleaseInput{})),
-		"delete":  forge.DeleteAsset(ctx, repo, 7),
-		"upload":  second(forge.UploadAsset(ctx, repo, 1, "b.tgz", 0, strings.NewReader(""))),
-		"kept":    second(forge.UploadAsset(ctx, repo, 1, "a.tgz", 0, strings.NewReader(""))),
-		"tapfile": tap.WriteFile(ctx, repo, github.FileInput{Path: "Formula/foo.rb"}),
-	} {
-		if err == nil || !strings.Contains(err.Error(), "refused") {
-			t.Errorf("%s: err = %v, want a refusal", name, err)
-		}
-	}
-	if len(recorder.Calls) != 0 {
-		t.Errorf("a refused write reached the forge: %v", recorder.Calls)
-	}
-}
-
-func second[T any](_ T, err error) error { return err }
-
 func TestFreshAgainstAcceptsAForgeThatHasNotMoved(t *testing.T) {
 	targets := diffFixture(t)
 	saved, err := publication.Observe(t.Context(), targets)
@@ -84,8 +22,8 @@ func TestFreshAgainstAcceptsAForgeThatHasNotMoved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if writes.allows(plandiff.KindRelease, "v1.2.3") != nil || writes.allows(plandiff.KindRelease, "v9") == nil {
-		t.Errorf("writes = %+v", writes.pending)
+	if writes.Allows(plandiff.KindRelease, "v1.2.3") != nil || writes.Allows(plandiff.KindRelease, "v9") == nil {
+		t.Errorf("writes = %+v", writes)
 	}
 }
 

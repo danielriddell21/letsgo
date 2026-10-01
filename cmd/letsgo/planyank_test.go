@@ -315,53 +315,6 @@ func TestYankStalenessHoldsTheWritesToThePlan(t *testing.T) {
 	}
 }
 
-func TestGuardYankRefusesWhatThePlanDidNotList(t *testing.T) {
-	recorder := publish.NewRecorder(nil)
-	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3"}
-	repo := github.Repo{Owner: "you", Name: "demo"}
-	nothing := newPlannedWrites(nil)
-
-	guarded := guardYank(yank.Options{Client: recorder, TapAPI: recorder, Tag: "v1.2.3"}, nothing)
-	if _, err := guarded.Client.UpdateRelease(context.Background(), repo, 7, github.ReleaseInput{}); err == nil {
-		t.Error("the release was edited though the plan did not list it")
-	}
-	if err := guarded.TapAPI.WriteFile(context.Background(), repo, github.FileInput{Path: "Formula/x.rb"}); err == nil {
-		t.Error("the tap was written though the plan did not list it")
-	}
-	if err := guarded.WriteGoMod(filepath.Join(t.TempDir(), "go.mod"), []byte("x")); err == nil {
-		t.Error("go.mod was written though the plan did not list it")
-	}
-	if len(recorder.Calls) != 0 {
-		t.Errorf("a refused write reached the forge: %v", recorder.Calls)
-	}
-}
-
-func TestGuardYankAllowsWhatThePlanListed(t *testing.T) {
-	recorder := publish.NewRecorder(nil)
-	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3"}
-	repo := github.Repo{Owner: "you", Name: "demo"}
-	goMod := filepath.Join(t.TempDir(), "go.mod")
-	listed := newPlannedWrites([]plandiff.Action{
-		{Op: plandiff.Change, Kind: plandiff.KindRelease, Target: "v1.2.3"},
-		{Op: plandiff.Change, Kind: plandiff.KindGoMod, Target: "go.mod"},
-		{Op: plandiff.Add, Kind: plandiff.KindTap, Target: "Formula/x.rb"},
-	})
-
-	guarded := guardYank(yank.Options{Client: recorder, TapAPI: recorder, Tag: "v1.2.3"}, listed)
-	if _, err := guarded.Client.UpdateRelease(context.Background(), repo, 7, github.ReleaseInput{}); err != nil {
-		t.Error(err)
-	}
-	if err := guarded.TapAPI.WriteFile(context.Background(), repo, github.FileInput{Path: "Formula/x.rb"}); err != nil {
-		t.Error(err)
-	}
-	if err := guarded.WriteGoMod(goMod, []byte("module x\n")); err != nil {
-		t.Error(err)
-	}
-	if got := readText(t, goMod); got != "module x\n" {
-		t.Errorf("go.mod = %q", got)
-	}
-}
-
 // The formula and @next roll back with the release, and a formula already at
 // the previous release is left as it is.
 func TestObserveYankPlansTheTapRollback(t *testing.T) {
