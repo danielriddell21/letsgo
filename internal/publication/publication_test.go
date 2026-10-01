@@ -463,3 +463,19 @@ func TestSumsFromSkipsAnUnreadableFile(t *testing.T) {
 		t.Errorf("digest recorded for a file that is not there: %v", sums)
 	}
 }
+
+// A digest the build recorded is kept; the file is not asked again.
+func TestSumsFromKeepsARecordedDigest(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "foo.tar.gz"), []byte("on disk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m := &manifest.Manifest{Artifacts: []manifest.Artifact{{Name: "foo.tar.gz", SHA256: "recorded"}}}
+
+	sums := sumsFrom(dir, &release.Result{Manifest: m, Files: []string{"foo.tar.gz"}})
+
+	if got := sums["foo.tar.gz"]; got != "recorded" {
+		t.Errorf("digest = %q, want the recorded one", got)
+	}
+}
