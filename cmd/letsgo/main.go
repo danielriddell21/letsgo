@@ -513,7 +513,7 @@ func (f forge) doRelease(ctx context.Context, a releaseArgs, applied *plandiff.F
 		Plan: plan.Options{
 			Dir: ".", Publish: !a.snapshot, Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken,
 			Snapshot: a.snapshot, Analyse: true, AllowVulnerable: a.allowVulnerable, AllowBreaking: a.allowBreaking,
-			DisableProxyWarm: a.skipWarm,
+			DisableProxyWarm: a.skipWarm, NewClient: f.client,
 		},
 		FailureNote: "nothing was built or published",
 		Started:     started,
