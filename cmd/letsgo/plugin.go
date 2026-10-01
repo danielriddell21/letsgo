@@ -43,8 +43,7 @@ func machineConfig() *config.Global {
 
 // defaultPluginRepoWith is defaultPluginRepo's core logic, taking the global
 // config directly rather than loading it, so tests can exercise the
-// `plugin-repo` directive without relying on config.LoadGlobal's
-// process-wide memoization.
+// `plugin-repo` directive without touching the machine's own config file.
 func defaultPluginRepoWith(global *config.Global) string {
 	if global.PluginRepo == "" {
 		return pluginRepo
