@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
@@ -39,7 +40,7 @@ func TestFetchErrors(t *testing.T) {
 			c := github.New("token")
 			c.SetEndpoints(server.URL, server.URL)
 
-			_, err := Fetch(context.Background(), c, repo, tc.tag)
+			_, err := Fetch(context.Background(), c, repo, discover.Scope{}, tc.tag)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
 			}
