@@ -19,7 +19,7 @@ func TestProposalJSON(t *testing.T) {
 	}
 	p.Level = Minor
 
-	data, err := p.JSON()
+	data, err := p.JSON("mod/v1.3.0", true)
 	if err != nil {
 		t.Fatalf("JSON: %v", err)
 	}
@@ -34,6 +34,8 @@ func TestProposalJSON(t *testing.T) {
 		`"source": "commits"`,
 		`"detail": "a feature commit"`,
 		`"notes": [`,
+		`"ref": "mod/v1.3.0"`,
+		`"tagged": true`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("JSON() = %s, want it to contain %q", out, want)
@@ -44,13 +46,13 @@ func TestProposalJSON(t *testing.T) {
 func TestProposalJSONOmitsEmptyOptionalFields(t *testing.T) {
 	p := Proposal{Next: "v0.1.0"}
 
-	data, err := p.JSON()
+	data, err := p.JSON("", false)
 	if err != nil {
 		t.Fatalf("JSON: %v", err)
 	}
 	out := string(data)
 
-	for _, absent := range []string{`"previous"`, `"disagree"`, `"signals"`, `"notes"`} {
+	for _, absent := range []string{`"previous"`, `"disagree"`, `"signals"`, `"notes"`, `"ref"`, `"tagged"`} {
 		if strings.Contains(out, absent) {
 			t.Errorf("JSON() = %s, want no %q field when empty", out, absent)
 		}
