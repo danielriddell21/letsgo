@@ -42,7 +42,7 @@ func planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*apply.Diff
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	tokenValue, _ := plan.Token(tokens.Token)
+	tokenValue, _ := plan.Token(ctx, tokens.Token)
 	client := newForgeClient(tokenValue)
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 
@@ -74,8 +74,8 @@ func planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*apply.Diff
 
 	actions, err := publication.Observe(ctx, publication.Options{
 		Plan:  p,
-		Forge: releaseClientFor(client, tokens.ReleaseToken, tokens.Token),
-		Tap:   tapClientFor(client, tokens.TapToken, tokens.Token),
+		Forge: releaseClientFor(ctx, client, tokens.ReleaseToken, tokens.Token),
+		Tap:   tapClientFor(ctx, client, tokens.TapToken, tokens.Token),
 		Token: tokenValue, Repo: repo, Dir: dir, Result: result, Notes: notes, Info: info,
 	})
 	if err != nil {

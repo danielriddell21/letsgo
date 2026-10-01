@@ -504,7 +504,7 @@ func planForApply(ctx context.Context, a releaseArgs, path string) (bool, error)
 func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error {
 	started := time.Now()
 
-	tokenValue, _ := plan.Token(a.token)
+	tokenValue, _ := plan.Token(ctx, a.token)
 	client := newForgeClient(tokenValue)
 
 	// A rehearsal needs no forge and no token, so the gates that check for
@@ -544,12 +544,12 @@ func doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error
 	// another repository need not be one that can also write to this one. They
 	// are the same client when no tap token is configured, which is what makes
 	// the split opt-in rather than a migration.
-	tapClient := tapClientFor(client, a.tapToken, a.token)
+	tapClient := tapClientFor(ctx, client, a.tapToken, a.token)
 
 	// The release itself gets its own client the same way, so it can be
 	// published under the same bot identity as the tap commit instead of
 	// whatever token ran the workflow.
-	releaseClient := releaseClientFor(client, a.releaseToken, a.token)
+	releaseClient := releaseClientFor(ctx, client, a.releaseToken, a.token)
 
 	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
 
@@ -772,7 +772,7 @@ func resolveModuleRepo(ctx context.Context, token string) (moduleRepo, error) {
 		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
 	}
 
-	tokenValue, _ := plan.Token(token)
+	tokenValue, _ := plan.Token(ctx, token)
 	if tokenValue == "" {
 		return moduleRepo{}, fmt.Errorf("letsgo: no token; set %s", envList())
 	}
@@ -821,7 +821,7 @@ func resolveScratchRun(ctx context.Context, repoFlag, token, work, tmpPrefix str
 		cleanup = func() { _ = os.RemoveAll(workDir) }
 	}
 
-	tokenValue, _ := plan.Token(token)
+	tokenValue, _ := plan.Token(ctx, token)
 	client := github.New(tokenValue)
 	client.UserAgent = "letsgo/" + version
 
@@ -918,7 +918,7 @@ func runDiff(args []string) error {
 			return err
 		}
 		scope = discover.Scope{Prefix: prefix}
-		tokenValue, _ := plan.Token(*token)
+		tokenValue, _ := plan.Token(context.Background(), *token)
 		client = github.New(tokenValue)
 		client.UserAgent = "letsgo/" + version
 		if forgeAPIEndpoint != "" {

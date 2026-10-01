@@ -43,7 +43,7 @@ func runYank(args []string) error {
 		return err
 	}
 
-	options := yankOptions(m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap},
+	options := yankOptions(ctx, m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap},
 		diffTokens{Token: *token, TapToken: *tapToken})
 	options.Logf = func(format string, args ...any) { fmt.Printf("  "+format+"\n", args...) }
 

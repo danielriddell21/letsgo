@@ -99,7 +99,7 @@ func TestTapClientForReusesTheReleaseClient(t *testing.T) {
 	client := github.New("release-token")
 	client.UserAgent = "letsgo/test"
 
-	if got := tapClientFor(client, "", "release-token"); got != client {
+	if got := tapClientFor(t.Context(), client, "", "release-token"); got != client {
 		t.Error("a tap with no token of its own got a second client")
 	}
 }
@@ -112,7 +112,7 @@ func TestTapClientForSplitsWhenTheTapHasItsOwnToken(t *testing.T) {
 	client := github.New("release-token")
 	client.UserAgent = "letsgo/test"
 
-	got := tapClientFor(client, "tap-token", "release-token")
+	got := tapClientFor(t.Context(), client, "tap-token", "release-token")
 	if got == client {
 		t.Fatal("the tap token did not produce a client of its own")
 	}
@@ -130,7 +130,7 @@ func TestTapClientForReadsTheEnvironment(t *testing.T) {
 	t.Setenv("LETSGO_TAP_TOKEN", "from-env")
 
 	client := github.New("release-token")
-	if got := tapClientFor(client, "", "release-token"); got == client {
+	if got := tapClientFor(t.Context(), client, "", "release-token"); got == client {
 		t.Error("LETSGO_TAP_TOKEN did not produce a client of its own")
 	}
 }
@@ -146,7 +146,7 @@ func TestReleaseClientForReusesTheMainClient(t *testing.T) {
 	client := github.New("workflow-token")
 	client.UserAgent = "letsgo/test"
 
-	if got := releaseClientFor(client, "", "workflow-token"); got != client {
+	if got := releaseClientFor(t.Context(), client, "", "workflow-token"); got != client {
 		t.Error("a release with no token of its own got a second client")
 	}
 }
@@ -159,7 +159,7 @@ func TestReleaseClientForSplitsWhenTheReleaseHasItsOwnToken(t *testing.T) {
 	client := github.New("workflow-token")
 	client.UserAgent = "letsgo/test"
 
-	got := releaseClientFor(client, "release-token", "workflow-token")
+	got := releaseClientFor(t.Context(), client, "release-token", "workflow-token")
 	if got == client {
 		t.Fatal("the release token did not produce a client of its own")
 	}
@@ -177,7 +177,7 @@ func TestReleaseClientForReadsTheEnvironment(t *testing.T) {
 	t.Setenv("LETSGO_RELEASE_TOKEN", "from-env")
 
 	client := github.New("workflow-token")
-	if got := releaseClientFor(client, "", "workflow-token"); got == client {
+	if got := releaseClientFor(t.Context(), client, "", "workflow-token"); got == client {
 		t.Error("LETSGO_RELEASE_TOKEN did not produce a client of its own")
 	}
 }

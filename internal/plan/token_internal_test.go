@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,16 +16,28 @@ import (
 func TestTokenWithRunsTheGlobalTokenCommand(t *testing.T) {
 	helper := printArgScript(t)
 
-	got, source := tokenWith(&config.Global{TokenCommand: []string{helper, "helper-token"}})
+	got, source := tokenWith(t.Context(), &config.Global{TokenCommand: []string{helper, "helper-token"}})
 	if got != "helper-token" || source != tokenCommandSource {
 		t.Errorf("tokenWith() = %q, %q; want %q, %q", got, source, "helper-token", tokenCommandSource)
+	}
+}
+
+// A cancelled run does not wait on a credential helper: the command is not
+// started, so there is no token.
+func TestTokenWithStopsWhenTheRunIsCancelled(t *testing.T) {
+	helper := printArgScript(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if got, source := tokenWith(ctx, &config.Global{TokenCommand: []string{helper, "helper-token"}}); got != "" || source != "" {
+		t.Errorf("tokenWith() = %q, %q; want no token", got, source)
 	}
 }
 
 func TestTokenWithTrimsTrailingWhitespace(t *testing.T) {
 	helper := printArgScript(t)
 
-	got, _ := tokenWith(&config.Global{TokenCommand: []string{helper, "helper-token\n"}})
+	got, _ := tokenWith(t.Context(), &config.Global{TokenCommand: []string{helper, "helper-token\n"}})
 	if got != "helper-token" {
 		t.Errorf("tokenWith() token = %q, want no trailing newline", got)
 	}
@@ -35,14 +48,14 @@ func TestTokenWithTrimsTrailingWhitespace(t *testing.T) {
 func TestTokenWithFallsThroughOnANonZeroExit(t *testing.T) {
 	helper := failingScript(t)
 
-	got, source := tokenWith(&config.Global{TokenCommand: []string{helper}})
+	got, source := tokenWith(t.Context(), &config.Global{TokenCommand: []string{helper}})
 	if got != "" || source != "" {
 		t.Errorf("tokenWith() = %q, %q; want no token", got, source)
 	}
 }
 
 func TestTokenWithWithoutATokenCommandYieldsNoToken(t *testing.T) {
-	got, source := tokenWith(&config.Global{})
+	got, source := tokenWith(t.Context(), &config.Global{})
 	if got != "" || source != "" {
 		t.Errorf("tokenWith() = %q, %q; want no token", got, source)
 	}

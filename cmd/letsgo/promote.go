@@ -44,8 +44,8 @@ func runPromote(args []string) error {
 	// `letsgo release` splits them: the RC and the stable release are the
 	// same forge object regardless, but the tap may live in a repository the
 	// plain token cannot write to.
-	releaseClient := releaseClientFor(client, *releaseToken, *token)
-	tapClient := tapClientFor(client, *tapToken, *token)
+	releaseClient := releaseClientFor(ctx, client, *releaseToken, *token)
+	tapClient := tapClientFor(ctx, client, *tapToken, *token)
 
 	workDir := *work
 	if workDir == "" {
