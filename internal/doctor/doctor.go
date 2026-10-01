@@ -122,7 +122,7 @@ func Run(ctx context.Context, dir string, global *config.Global) (*Result, error
 	cfg, cfgErr := loadConfig(root.Dir)
 
 	r := &Result{}
-	r.checkGo(ctx, root)
+	r.checkGo(ctx, root, global)
 	r.checkGit(ctx)
 	r.checkVulncheck(cfgErr == nil && requiresVulncheck(cfg))
 	r.checkApidiff()
@@ -165,8 +165,8 @@ func requiresVulncheck(cfg *config.Config) bool {
 
 // checkGo reports the resolved go toolchain (DR-1, DR-2), and whether it
 // matches what go.mod requires (DR-3).
-func (r *Result) checkGo(ctx context.Context, root discover.Module) {
-	path, _, err := gobuild.ToolchainSource()
+func (r *Result) checkGo(ctx context.Context, root discover.Module, global *config.Global) {
+	path, _, err := gobuild.Toolchain(global)
 	if err != nil {
 		r.add(toolsGroup, "go", Fail, "", "%v", err)
 		return

@@ -62,7 +62,7 @@ func Build(
 		return nil, fmt.Errorf("release: %w", err)
 	}
 
-	goVersion, err := gobuild.Version(ctx, "")
+	goVersion, err := gobuild.Version(ctx, p.GoBin)
 	if err != nil {
 		return nil, err
 	}
@@ -333,6 +333,7 @@ func buildCommands(ctx context.Context, p *plan.Plan, dir string, warnf func(str
 			ExtraFiles:   p.Files,
 			ExtraLDFlags: p.LDFlags,
 			Tags:         group.Tags,
+			GoBin:        p.GoBin,
 			Symbols: build.VersionSymbols{
 				Version: p.Symbols.Version, Commit: p.Symbols.Commit, Date: p.Symbols.Date,
 			},

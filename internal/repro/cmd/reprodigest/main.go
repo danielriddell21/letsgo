@@ -46,9 +46,15 @@ func run() error {
 	// two runs of this command is the machine it runs on.
 	modTime := time.Date(2024, 3, 15, 12, 30, 45, 0, time.UTC)
 
+	goBin, _, err := gobuild.Toolchain(nil)
+	if err != nil {
+		return err
+	}
+
 	artifacts, err := repro.Build(context.Background(), repro.Options{
 		ModuleDir:  *fixture,
 		Commands:   []repro.Command{{Package: ".", Binary: "fixture"}},
+		GoBin:      goBin,
 		Name:       "fixture",
 		Version:    "1.2.3",
 		Commit:     "9f2ab1c",
@@ -68,7 +74,7 @@ func run() error {
 	// The toolchain is a build input, so it belongs in the record. Without it
 	// a version mismatch between machines shows up only as digests that
 	// differ for no stated reason, which is a slow thing to diagnose.
-	version, err := gobuild.Version(context.Background(), "")
+	version, err := gobuild.Version(context.Background(), goBin)
 	if err != nil {
 		return err
 	}

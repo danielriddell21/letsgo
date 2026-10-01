@@ -574,7 +574,7 @@ func goEnv(ctx context.Context, name string) string {
 	if value := os.Getenv(name); value != "" {
 		return value
 	}
-	goBin, err := gobuild.Toolchain()
+	goBin, _, err := gobuild.Toolchain(machineConfig())
 	if err != nil {
 		return ""
 	}

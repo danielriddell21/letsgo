@@ -16,7 +16,7 @@ import (
 // Whatever is found must be invoked by absolute path, so the choice cannot be
 // re-made later in a different environment.
 func TestToolchainResolvesAbsolutely(t *testing.T) {
-	path, err := Toolchain()
+	path, _, err := Toolchain(nil)
 	if err != nil {
 		t.Fatalf("Toolchain: %v", err)
 	}
@@ -32,9 +32,13 @@ func TestToolchainResolvesAbsolutely(t *testing.T) {
 // directory on it, and the toolchain execs plenty of its own helpers.
 func TestEnvUsesAFixedPath(t *testing.T) {
 	t.Setenv("PATH", "/tmp/attacker-controlled")
+	goBin, _, err := Toolchain(nil)
+	if err != nil {
+		t.Skipf("no go command: %v", err)
+	}
 
 	var paths []string
-	for _, entry := range Env(Host(), "") {
+	for _, entry := range Env(Host(), "", goBin) {
 		if key, value, ok := strings.Cut(entry, "="); ok && strings.EqualFold(key, "PATH") {
 			paths = append(paths, value)
 		}
@@ -48,7 +52,7 @@ func TestEnvUsesAFixedPath(t *testing.T) {
 	}
 	// The toolchain's own directory has to be reachable, or go cannot find
 	// the helpers it ships with.
-	if dir := toolchainDir(); dir != "" && !strings.Contains(paths[0], dir) {
+	if dir := toolchainDir(goBin); dir != "" && !strings.Contains(paths[0], dir) {
 		t.Errorf("PATH %q does not include the toolchain directory %q", paths[0], dir)
 	}
 }
@@ -62,8 +66,8 @@ func TestEnvUsesAFixedPath(t *testing.T) {
 func TestEnvDisablesWorkspaceMode(t *testing.T) {
 	t.Setenv("GOWORK", "/some/repo/go.work")
 
-	if !slices.Contains(Env(Host(), ""), "GOWORK=off") {
-		t.Errorf("GOWORK=off is not in the build environment: %v", Env(Host(), ""))
+	if !slices.Contains(Env(Host(), "", "/usr/bin/go"), "GOWORK=off") {
+		t.Errorf("GOWORK=off is not in the build environment: %v", Env(Host(), "", "/usr/bin/go"))
 	}
 }
 
@@ -85,9 +89,9 @@ func TestToolchainFollowsPathNotSystemDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, _, err := resolveToolchain()
+	got, _, err := Toolchain(nil)
 	if err != nil {
-		t.Fatalf("resolveToolchain: %v", err)
+		t.Fatalf("Toolchain: %v", err)
 	}
 	if got != wantAbs {
 		t.Errorf("resolved %q, but PATH selects %q; a system copy must not win", got, wantAbs)
@@ -110,7 +114,7 @@ func TestGorootOutranksPath(t *testing.T) {
 	t.Setenv(ToolchainEnvOverride, "")
 	t.Setenv("GOROOT", dir)
 
-	got, _, err := resolveToolchain()
+	got, _, err := Toolchain(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,19 +131,19 @@ func TestToolchainOverrideMustBeAbsoluteAndExecutable(t *testing.T) {
 	}
 
 	t.Setenv(ToolchainEnvOverride, good)
-	if got, _, err := resolveToolchain(); err != nil || got != good {
-		t.Errorf("resolveToolchain() = %q, %v; want %q", got, err, good)
+	if got, _, err := Toolchain(nil); err != nil || got != good {
+		t.Errorf("Toolchain(nil) = %q, %v; want %q", got, err, good)
 	}
 
 	// A bare name would be resolved through PATH by the operating system,
 	// reintroducing exactly what this avoids.
 	t.Setenv(ToolchainEnvOverride, "go")
-	if _, _, err := resolveToolchain(); err == nil {
+	if _, _, err := Toolchain(nil); err == nil {
 		t.Error("a bare name was accepted as an override")
 	}
 
 	t.Setenv(ToolchainEnvOverride, filepath.Join(dir, "absent"))
-	if _, _, err := resolveToolchain(); err == nil {
+	if _, _, err := Toolchain(nil); err == nil {
 		t.Error("a missing file was accepted as an override")
 	}
 }
@@ -154,7 +158,7 @@ func TestToolchainEnvOverrideOutranksGlobalConfig(t *testing.T) {
 	}
 	t.Setenv(ToolchainEnvOverride, good)
 
-	got, source, err := resolveToolchainWith(&config.Global{Path: "config.mod", Go: "/other/go"})
+	got, source, err := Toolchain(&config.Global{Path: "config.mod", Go: "/other/go"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +178,7 @@ func TestToolchainGlobalConfigOutranksGorootAndPath(t *testing.T) {
 	t.Setenv(ToolchainEnvOverride, "")
 	t.Setenv("GOROOT", "")
 
-	got, source, err := resolveToolchainWith(&config.Global{Path: "/etc/letsgo/config.mod", Go: pinned})
+	got, source, err := Toolchain(&config.Global{Path: "/etc/letsgo/config.mod", Go: pinned})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +190,7 @@ func TestToolchainGlobalConfigOutranksGorootAndPath(t *testing.T) {
 func TestToolchainGlobalConfigMustBeAbsoluteAndExecutable(t *testing.T) {
 	t.Setenv(ToolchainEnvOverride, "")
 
-	if _, _, err := resolveToolchainWith(&config.Global{Path: "config.mod", Go: "go"}); err == nil {
+	if _, _, err := Toolchain(&config.Global{Path: "config.mod", Go: "go"}); err == nil {
 		t.Error("a relative path was accepted from the global config")
 	}
 
@@ -198,7 +202,42 @@ func TestToolchainGlobalConfigMustBeAbsoluteAndExecutable(t *testing.T) {
 	if err := os.WriteFile(notExecutable, []byte("#!/bin/sh\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := resolveToolchainWith(&config.Global{Path: "config.mod", Go: notExecutable}); err == nil {
+	if _, _, err := Toolchain(&config.Global{Path: "config.mod", Go: notExecutable}); err == nil {
 		t.Error("a non-executable path was accepted from the global config")
+	}
+}
+
+// Nothing resolves the toolchain on a caller's behalf any more: a caller that
+// has none to give is told so rather than quietly handed whichever go the
+// environment turns up.
+func TestBuildAndVersionRequireTheGoCommand(t *testing.T) {
+	if _, err := Version(t.Context(), ""); err == nil {
+		t.Error("Version without a go command succeeded")
+	}
+	err := Build(t.Context(), Request{Dir: t.TempDir(), Package: ".", Output: "out", Target: Host()})
+	if err == nil {
+		t.Error("Build without a go command succeeded")
+	}
+}
+
+func TestToolchainDirIsTheCommandsOwnDirectory(t *testing.T) {
+	if got := toolchainDir("/opt/go/bin/go"); got != filepath.FromSlash("/opt/go/bin") {
+		t.Errorf("toolchainDir = %q", got)
+	}
+	if got := toolchainDir(""); got != "" {
+		t.Errorf("toolchainDir(\"\") = %q, want none", got)
+	}
+}
+
+// Naming the override is the only way out of a machine with no go on PATH,
+// so the error has to say so.
+func TestToolchainNotFound(t *testing.T) {
+	t.Setenv(ToolchainEnvOverride, "")
+	t.Setenv("GOROOT", "")
+	t.Setenv("PATH", t.TempDir())
+
+	_, _, err := Toolchain(nil)
+	if err == nil || !strings.Contains(err.Error(), ToolchainEnvOverride) {
+		t.Errorf("err = %v, want it to name %s", err, ToolchainEnvOverride)
 	}
 }

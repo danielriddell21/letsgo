@@ -22,6 +22,7 @@ func options(t *testing.T, sourceDir, workDir string) repro.Options {
 	t.Helper()
 	return repro.Options{
 		ModuleDir:  sourceDir,
+		GoBin:      goBin(t),
 		Commands:   []repro.Command{{Package: ".", Binary: "fixture"}},
 		Name:       "fixture",
 		Version:    "1.2.3",
@@ -229,4 +230,13 @@ func copyDir(t *testing.T, src, dst string) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func goBin(t *testing.T) string {
+	t.Helper()
+	bin, _, err := gobuild.Toolchain(nil)
+	if err != nil {
+		t.Skipf("no go command: %v", err)
+	}
+	return bin
 }

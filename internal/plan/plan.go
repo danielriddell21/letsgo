@@ -305,7 +305,8 @@ func (p *Plan) resolveGlobalConfig(global *config.Global) {
 	}
 	p.Global = global
 
-	if path, source, err := gobuild.ToolchainSource(); err == nil {
+	if path, source, err := gobuild.Toolchain(p.Global); err == nil {
+		p.GoBin = path
 		p.note("go", path, source)
 	}
 	if path, source, err := discover.GitSource(); err == nil {
@@ -722,6 +723,10 @@ type Plan struct {
 	// what is done with the plan reads the same settings the plan reported.
 	Global *config.Global
 
+	// GoBin is the go command resolved from the environment and global
+	// config, empty when none was found.
+	GoBin string
+
 	// Proxy is the module proxy this release would warm, resolved from
 	// GOPROXY, the global config, or the fixed default.
 	Proxy string
@@ -1047,7 +1052,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 	}
 	// Nothing importable is a fact about the module, not a gap in the release,
 	// so it stays a Skip even when the gate is required.
-	if importable, err := gate.Importable(ctx, p.Module.Dir); err == nil && !importable {
+	if importable, err := gate.Importable(ctx, p.GoBin, p.Module.Dir); err == nil && !importable {
 		p.add(apiCompatibility, Skip, "%v", gate.ErrNothingExported)
 		return
 	}
@@ -1074,7 +1079,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 	}
 	defer cleanup()
 
-	changes, err := gate.APIDiff(ctx, old, p.Module.Dir)
+	changes, err := gate.APIDiff(ctx, p.GoBin, old, p.Module.Dir)
 	switch {
 	case errors.Is(err, gate.ErrToolMissing), errors.Is(err, gate.ErrNothingExported):
 		p.skip(apiCompatibility, apiGate, "%v", err)

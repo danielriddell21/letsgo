@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/lsp"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -25,18 +26,7 @@ func runLSP(args []string) error {
 		return errUsage("letsgo lsp [--restricted]")
 	}
 
-	var goBin string
-	var resolvePin lsp.PinResolver
-	var installPin lsp.PinInstaller
-	if !*restricted {
-		resolvePin, installPin = latestPin, installPinned
-		// A go binary that can't be resolved is not fatal: build-target
-		// completion just comes back empty, the same as it does in
-		// restricted mode.
-		goBin, _ = gobuild.Toolchain()
-	}
-
-	server := lsp.NewServer(os.Stdin, os.Stdout, lsp.Options{Restricted: *restricted, GoBin: goBin, PluginsDir: machineConfig().PluginsDir, ResolvePin: resolvePin, InstallPin: installPin})
+	server := lsp.NewServer(os.Stdin, os.Stdout, lspOptions(*restricted, machineConfig()))
 	code, err := server.Run(context.Background())
 	if err != nil {
 		return err
@@ -45,6 +35,22 @@ func runLSP(args []string) error {
 		os.Exit(code)
 	}
 	return nil
+}
+
+// lspOptions is what the server is wired with: nothing that reaches outside
+// the document in restricted mode, and the machine's go command and plugin
+// store otherwise.
+func lspOptions(restricted bool, global *config.Global) lsp.Options {
+	opts := lsp.Options{Restricted: restricted, PluginsDir: global.PluginsDir}
+	if restricted {
+		return opts
+	}
+	opts.ResolvePin, opts.InstallPin = latestPin, installPinned
+	// A go binary that can't be resolved is not fatal: build-target
+	// completion just comes back empty, the same as it does in restricted
+	// mode.
+	opts.GoBin, _, _ = gobuild.Toolchain(global)
+	return opts
 }
 
 // latestPin backs the editor's "update pin" action: it installs the newest

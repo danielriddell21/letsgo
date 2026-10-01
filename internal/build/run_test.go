@@ -43,6 +43,7 @@ func buildTools(t *testing.T, targets ...gobuild.Target) ([]build.Artifact, stri
 
 	work := t.TempDir()
 	artifacts, err := build.Run(t.Context(), build.Options{
+		GoBin:     goBin(t),
 		ModuleDir: multiRepo(t),
 		Commands: []build.Command{
 			{Package: "./cmd/crabs", Binary: "crabs"},
@@ -205,6 +206,7 @@ func TestRunCachesTagSetsSeparately(t *testing.T) {
 	run := func(name string, tags []string) build.Artifact {
 		t.Helper()
 		artifacts, err := build.Run(t.Context(), build.Options{
+			GoBin:     goBin(t),
 			ModuleDir: dir,
 			Commands:  []build.Command{{Package: ".", Binary: "prog"}},
 			Name:      name,
@@ -231,4 +233,13 @@ func TestRunCachesTagSetsSeparately(t *testing.T) {
 	if plain.Binaries[0].SHA256 == tagged.Binaries[0].SHA256 {
 		t.Error("the tagged build was handed the untagged build's binary from the cache")
 	}
+}
+
+func goBin(t *testing.T) string {
+	t.Helper()
+	bin, _, err := gobuild.Toolchain(nil)
+	if err != nil {
+		t.Skipf("no go command: %v", err)
+	}
+	return bin
 }
