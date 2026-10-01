@@ -23,6 +23,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish"
@@ -72,13 +73,6 @@ type Options struct {
 	// does — relevant only on a resumed run that already created the
 	// release with hand-edited notes since.
 	AppendNotes bool
-
-	// ExtraNotes renders the sections `letsgo release` appends after the
-	// changelog — what shipped, the manifest fingerprint — so a promoted
-	// release reads like any other. It is given the previous release the
-	// changelog used and the manifest as it will be published, promoted_from
-	// included, because that is what the fingerprint names. Optional.
-	ExtraNotes func(ctx context.Context, p *plan.Plan, previous string, current *manifest.Manifest, manifestSum []byte) (string, error)
 
 	// Tap, Token and Out are what the publication writes the formula, the
 	// container image and its report with, exactly as `letsgo release`
@@ -414,28 +408,28 @@ func buildNotes(ctx context.Context, o Options, stableTag string, p *plan.Plan, 
 	if err != nil {
 		return "", fmt.Errorf("promote: collecting the commits: %w", err)
 	}
-	notes := changelog.Build(previous, stableTag, commits).WithAPIChanges(p.APIChanges).Markdown()
+	body := changelog.Build(previous, stableTag, commits).WithAPIChanges(p.APIChanges).Markdown()
 
 	history, err := prereleaseHistory(ctx, o, stableTag)
 	if err != nil {
 		return "", err
 	}
 	if history != "" {
-		notes += "\n<details><summary>Prerelease history</summary>\n\n" + history + "</details>\n"
+		body += "\n<details><summary>Prerelease history</summary>\n\n" + history + "</details>\n"
 	}
 
-	if o.ExtraNotes == nil {
-		return notes, nil
-	}
 	sum, err := manifestDigest(built)
 	if err != nil {
 		return "", fmt.Errorf("promote: digesting the manifest: %w", err)
 	}
-	extra, err := o.ExtraNotes(ctx, p, previous, built.Manifest, sum)
+	extra, err := notes.Extra(ctx, notes.Source{
+		Plan: p, Client: o.Client, Repo: o.Repo, Manifest: built.Manifest, ManifestSum: sum,
+		Logf: o.Logf,
+	}, previous)
 	if err != nil {
 		return "", fmt.Errorf("promote: generating the extra notes: %w", err)
 	}
-	return notes + extra, nil
+	return body + extra, nil
 }
 
 // manifestDigest is the digest of the manifest as it will be published, read
