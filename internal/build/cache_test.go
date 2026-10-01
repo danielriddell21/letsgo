@@ -4,9 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
-
-	"github.com/danielriddell21/letsgo/internal/config"
 )
 
 func binary(t *testing.T, content string) string {
@@ -19,7 +18,7 @@ func binary(t *testing.T, content string) string {
 }
 
 func TestCacheRoundTrip(t *testing.T) {
-	c := OpenCache(t.TempDir())
+	c := OpenCache(t.TempDir(), false)
 	src := binary(t, "compiled output")
 	key := CacheKey("commit", "./cmd/foo", "linux/amd64")
 
@@ -54,7 +53,7 @@ func TestCacheRoundTrip(t *testing.T) {
 // guarantee downstream of it.
 func TestCacheRejectsAlteredEntries(t *testing.T) {
 	dir := t.TempDir()
-	c := OpenCache(dir)
+	c := OpenCache(dir, false)
 	key := CacheKey("commit", "linux/amd64")
 
 	c.Put(key, binary(t, "original"))
@@ -101,26 +100,24 @@ func TestCacheKeyIsUnambiguous(t *testing.T) {
 
 // Caching is opt-in; an empty key must never hit or store.
 func TestEmptyKeyDisablesCaching(t *testing.T) {
-	c := OpenCache(t.TempDir())
+	c := OpenCache(t.TempDir(), false)
 	c.Put("", binary(t, "x"))
 	if c.Get("", filepath.Join(t.TempDir(), "out")) {
 		t.Error("an empty key produced a hit")
 	}
 }
 
-// The global config's `cache off` disables the cache when no explicit
-// directory is given.
-func TestOpenCacheWithHonoursGlobalCacheOff(t *testing.T) {
-	if openCacheWith("", &config.Global{CacheOff: true}) != nil {
+// `cache off` disables the cache, whatever directory was also given.
+func TestOpenCacheHonoursOff(t *testing.T) {
+	if OpenCache(t.TempDir(), true) != nil {
 		t.Error("cache off did not disable the cache")
 	}
 }
 
-// The global config's `cache <dir>` picks the directory when no explicit
-// one is given.
-func TestOpenCacheWithHonoursGlobalCacheDir(t *testing.T) {
+// `cache <dir>` picks the directory.
+func TestOpenCacheUsesTheGivenDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "cache")
-	c := openCacheWith("", &config.Global{CacheDir: dir})
+	c := OpenCache(dir, false)
 	if c == nil {
 		t.Fatal("expected a cache")
 	}
@@ -129,15 +126,30 @@ func TestOpenCacheWithHonoursGlobalCacheDir(t *testing.T) {
 	}
 }
 
-// An explicit dir outranks the global config entirely.
-func TestOpenCacheWithExplicitDirOutranksGlobalConfig(t *testing.T) {
-	dir := t.TempDir()
-	c := openCacheWith(dir, &config.Global{CacheOff: true, CacheDir: "/should/not/be/used"})
+// No dir given: the user cache directory is used.
+func TestOpenCacheDefaultsToTheUserCacheDir(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", base)
+	t.Setenv("HOME", base)
+	t.Setenv("LocalAppData", base)
+
+	c := OpenCache("", false)
 	if c == nil {
-		t.Fatal("an explicit dir was overridden by cache off")
+		t.Fatal("expected a cache")
 	}
-	if c.dir != dir {
-		t.Errorf("dir = %q, want %q", c.dir, dir)
+	if !strings.HasPrefix(c.dir, base) {
+		t.Errorf("dir = %q, want it under %q", c.dir, base)
+	}
+}
+
+// A directory that cannot be created leaves the builds uncached.
+func TestOpenCacheWithAnUncreatableDirIsNil(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if OpenCache(filepath.Join(file, "cache"), false) != nil {
+		t.Error("an uncreatable dir produced a cache")
 	}
 }
 

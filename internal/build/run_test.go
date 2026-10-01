@@ -197,7 +197,7 @@ func TestRunCachesTagSetsSeparately(t *testing.T) {
 	write("mode_plain.go", "//go:build !gui\n\npackage main\n\nconst mode = \"plain\"\n")
 	write("mode_gui.go", "//go:build gui\n\npackage main\n\nconst mode = \"gui\"\n")
 
-	cache := build.OpenCache(t.TempDir())
+	cache := build.OpenCache(t.TempDir(), false)
 	target := gobuild.Host()
 
 	// One cache key for both, as a single release gives every build of one

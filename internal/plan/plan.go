@@ -55,6 +55,10 @@ type Options struct {
 	// Dir is any directory inside the module.
 	Dir string
 
+	// Global is the machine's configuration, read once by the caller and
+	// handed down. Nil reads it from the file, which is what a command does.
+	Global *config.Global
+
 	// Snapshot builds an untagged working version.
 	Snapshot bool
 
@@ -291,10 +295,15 @@ func (p *Plan) checkPluginConfigFiles() {
 // silent fallback: every other package that consults the global config falls
 // back to its defaults on error, trusting this check to surface the problem
 // once instead of nowhere.
-func (p *Plan) resolveGlobalConfig() {
-	if _, err := config.LoadGlobal(); err != nil {
-		p.add("global config", Fail, "%v", err)
+func (p *Plan) resolveGlobalConfig(global *config.Global) {
+	if global == nil {
+		var err error
+		if global, err = config.LoadGlobal(); err != nil {
+			p.add("global config", Fail, "%v", err)
+			global = &config.Global{}
+		}
 	}
+	p.Global = global
 
 	if path, source, err := gobuild.ToolchainSource(); err == nil {
 		p.note("go", path, source)
@@ -302,7 +311,7 @@ func (p *Plan) resolveGlobalConfig() {
 	if path, source, err := discover.GitSource(); err == nil {
 		p.note("git", path, source)
 	}
-	proxy, source := publish.ResolveProxy()
+	proxy, source := publish.ResolveProxy(os.Getenv("GOPROXY"), p.Global.Proxy, p.Global.Path)
 	p.Proxy = proxy
 	p.note("proxy", proxy, source)
 }
@@ -700,6 +709,10 @@ type Plan struct {
 	// configured, which is the default.
 	Image *ImageTarget
 
+	// Global is the machine configuration this plan was resolved under, so
+	// what is done with the plan reads the same settings the plan reported.
+	Global *config.Global
+
 	// Proxy is the module proxy this release would warm, resolved from
 	// GOPROXY, the global config, or the fixed default.
 	Proxy string
@@ -804,7 +817,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 		p.note("repository", repo.String(), "git remote origin")
 	}
 
-	p.resolveGlobalConfig()
+	p.resolveGlobalConfig(opts.Global)
 
 	// The config is read before the module is settled, because it is what can
 	// move it: `module web` says the go.mod to build is not the one beside

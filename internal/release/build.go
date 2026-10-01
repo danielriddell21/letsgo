@@ -306,7 +306,7 @@ func buildCommands(ctx context.Context, p *plan.Plan, dir string, warnf func(str
 	if p.Git.Clean {
 		cacheKey = p.Git.Commit
 	}
-	cache := build.OpenCache("")
+	cache := build.OpenCache(p.Global.CacheDir, p.Global.CacheOff)
 
 	var artifacts []build.Artifact
 	for _, group := range p.Groups {

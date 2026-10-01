@@ -7,8 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/danielriddell21/letsgo/internal/config"
 )
 
 // Cache stores compiled binaries under a key derived from their inputs.
@@ -27,34 +25,20 @@ type Cache struct {
 	dir string
 }
 
-// OpenCache prepares a cache under dir. An empty dir defers to the global
-// config's `cache` directive, then the user cache directory. A cache that
-// cannot be opened is not an error: builds simply happen the slow way.
-func OpenCache(dir string) *Cache {
-	global, err := config.LoadGlobal()
-	if err != nil {
-		global = &config.Global{}
+// OpenCache prepares a cache under dir. An empty dir is the user cache
+// directory; off disables the cache outright. Both come from the global
+// config, resolved by the caller. A cache that cannot be opened is not an
+// error: builds simply happen the slow way.
+func OpenCache(dir string, off bool) *Cache {
+	if off {
+		return nil
 	}
-	return openCacheWith(dir, global)
-}
-
-// openCacheWith is OpenCache's core logic, taking the global config directly
-// rather than loading it, so tests can exercise cache/off without relying on
-// config.LoadGlobal's process-wide memoization.
-func openCacheWith(dir string, global *config.Global) *Cache {
 	if dir == "" {
-		if global.CacheOff {
+		base, err := os.UserCacheDir()
+		if err != nil {
 			return nil
 		}
-		if global.CacheDir != "" {
-			dir = global.CacheDir
-		} else {
-			base, err := os.UserCacheDir()
-			if err != nil {
-				return nil
-			}
-			dir = filepath.Join(base, "letsgo", "builds")
-		}
+		dir = filepath.Join(base, "letsgo", "builds")
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil
