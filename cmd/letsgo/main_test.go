@@ -772,3 +772,39 @@ func TestRunDiffDefaultsToTheModulesOwnLatestRelease(t *testing.T) {
 		t.Fatalf("runDiff: %v", err)
 	}
 }
+
+// A release goes through the injected forge from the first gate to the last
+// upload: the plan checks write access, the release is created, every built
+// file is attached, and nothing reaches an endpoint the fake does not serve.
+func TestRunReleasePublishesThroughTheInjectedForge(t *testing.T) {
+	ff, f := newFakeForge(t)
+	t.Chdir(moduleFixture(t))
+
+	var err error
+	out := captureStdout(t, func() {
+		err = f.runRelease([]string{"-no-proxy-warm", "-o", filepath.Join(t.TempDir(), "dist")})
+	})
+	if err != nil {
+		t.Fatalf("runRelease = %v\n%s", err, out)
+	}
+
+	if missed := ff.unhandled(); len(missed) > 0 {
+		t.Errorf("requests the forge does not serve: %v", missed)
+	}
+	rel := ff.release("v1.2.3")
+	if rel == nil {
+		t.Fatalf("no release was published\n%s", out)
+	}
+	if rel.Draft || rel.Prerelease {
+		t.Errorf("release = draft %v, prerelease %v; want a stable release", rel.Draft, rel.Prerelease)
+	}
+	if len(rel.Assets) == 0 {
+		t.Fatalf("release has no assets\n%s", out)
+	}
+	if body, ok := ff.asset("v1.2.3", manifest.FileName); !ok || len(body) == 0 {
+		t.Errorf("the manifest was not uploaded; assets = %v", rel.Assets)
+	}
+	if !strings.Contains(out, "released in") || !strings.Contains(out, rel.HTMLURL) {
+		t.Errorf("output does not report the release:\n%s", out)
+	}
+}
