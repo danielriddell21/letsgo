@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/promote"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -88,7 +89,7 @@ func runPromote(args []string) error {
 		Token:       tokenValue,
 		Out:         os.Stdout,
 		ExtraNotes: func(ctx context.Context, p *plan.Plan, previous string, current *manifest.Manifest, sum []byte) (string, error) {
-			return extraNotes(ctx, p, client, repo, previous, current, sum)
+			return notes.Extra(ctx, notesSource(p, client, repo, current, sum), previous)
 		},
 		Logf: func(format string, args ...any) {
 			fmt.Printf("  "+format+"\n", args...)

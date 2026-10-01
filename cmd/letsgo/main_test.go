@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"io"
@@ -19,10 +18,8 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/bump"
 	"github.com/danielriddell21/letsgo/internal/discover"
-	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/manifest"
-	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
@@ -686,217 +683,6 @@ type discard struct{}
 
 func (discard) Write(p []byte) (int, error) { return len(p), nil }
 
-// disable changelog must stop the changelog from being built at all, not
-// merely from being shown: a nil client proves this returns before it would
-// have made a network call.
-func TestReleaseNotesSkippedWhenChangelogDisabled(t *testing.T) {
-	p := &plan.Plan{Features: feature.Resolve([]string{"changelog"})}
-
-	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, nil, nil)
-	if err != nil || notes != "" {
-		t.Errorf("releaseNotes = (%q, %v), want empty and no error", notes, err)
-	}
-}
-
-// manifestForge serves one release whose only asset (when m is non-nil) is
-// the manifest itself, reachable the way DownloadAsset actually fetches it:
-// by numeric asset ID through the API host, not a browser_download_url.
-func manifestForge(t *testing.T, repoName, tag string, m *manifest.Manifest) *github.Client {
-	t.Helper()
-
-	mux := http.NewServeMux()
-	release := func(w http.ResponseWriter, _ *http.Request) {
-		var assets []map[string]any
-		if m != nil {
-			assets = append(assets, map[string]any{"id": 1, "name": manifest.FileName})
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": tag, "assets": assets})
-	}
-	mux.HandleFunc("/repos/"+repoName+"/releases/tags/"+tag, release)
-	mux.HandleFunc("/repos/"+repoName+"/releases/assets/1", func(w http.ResponseWriter, _ *http.Request) {
-		data, err := m.Encode()
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _ = w.Write(data)
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-
-	client := github.New("")
-	client.SetEndpoints(srv.URL, srv.URL)
-	return client
-}
-
-// A first release has no previous tag to diff against, so there is nothing
-// to fetch: whatShipped must return before it would have made a network
-// call, same guarantee TestReleaseNotesSkippedWhenChangelogDisabled proves
-// for the changelog-disabled case.
-func TestWhatShippedSkipsAFirstRelease(t *testing.T) {
-	out, err := whatShipped(context.Background(), nil, github.Repo{}, "", &manifest.Manifest{Version: "v1.0.0"}, nil)
-	if err != nil || out != "" {
-		t.Errorf("whatShipped = %q, %v, want empty for a first release", out, err)
-	}
-}
-
-// A previous release published before letsgo recorded a manifest leaves
-// nothing to fetch; the release must still go out, just without this
-// section.
-func TestWhatShippedSkipsAPreviousReleaseWithNoManifest(t *testing.T) {
-	client := manifestForge(t, "you/demo", "v1.0.0", nil) // no manifest: no asset to find
-	repo := github.Repo{Owner: "you", Name: "demo"}
-	current := &manifest.Manifest{Version: "v1.1.0", Builder: manifest.Builder{Go: "go1.26.2"}}
-
-	var out string
-	stdout := captureStdout(t, func() {
-		var err error
-		out, err = whatShipped(context.Background(), client, repo, "v1.0.0", current, nil)
-		if err != nil {
-			t.Errorf("whatShipped: %v", err)
-		}
-	})
-	if out != "" {
-		t.Errorf("whatShipped = %q, want empty", out)
-	}
-	if !strings.Contains(stdout, `skipped the "what shipped" section`) {
-		t.Errorf("stdout = %q, want a skip notice", stdout)
-	}
-}
-
-// A release that required diff-notes asked for the failure the tests above
-// tolerate: no previous release, or one with no manifest, is an error.
-func TestWhatShippedFailsWhenRequiredAndNothingToCompare(t *testing.T) {
-	repo := github.Repo{Owner: "you", Name: "demo"}
-	current := &manifest.Manifest{Version: "v1.1.0"}
-	required := []string{"diff-notes"}
-
-	if _, err := whatShipped(context.Background(), nil, repo, "", current, required); err == nil {
-		t.Error("a first release should fail when diff-notes is required")
-	}
-
-	client := manifestForge(t, "you/demo", "v1.0.0", nil)
-	if _, err := whatShipped(context.Background(), client, repo, "v1.0.0", current, required); err == nil {
-		t.Error("a previous release with no manifest should fail when diff-notes is required")
-	}
-}
-
-func TestWhatShippedRendersTheCollapsedSection(t *testing.T) {
-	previous := &manifest.Manifest{
-		Schema: manifest.Schema, Version: "v1.0.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.1"},
-	}
-	client := manifestForge(t, "you/demo", "v1.0.0", previous)
-	repo := github.Repo{Owner: "you", Name: "demo"}
-	current := &manifest.Manifest{
-		Schema: manifest.Schema, Version: "v1.1.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.2"},
-	}
-
-	out, err := whatShipped(context.Background(), client, repo, "v1.0.0", current, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "<details><summary>What shipped (vs v1.0.0)</summary>") {
-		t.Errorf("whatShipped = %q, want the collapsed summary", out)
-	}
-	if !strings.Contains(out, "go1.26.1 → go1.26.2") {
-		t.Errorf("whatShipped = %q, want the toolchain row", out)
-	}
-}
-
-// historyFixture writes a repository with two tags, so a local changelog
-// Collect can resolve a real "previous" release without touching the
-// network — the same value whatShipped's forge fetch below must agree with.
-func historyFixture(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-
-	identity := []string{"-c", "user.name=Test", "-c", "user.email=t@example.com"}
-	run := func(args ...string) {
-		t.Helper()
-		full := append(append([]string{"-C", dir}, identity...), args...)
-		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", full, err, out)
-		}
-	}
-	commit := func(name, message string) {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(name), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		run("add", ".")
-		run("commit", "-q", "-m", message)
-	}
-
-	run("init", "-q", "-b", "main")
-	commit("a", "feat: first release")
-	run("tag", "v1.0.0")
-	commit("b", "feat: second release")
-	run("tag", "v1.1.0")
-
-	return dir
-}
-
-// The notes section must compare against the same previous release the
-// changelog above it just used, and must be appended after it (WS-1).
-func TestReleaseNotesAppendsWhatShippedUsingTheChangelogsPreviousRelease(t *testing.T) {
-	dir := historyFixture(t)
-
-	previous := &manifest.Manifest{
-		Schema: manifest.Schema, Version: "v1.0.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.1"},
-	}
-	client := manifestForge(t, "you/demo", "v1.0.0", previous)
-	repo := github.Repo{Owner: "you", Name: "demo"}
-
-	p := &plan.Plan{
-		Features: feature.Resolve(nil),
-		Module:   discover.Module{Dir: dir},
-		Tag:      "v1.1.0",
-	}
-	current := &manifest.Manifest{
-		Schema: manifest.Schema, Version: "v1.1.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.2"},
-	}
-
-	notes, err := releaseNotes(context.Background(), p, client, repo, current, nil)
-	if err != nil {
-		t.Fatalf("releaseNotes: %v", err)
-	}
-	if !strings.Contains(notes, "second release") {
-		t.Errorf("notes = %q, want the changelog entry", notes)
-	}
-	if !strings.Contains(notes, "<details><summary>What shipped (vs v1.0.0)</summary>") {
-		t.Errorf("notes = %q, want the what-shipped section against v1.0.0", notes)
-	}
-	if strings.Index(notes, "second release") > strings.Index(notes, "What shipped") {
-		t.Errorf("notes = %q, want the what-shipped section after the changelog", notes)
-	}
-}
-
-// disable diff-notes must remove the section, and must do so before the
-// forge is ever asked for the previous manifest — same no-network-call
-// guarantee TestReleaseNotesSkippedWhenChangelogDisabled proves for
-// disable changelog. (WS-9)
-func TestReleaseNotesOmitsWhatShippedWhenDisabled(t *testing.T) {
-	dir := historyFixture(t)
-
-	p := &plan.Plan{
-		Features: feature.Resolve([]string{"diff-notes"}),
-		Module:   discover.Module{Dir: dir},
-		Tag:      "v1.1.0",
-	}
-	current := &manifest.Manifest{
-		Schema: manifest.Schema, Version: "v1.1.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.2"},
-	}
-
-	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, current, nil)
-	if err != nil {
-		t.Fatalf("releaseNotes: %v", err)
-	}
-	if !strings.Contains(notes, "second release") {
-		t.Errorf("notes = %q, want the changelog entry", notes)
-	}
-	if strings.Contains(notes, "What shipped") {
-		t.Errorf("notes = %q, want no what-shipped section", notes)
-	}
-}
-
 // Tags do not exist on disk, so the file system decides which side of a diff
 // is which.
 func TestIsManifestPath(t *testing.T) {
@@ -930,47 +716,6 @@ func TestTookKeepsSubSecondDetail(t *testing.T) {
 func TestErrUsage(t *testing.T) {
 	if err := errUsage("letsgo yank <tag>"); !strings.HasPrefix(err.Error(), "usage: ") {
 		t.Errorf("errUsage = %v", err)
-	}
-}
-
-func TestReleaseNotesEndWithTheManifestFingerprint(t *testing.T) {
-	dir := historyFixture(t)
-	p := &plan.Plan{Features: feature.Resolve([]string{"diff-notes"}), Module: discover.Module{Dir: dir}, Tag: "v1.1.0"}
-	sum := sha256.Sum256([]byte("manifest"))
-
-	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, nil, sum[:])
-	if err != nil {
-		t.Fatalf("releaseNotes: %v", err)
-	}
-	for _, want := range []string{
-		"<summary>Manifest fingerprint</summary>", "[letsgo v1.1.0]", "sha256:" + hex.EncodeToString(sum[:]),
-	} {
-		if !strings.Contains(notes, want) {
-			t.Errorf("notes = %q, want %q", notes, want)
-		}
-	}
-	// PW-6: the words in the body are the ones `verify --words` prints.
-	if want := pgpwords.Rows(pgpwords.Encode(sum[:])); !strings.Contains(notes, want) {
-		t.Errorf("notes = %q, want the words %q", notes, want)
-	}
-	if strings.Index(notes, "second release") > strings.Index(notes, "Manifest fingerprint") {
-		t.Errorf("notes = %q, want the fingerprint after the changelog", notes)
-	}
-}
-
-func TestReleaseNotesOmitTheFingerprintWhenDisabled(t *testing.T) {
-	dir := historyFixture(t)
-	p := &plan.Plan{
-		Features: feature.Resolve([]string{"diff-notes", "randomart"}), Module: discover.Module{Dir: dir}, Tag: "v1.1.0",
-	}
-	sum := sha256.Sum256([]byte("manifest"))
-
-	notes, err := releaseNotes(context.Background(), p, nil, github.Repo{}, nil, sum[:])
-	if err != nil {
-		t.Fatalf("releaseNotes: %v", err)
-	}
-	if strings.Contains(notes, "fingerprint") {
-		t.Errorf("notes = %q, want no fingerprint", notes)
 	}
 }
 

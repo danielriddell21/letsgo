@@ -17,6 +17,8 @@ import (
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	installer "github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/notes"
+	"github.com/danielriddell21/letsgo/internal/notes/notestest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish"
@@ -322,13 +324,15 @@ func notesOf(t *testing.T, disabled, required []string, client *github.Client, s
 	p := &plan.Plan{
 		Features: feature.Resolve(disabled),
 		Required: required,
-		Module:   discover.Module{Dir: historyFixture(t)},
+		Module:   discover.Module{Dir: notestest.History(t)},
 		Tag:      "v1.1.0",
 	}
 	current := &manifest.Manifest{
 		Schema: manifest.Schema, Version: "v1.1.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.2"},
 	}
-	return releaseNotes(context.Background(), p, client, github.Repo{Owner: "you", Name: "demo"}, current, sum)
+	return notes.Release(context.Background(), notes.Source{
+		Plan: p, Client: client, Repo: github.Repo{Owner: "you", Name: "demo"}, Manifest: current, ManifestSum: sum,
+	})
 }
 
 // quietly disables the sections the probe at hand is not about, so they can
@@ -351,7 +355,7 @@ func diffNotesRan(t *testing.T, disabled []string) bool {
 	previous := &manifest.Manifest{
 		Schema: manifest.Schema, Version: "v1.0.0", Builder: manifest.Builder{Tool: "letsgo", Go: "go1.26.1"},
 	}
-	notes, err := notesOf(t, quietly(disabled, "randomart"), nil, manifestForge(t, "you/demo", "v1.0.0", previous), nil)
+	notes, err := notesOf(t, quietly(disabled, "randomart"), nil, notestest.Forge(t, "you/demo", "v1.0.0", previous), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +366,7 @@ func diffNotesRan(t *testing.T, disabled []string) bool {
 func diffNotesSkipFails(t *testing.T, required bool) bool {
 	t.Helper()
 	_, err := notesOf(t, []string{"randomart"}, requiredIf(required, "diff-notes"),
-		manifestForge(t, "you/demo", "v1.0.0", nil), nil)
+		notestest.Forge(t, "you/demo", "v1.0.0", nil), nil)
 	return err != nil
 }
 

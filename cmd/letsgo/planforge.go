@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -76,7 +77,7 @@ func planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*forgeDiff,
 	if err != nil {
 		return nil, err
 	}
-	notes, err := releaseNotes(ctx, p, client, repo, result.Manifest, manifestSum)
+	notes, err := notes.Release(ctx, notesSource(p, client, repo, result.Manifest, manifestSum))
 	if err != nil {
 		return nil, err
 	}
