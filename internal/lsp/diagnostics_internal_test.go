@@ -45,6 +45,19 @@ func TestParseDiagnosticsReportsADecodeErrorRepo(t *testing.T) {
 	}
 }
 
+func TestParseDiagnosticsCarriesTheSuggestion(t *testing.T) {
+	diags := parseDiagnostics("letsgo.mod", "bulid linux/amd64\n")
+	if len(diags) != 1 || diags[0].Data == nil {
+		t.Fatalf("diags = %+v, want one with a suggestion", diags)
+	}
+	if got, want := *diags[0].Data, (Suggestion{Wrong: "bulid", Suggest: "build"}); got != want {
+		t.Errorf("Data = %+v, want %+v", got, want)
+	}
+	if r := diags[0].Range; r.End.Character-r.Start.Character != len("bulid") {
+		t.Errorf("Range = %+v, want it to cover the word", r)
+	}
+}
+
 func TestParseDiagnosticsIsSyntaxOnlyForPluginConfig(t *testing.T) {
 	path := filepath.Join(".letsgo", "letsgo-cask.mod")
 	diags := parseDiagnostics(path, "not-a-real-directive foo\n")

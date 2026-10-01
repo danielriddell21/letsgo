@@ -22,6 +22,16 @@ type Diagnostic struct {
 	Range    Range  `json:"range"`
 	Severity int    `json:"severity,omitempty"`
 	Message  string `json:"message"`
+
+	// Data comes back on a code-action request, so the editor can fix the
+	// diagnostic without parsing its message.
+	Data *Suggestion `json:"data,omitempty"`
+}
+
+// Suggestion is a correction for a word the config reader did not know.
+type Suggestion struct {
+	Wrong   string `json:"wrong"`
+	Suggest string `json:"suggest"`
 }
 
 const (

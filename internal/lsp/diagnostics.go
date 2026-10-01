@@ -62,11 +62,16 @@ func diagnosticFromSyntaxError(err error) Diagnostic {
 	}
 	line := max(se.Pos.Line-1, 0)
 	col := max(se.Pos.Col-1, 0)
-	return Diagnostic{
+	d := Diagnostic{
 		Range:    Range{Start: Position{Line: line, Character: col}, End: Position{Line: line, Character: col + 1}},
 		Severity: SeverityError,
 		Message:  se.Msg,
 	}
+	if se.Suggest != "" {
+		d.Range.End.Character = col + len(se.Wrong)
+		d.Data = &Suggestion{Wrong: se.Wrong, Suggest: se.Suggest}
+	}
+	return d
 }
 
 // planDiagnostics runs a fast, local plan — no analysis gates, no forge, a
