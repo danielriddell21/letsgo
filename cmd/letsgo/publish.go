@@ -46,7 +46,7 @@ func (f forge) releaseClientFor(ctx context.Context, client *github.Client, rele
 // `draft = true` in the config.
 func applyDraftFlag(p *plan.Plan, draft bool) {
 	if draft {
-		p.Config.Draft = true
+		p.MarkDraft()
 	}
 }
 

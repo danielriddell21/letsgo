@@ -77,7 +77,7 @@ func tapFilesInput(p *plan.Plan, artifacts []build.Artifact, info *github.RepoIn
 		Repo:      repo.String(),
 		Tap:       p.Tap.String(),
 		Homepage:  "https://" + repo.String(),
-		Caveats:   p.Config.BrewCaveats,
+		Caveats:   p.BrewCaveats(),
 		Artifacts: make([]plugin.TapArtifact, 0, len(artifacts)),
 	}
 	if info != nil {

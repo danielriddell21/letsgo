@@ -165,7 +165,7 @@ func releaseOptions(o Options, logf func(format string, args ...any)) (publish.O
 			TagName:         Tag(p),
 			Name:            releaseTitle(p),
 			Body:            o.Notes,
-			Draft:           p.Config.Draft,
+			Draft:           p.Draft(),
 			Prerelease:      isPrerelease(p),
 			MakeLatest:      isLatest(p),
 			TargetCommitish: p.Git.Commit,
@@ -209,10 +209,10 @@ func sumsFrom(r *release.Result) (map[string]string, error) {
 
 // isPrerelease follows semver: a version carrying a pre-release segment is one.
 func isPrerelease(p *plan.Plan) bool {
-	switch p.Config.Prerelease {
-	case "true":
+	switch p.Prerelease() {
+	case plan.Yes:
 		return true
-	case "false":
+	case plan.No:
 		return false
 	}
 	base, _, _ := strings.Cut(p.Version, "+")
@@ -224,9 +224,11 @@ func isPrerelease(p *plan.Plan) bool {
 // (see discover.Scope), rather than fight whichever module released last for
 // the badge.
 func isLatest(p *plan.Plan) string {
-	switch p.Config.Latest {
-	case "true", "false":
-		return p.Config.Latest
+	switch p.Latest() {
+	case plan.Yes:
+		return "true"
+	case plan.No:
+		return "false"
 	}
 	if p.Scope.Prefix == "" {
 		return "true"

@@ -139,7 +139,7 @@ func TestDraftFlagHoldsTheTapBack(t *testing.T) {
 	result := built(artifact("foo_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"))
 	tap := &fakeTap{}
 
-	p.Config.Draft = true
+	p.MarkDraft()
 
 	if err := publishTap(context.Background(), io.Discard, p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil); err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestDraftFlagHoldsTheImagesBack(t *testing.T) {
 	p := releasePlan()
 	result := &release.Result{Images: []release.ImageBuild{{}}}
 
-	p.Config.Draft = true
+	p.MarkDraft()
 
 	// Reaches the draft guard before any registry call; a push would fail here.
 	if err := publishImages(context.Background(), io.Discard, Options{Plan: p, Result: result}); err != nil {
