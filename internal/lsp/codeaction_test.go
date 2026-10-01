@@ -278,3 +278,11 @@ func TestCodeActionOffersNothingForAnUnopenedDocument(t *testing.T) {
 		t.Errorf("actions = %+v, want none", actions)
 	}
 }
+
+func TestActionsOnABlockFormPin(t *testing.T) {
+	c, uri := pinEditor(t, lsp.Options{ResolvePin: fixedPin(lsp.Pin{Version: "v0.2.0", Digest: newDigest}, nil)}, "letsgo.mod", "plugin (\n\tldflags letsgo-env v0.1.0 "+oldDigest+"\n)\n")
+	actions := codeActions(t, c, uri)
+	if len(actions) != 1 || !strings.Contains(actions[0].Title, "Update pin: letsgo-env") {
+		t.Fatalf("actions = %+v, want one update-pin action on the block's line", actions)
+	}
+}

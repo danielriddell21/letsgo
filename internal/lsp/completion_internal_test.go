@@ -2,26 +2,27 @@ package lsp
 
 import (
 	"context"
+	"slices"
 	"testing"
 )
 
 func TestLineContext(t *testing.T) {
 	tests := []struct {
 		name      string
-		lines     []string
+		text      string
 		lineNo    int
 		character int
 		want      completionContext
 	}{
-		{"empty line", []string{""}, 0, 0, completionContext{tokens: nil}},
-		{"typing the first word", []string{"bui"}, 0, 3, completionContext{tokens: nil}},
-		{"first word complete, cursor after space", []string{"build "}, 0, 6, completionContext{tokens: []string{"build"}}},
-		{"typing the second word", []string{"plugin arch"}, 0, 11, completionContext{tokens: []string{"plugin"}}},
-		{"second word complete, cursor after space", []string{"plugin archive "}, 0, 16, completionContext{tokens: []string{"plugin", "archive"}}},
+		{"empty line", "", 0, 0, completionContext{tokens: nil}},
+		{"typing the first word", "bui", 0, 3, completionContext{tokens: nil}},
+		{"first word complete, cursor after space", "build ", 0, 6, completionContext{tokens: []string{"build"}}},
+		{"typing the second word", "plugin arch", 0, 11, completionContext{tokens: []string{"plugin"}}},
+		{"second word complete, cursor after space", "plugin archive ", 0, 16, completionContext{tokens: []string{"plugin", "archive"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := lineContext(tt.lines, tt.lineNo, tt.character)
+			got := lineContext(outlineOf("letsgo.mod", tt.text), tt.lineNo, tt.character)
 			if len(got.tokens) != len(tt.want.tokens) {
 				t.Fatalf("tokens = %v, want %v", got.tokens, tt.want.tokens)
 			}
@@ -34,22 +35,41 @@ func TestLineContext(t *testing.T) {
 	}
 }
 
-func TestOpenBlockKeyword(t *testing.T) {
-	lines := []string{
-		"build (",
-		"  linux/amd64",
-		"  windows/amd64",
-		")",
-		"tags foo",
+func TestLineContextInsideABlock(t *testing.T) {
+	tests := []struct {
+		name, text string
+		lineNo     int
+		character  int
+		want       completionContext
+	}{
+		{"empty line in a block", "disable (\n  \n)\n", 1, 2, completionContext{tokens: []string{"disable"}, blockOpener: "disable"}},
+		{"typing in a block", "require (\n  prov\n)\n", 1, 6, completionContext{tokens: []string{"require"}, blockOpener: "require"}},
+		{"second word in a block", "plugin (\n  archive \n)\n", 1, 10, completionContext{tokens: []string{"plugin", "archive"}, blockOpener: "plugin"}},
+		{"unclosed block", "disable (\n  ", 1, 2, completionContext{tokens: []string{"disable"}, blockOpener: "disable"}},
+		{"the closing line", "disable (\n  sbom\n)\n", 2, 0, completionContext{}},
+		{"after the block", "disable (\n  sbom\n)\n\n", 3, 0, completionContext{}},
 	}
-	if got := openBlockKeyword(lines, 2); got != "build" {
-		t.Errorf("inside the block: openBlockKeyword = %q, want build", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lineContext(outlineOf("letsgo.mod", tt.text), tt.lineNo, tt.character)
+			if got.blockOpener != tt.want.blockOpener || !slices.Equal(got.tokens, tt.want.tokens) {
+				t.Errorf("lineContext = %+v, want %+v", got, tt.want)
+			}
+		})
 	}
-	if got := openBlockKeyword(lines, 4); got != "" {
-		t.Errorf("after the block closes: openBlockKeyword = %q, want empty", got)
-	}
-	if got := openBlockKeyword(lines, 0); got != "" {
-		t.Errorf("before the block opens: openBlockKeyword = %q, want empty", got)
+}
+
+func TestCompletionsInsideABlockOfFeatures(t *testing.T) {
+	for _, keyword := range []string{"disable", "require"} {
+		items := completions(context.Background(), "letsgo.mod", keyword+" (\n  \n)\n", 1, 2, false, "")
+		if len(items) == 0 {
+			t.Fatalf("%s block: no completions", keyword)
+		}
+		for _, it := range items {
+			if it.Kind == CompletionKeyword {
+				t.Errorf("%s block offers the directive %q, want feature names", keyword, it.Label)
+			}
+		}
 	}
 }
 

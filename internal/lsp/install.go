@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -53,16 +55,17 @@ func installAction(title string, args installArgs) CodeAction {
 	}
 }
 
-// pinsToInstall lists the pins in text that need installing: the one on line,
-// or every one for allPins. The same release pinned on two hooks is listed once.
-func pinsToInstall(dir, text string, line int) []pinLine {
+// pinsToInstall lists the pins in the document that need installing: the one
+// on line, or every one for allPins. The same release pinned on two hooks is
+// listed once.
+func pinsToInstall(dir string, o outline, line int) []pinLine {
 	var pins []pinLine
 	seen := map[string]bool{}
-	for n, l := range strings.Split(text, "\n") {
+	for _, n := range slices.Sorted(maps.Keys(o.byLine)) {
 		if line != allPins && n != line {
 			continue
 		}
-		pin, ok := pinOnLine(l)
+		pin, ok := o.pin(n)
 		key := pin.command + "@" + pin.version
 		if !ok || seen[key] || !needsInstall(dir, pin) {
 			continue
@@ -97,7 +100,7 @@ func (s *Server) handleExecuteCommand(ctx context.Context, raw json.RawMessage) 
 		return nil, nil
 	}
 	dir := filepath.Dir(uriToPath(args.URI))
-	pins := pinsToInstall(dir, doc.text, args.Line)
+	pins := pinsToInstall(dir, outlineOf(uriToPath(args.URI), doc.text), args.Line)
 	if len(pins) == 0 {
 		return nil, s.conn.notify("window/showMessage", showMessageParams{Type: messageInfo, Message: "letsgo: nothing to install"})
 	}
