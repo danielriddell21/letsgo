@@ -63,6 +63,9 @@ func OpenReadOnly(dir, configured string) (*Store, error) {
 	return &Store{dir: resolved}, nil
 }
 
+// Dir is where the store lives.
+func (s *Store) Dir() string { return s.dir }
+
 // storeDir picks where the store lives, without touching the disk.
 func storeDir(dir, configured string) (string, error) {
 	if dir == "" {

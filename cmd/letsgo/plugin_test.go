@@ -803,3 +803,30 @@ func TestVerifyPinnedFailsWhenTheInstalledBinaryIsNotThePin(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestRunPluginDirPrintsTheStore(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(pluginstore.StoreEnvOverride, dir)
+
+	out := captureStdout(t, func() {
+		if err := runPlugin([]string{"dir"}); err != nil {
+			t.Error(err)
+		}
+	})
+	if got := strings.TrimSpace(out); got != dir {
+		t.Errorf("dir = %q, want %q", got, dir)
+	}
+}
+
+func TestRunPluginDirWithoutAHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows resolves the home directory from more than one variable")
+	}
+	t.Setenv(pluginstore.StoreEnvOverride, "")
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("HOME", "")
+
+	if err := runPlugin([]string{"dir"}); err == nil {
+		t.Fatal("no store location should be an error")
+	}
+}
