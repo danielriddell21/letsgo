@@ -411,53 +411,15 @@ func TestCheckReportsAnUnknownTag(t *testing.T) {
 // own prefix, not the repository's overall latest.
 func TestCheckWithNoTagIsScopedToThePrefix(t *testing.T) {
 	const prefix = "services/api/"
-	const tag = prefix + "v1.2.3"
-
-	m := &manifest.Manifest{
-		Schema: manifest.Schema, Project: "tool", Version: "1.2.3", Tag: tag,
-		Artifacts: []manifest.Artifact{{
-			Name: "tool_1.2.3_linux_amd64.tar.gz", OS: "linux", Arch: "amd64", Binary: "tool",
-			SHA256: "a", BinarySHA256: "b",
-		}},
-	}
-	manifestData, err := m.Encode()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/tags"):
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode([]map[string]string{
-				{"name": "v9.9.9"},
-				{"name": "other/v8.0.0"},
-				{"name": prefix + "v1.0.0"},
-				{"name": tag},
-			})
-
-		case strings.Contains(r.URL.Path, "/releases/tags/"):
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"tag_name": tag,
-				"assets": []map[string]string{
-					{"name": manifest.FileName, "browser_download_url": server.URL + "/download/manifest"},
-					{"name": m.Artifacts[0].Name, "browser_download_url": server.URL + "/download/archive"},
-				},
-			})
-
-		case strings.HasSuffix(r.URL.Path, "/download/manifest"):
-			_, _ = w.Write(manifestData)
-
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(server.Close)
+	url := channelForge(t, "you/tool", []releaseFixture{
+		{tag: "v9.9.9"},
+		{tag: "other/v8.0.0"},
+		{tag: prefix + "v1.0.0"},
+		{tag: prefix + "v1.2.3"},
+	})
 
 	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
-		Repo: "you/tool", Current: "0.0.1", APIEndpoint: server.URL, OS: "linux", Arch: "amd64",
+		Repo: "you/tool", Current: "0.0.1", APIEndpoint: url, OS: "linux", Arch: "amd64",
 		Prefix: prefix,
 	})
 	if err != nil {
@@ -466,26 +428,18 @@ func TestCheckWithNoTagIsScopedToThePrefix(t *testing.T) {
 	if update == nil {
 		t.Fatal("no update offered")
 	}
-	if update.Tag != tag {
-		t.Errorf("Tag = %q, want the scoped module's own latest release, not the repository's overall latest", update.Tag)
+	if want := prefix + "v1.2.3"; update.Tag != want {
+		t.Errorf("Tag = %q, want the scoped module's own latest release %q, not the repository's overall latest", update.Tag, want)
 	}
 }
 
-// A prefix that matches no tag means the module has no release yet, and that
-// has to surface as "no releases" rather than a nil pointer.
+// A prefix that matches no release means the module has no release yet, and
+// that has to surface as "no releases" rather than a nil pointer.
 func TestCheckScopedToAPrefixWithNoMatchingTagHasNoReleases(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/tags") {
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode([]map[string]string{{"name": "other/v1.0.0"}})
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	t.Cleanup(server.Close)
+	url := channelForge(t, "you/tool", []releaseFixture{{tag: "other/v1.0.0"}})
 
 	_, err := selfupdate.Check(context.Background(), selfupdate.Options{
-		Repo: "you/tool", Current: "1.0.0", APIEndpoint: server.URL, OS: "linux", Arch: "amd64",
+		Repo: "you/tool", Current: "1.0.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
 		Prefix: "services/api/",
 	})
 	if err == nil || !strings.Contains(err.Error(), "has no releases") {
@@ -493,8 +447,8 @@ func TestCheckScopedToAPrefixWithNoMatchingTagHasNoReleases(t *testing.T) {
 	}
 }
 
-// A forge error listing tags must surface, not be swallowed as "no releases".
-func TestCheckScopedToAPrefixSurfacesATagsError(t *testing.T) {
+// A forge error listing releases must surface, not be swallowed as "no releases".
+func TestCheckScopedToAPrefixSurfacesAListingError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -505,10 +459,10 @@ func TestCheckScopedToAPrefixSurfacesATagsError(t *testing.T) {
 		Prefix: "services/api/",
 	})
 	if err == nil {
-		t.Fatal("a failed tag listing verified")
+		t.Fatal("a failed release listing was accepted")
 	}
 	if strings.Contains(err.Error(), "has no releases") {
-		t.Errorf("err = %v, want the underlying tags error, not \"has no releases\"", err)
+		t.Errorf("err = %v, want the underlying listing error, not \"has no releases\"", err)
 	}
 }
 
@@ -719,5 +673,30 @@ func TestLatestReportsAForgeFailure(t *testing.T) {
 	_, err := selfupdate.Latest(context.Background(), selfupdate.Options{Repo: "you/tool", APIEndpoint: "http://127.0.0.1:1"})
 	if err == nil {
 		t.Fatal("Latest against an unreachable forge succeeded")
+	}
+}
+
+// Without a channel a scoped module is offered stable releases only, the same
+// as an unscoped one: no prereleases, drafts or yanked releases.
+func TestCheckScopedWithNoChannelSkipsPrereleasesDraftsAndYanked(t *testing.T) {
+	const prefix = "services/api/"
+	url := channelForge(t, "you/tool", []releaseFixture{
+		{tag: prefix + "v1.0.0"},
+		{tag: prefix + "v1.1.0"},
+		{tag: prefix + "v1.2.0-rc.1"},
+		{tag: prefix + "v1.3.0", draft: true},
+		{tag: prefix + "v1.4.0", body: "> [!CAUTION]\n> yanked"},
+		{tag: "other/v9.0.0"},
+	})
+
+	update, err := selfupdate.Check(context.Background(), selfupdate.Options{
+		Repo: "you/tool", Current: "0.9.0", APIEndpoint: url, OS: "linux", Arch: "amd64",
+		Prefix: prefix,
+	})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if update == nil || update.Tag != prefix+"v1.1.0" {
+		t.Fatalf("update = %+v, want %sv1.1.0, the newest stable release in scope", update, prefix)
 	}
 }

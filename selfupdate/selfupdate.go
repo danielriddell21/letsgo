@@ -344,25 +344,23 @@ func releaseForTag(ctx context.Context, o Options, tag string) (*release, error)
 	return &out, nil
 }
 
-// latestRelease finds the most recent release, scoped to o.Prefix when it is
-// set. The forge's own "latest release" has no concept of a monorepo's
-// scopes, so a scoped module instead lists tags and picks the highest version
-// within its own prefix, the same way verify.latestRelease does.
+// latestRelease finds the newest stable release, scoped to o.Prefix when it
+// is set. The forge's own "latest release" has no concept of a monorepo's
+// scopes, so a scoped module instead lists releases and applies the same
+// draft, prerelease and yanked rules the forge applies to the unscoped one.
 func latestRelease(ctx context.Context, o Options) (*release, error) {
 	if o.Prefix == "" {
 		return unscopedLatestRelease(ctx, o)
 	}
 
-	tags, err := listTags(ctx, o)
+	best, err := bestRelease(ctx, o, func(v semver.Version) bool { return !v.IsPrerelease() })
 	if err != nil {
 		return nil, err
 	}
-
-	tag, ok := (discover.Scope{Prefix: o.Prefix}).LatestTag(tags)
-	if !ok {
+	if best == nil {
 		return nil, fmt.Errorf("selfupdate: %s has no releases", o.Repo)
 	}
-	return releaseForTag(ctx, o, tag)
+	return best, nil
 }
 
 func unscopedLatestRelease(ctx context.Context, o Options) (*release, error) {
@@ -500,35 +498,6 @@ func listReleases(ctx context.Context, o Options) ([]release, error) {
 		return nil, fmt.Errorf("selfupdate: parsing releases: %w", err)
 	}
 	return out, nil
-}
-
-type tagInfo struct {
-	Name string `json:"name"`
-}
-
-// listTags fetches up to 100 tags, which is enough to find a monorepo
-// module's latest release without paging: a module far enough behind that
-// its newest tag falls off the first page has bigger problems than this
-// lookup.
-func listTags(ctx context.Context, o Options) ([]string, error) {
-	resp, err := o.get(ctx, fmt.Sprintf("%s/repos/%s/tags?per_page=100", o.api(), o.Repo))
-	if err != nil {
-		return nil, err
-	}
-	data, err := read(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	var out []tagInfo
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("selfupdate: parsing tags: %w", err)
-	}
-	names := make([]string, len(out))
-	for i, t := range out {
-		names[i] = t.Name
-	}
-	return names, nil
 }
 
 func fetchManifest(ctx context.Context, o Options, r *release) (*manifest.Manifest, error) {
