@@ -869,7 +869,7 @@ var ReleaseTokenEnvVars = []string{"LETSGO_RELEASE_TOKEN"}
 const tokenCommandSource = "token-command"
 
 // Token returns the resolved token, and where it came from.
-func Token(override string) (token, source string) {
+func Token(ctx context.Context, override string) (token, source string) {
 	if override != "" {
 		return override, "--token"
 	}
@@ -882,14 +882,14 @@ func Token(override string) (token, source string) {
 	if err != nil {
 		global = &config.Global{}
 	}
-	return tokenWith(global)
+	return tokenWith(ctx, global)
 }
 
 // tokenWith is Token's last fallback tier, taking the global config directly
 // rather than loading it, so tests can exercise token-command without
 // relying on config.LoadGlobal's process-wide memoization.
-func tokenWith(global *config.Global) (token, source string) {
-	if token := runTokenCommand(global.TokenCommand); token != "" {
+func tokenWith(ctx context.Context, global *config.Global) (token, source string) {
+	if token := runTokenCommand(ctx, global.TokenCommand); token != "" {
 		return token, tokenCommandSource
 	}
 	return "", ""
@@ -903,11 +903,11 @@ func tokenWith(global *config.Global) (token, source string) {
 //
 // The token is returned and nothing else: it is never logged, and only the
 // argv that produced it is ever recorded, as tokenCommandSource.
-func runTokenCommand(argv []string) string {
+func runTokenCommand(ctx context.Context, argv []string) string {
 	if len(argv) == 0 {
 		return ""
 	}
-	cmd := exec.CommandContext(context.Background(), argv[0], argv[1:]...)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -929,7 +929,7 @@ func runTokenCommand(argv []string) string {
 // published with one credential keeps working unchanged. What the fallback
 // costs is stated where it is configured, not here: one token that can write
 // to both repositories is one token whose loss reaches both.
-func TapToken(override, tokenOverride string) (token, source string) {
+func TapToken(ctx context.Context, override, tokenOverride string) (token, source string) {
 	if override != "" {
 		return override, "--tap-token"
 	}
@@ -938,7 +938,7 @@ func TapToken(override, tokenOverride string) (token, source string) {
 			return v, name
 		}
 	}
-	return Token(tokenOverride)
+	return Token(ctx, tokenOverride)
 }
 
 // ReleaseToken returns the token the GitHub release is published with, and
@@ -947,7 +947,7 @@ func TapToken(override, tokenOverride string) (token, source string) {
 // It falls back to the release token so that a repository which has always
 // published with one credential keeps working unchanged, exactly as
 // TapToken does for the tap.
-func ReleaseToken(override, tokenOverride string) (token, source string) {
+func ReleaseToken(ctx context.Context, override, tokenOverride string) (token, source string) {
 	if override != "" {
 		return override, "--release-token"
 	}
@@ -956,7 +956,7 @@ func ReleaseToken(override, tokenOverride string) (token, source string) {
 			return v, name
 		}
 	}
-	return Token(tokenOverride)
+	return Token(ctx, tokenOverride)
 }
 
 // checkVulnerabilities refuses to publish a binary that can reach known
@@ -1188,7 +1188,7 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 		return
 	}
 
-	token, source := Token(opts.Token)
+	token, source := Token(ctx, opts.Token)
 	if token == "" {
 		p.add("token", Fail, "no token; set %s", strings.Join(TokenEnvVars, " or "))
 		return
@@ -1220,7 +1220,7 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 	// Probing the release's credential instead is how a plan passes and the
 	// release then fails on its last step, which is the one failure this
 	// gate exists to prevent.
-	tapToken, tapSource := TapToken(opts.TapToken, opts.Token)
+	tapToken, tapSource := TapToken(ctx, opts.TapToken, opts.Token)
 	tapClient := client
 	if tapToken != token {
 		tapClient = github.New(tapToken)
@@ -1246,7 +1246,7 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 func (p *Plan) checkRelease(
 	ctx context.Context, opts Options, repo github.Repo, token string, client *github.Client, access github.Access,
 ) bool {
-	releaseToken, releaseSource := ReleaseToken(opts.ReleaseToken, opts.Token)
+	releaseToken, releaseSource := ReleaseToken(ctx, opts.ReleaseToken, opts.Token)
 	releaseClient, releaseAccess := client, access
 	if releaseToken != token {
 		releaseClient = github.New(releaseToken)

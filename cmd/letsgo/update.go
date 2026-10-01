@@ -48,7 +48,7 @@ func runUpdate(args []string) error {
 		return err
 	}
 
-	tokenValue, _ := plan.Token(*token)
+	tokenValue, _ := plan.Token(context.Background(), *token)
 
 	u := updater{
 		Options: selfupdate.Options{

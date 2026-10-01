@@ -35,7 +35,7 @@ type yankTarget struct {
 
 // yankOptions is the one place a retraction is put together, so that doing it,
 // planning it and applying a plan of it all start from the same options.
-func yankOptions(m moduleRepo, t yankTarget, tokens diffTokens) yank.Options {
+func yankOptions(ctx context.Context, m moduleRepo, t yankTarget, tokens diffTokens) yank.Options {
 	o := yank.Options{
 		Client:   m.Client,
 		Repo:     m.Repo,
@@ -51,7 +51,7 @@ func yankOptions(m moduleRepo, t yankTarget, tokens diffTokens) yank.Options {
 		},
 	}
 	if !t.KeepTap {
-		o.Tap, o.TapAPI, o.TapFilesPlugin, o.PluginRoot = tapFor(m.Module.Dir, tapClientFor(m.Client, tokens.TapToken, tokens.Token))
+		o.Tap, o.TapAPI, o.TapFilesPlugin, o.PluginRoot = tapFor(m.Module.Dir, tapClientFor(ctx, m.Client, tokens.TapToken, tokens.Token))
 	}
 	return o
 }
@@ -75,7 +75,7 @@ func planYank(ctx context.Context, tag string, y yankArgs, tokens diffTokens, r 
 	if err != nil {
 		return err
 	}
-	options := yankOptions(m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap}, tokens)
+	options := yankOptions(ctx, m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap}, tokens)
 
 	fmt.Printf("retract %s from %s\n", tag, m.Repo)
 	actions, err := apply.ObserveYank(ctx, options)
@@ -112,7 +112,7 @@ func applyYank(ctx context.Context, file *plandiff.File, tokens diffTokens) erro
 
 	// A plan that touches no tap file was made without one.
 	keepTap := !apply.Touches(file.Actions, plandiff.KindTap)
-	options := yankOptions(m, yankTarget{Tag: file.Tag, Reason: file.Reason, Previous: file.Previous, KeepTap: keepTap}, tokens)
+	options := yankOptions(ctx, m, yankTarget{Tag: file.Tag, Reason: file.Reason, Previous: file.Previous, KeepTap: keepTap}, tokens)
 
 	fmt.Println()
 	result, err := apply.Yank(ctx, file, options, say)

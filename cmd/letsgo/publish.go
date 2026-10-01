@@ -19,8 +19,8 @@ const releaseTokenUsage = "token the GitHub release is published with (default: 
 // when resolved names the same credential as the release: one client means
 // one connection pool and one user agent, and it keeps the single-credential
 // arrangement exactly as it was.
-func splitClientFor(client *github.Client, resolved, token string) *github.Client {
-	current, _ := plan.Token(token)
+func splitClientFor(ctx context.Context, client *github.Client, resolved, token string) *github.Client {
+	current, _ := plan.Token(ctx, token)
 	if resolved == current {
 		return client
 	}
@@ -30,17 +30,17 @@ func splitClientFor(client *github.Client, resolved, token string) *github.Clien
 }
 
 // tapClientFor returns the client the tap is written with.
-func tapClientFor(client *github.Client, tapToken, token string) *github.Client {
-	value, _ := plan.TapToken(tapToken, token)
-	return splitClientFor(client, value, token)
+func tapClientFor(ctx context.Context, client *github.Client, tapToken, token string) *github.Client {
+	value, _ := plan.TapToken(ctx, tapToken, token)
+	return splitClientFor(ctx, client, value, token)
 }
 
 // releaseClientFor returns the client the GitHub release itself is created
 // and published with. Mirrors tapClientFor exactly, one split credential at
 // a time.
-func releaseClientFor(client *github.Client, releaseToken, token string) *github.Client {
-	value, _ := plan.ReleaseToken(releaseToken, token)
-	return splitClientFor(client, value, token)
+func releaseClientFor(ctx context.Context, client *github.Client, releaseToken, token string) *github.Client {
+	value, _ := plan.ReleaseToken(ctx, releaseToken, token)
+	return splitClientFor(ctx, client, value, token)
 }
 
 // applyDraftFlag folds `release --draft` into the plan, so the tap and image
