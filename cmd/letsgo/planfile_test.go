@@ -331,3 +331,24 @@ func resolvedPlan(tag, commit string) *plan.Plan {
 	p.Git.Commit = commit
 	return p
 }
+
+// A fresh apply plans and builds as one: --no-proxy-warm must be in the plan
+// it saves, or the rebuild would never match it.
+func TestApplyWithNoProxyWarmPlansWithoutIt(t *testing.T) {
+	writableForge(t)
+	t.Chdir(moduleFixture(t))
+	path := filepath.Join(t.TempDir(), "release.plan")
+
+	var err error
+	_ = captureStdout(t, func() { _, err = planForApply(t.Context(), releaseArgs{skipWarm: true}, path) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := plandiff.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(file.Manifest), "proxy-warm") {
+		t.Errorf("the plan's manifest does not record proxy-warm as disabled:\n%s", file.Manifest)
+	}
+}
