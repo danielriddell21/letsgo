@@ -765,3 +765,41 @@ func TestListPluginsReportsUnreferencedStoreEntries(t *testing.T) {
 		t.Errorf("printed:\n%s\nwant the prune hint", out.String())
 	}
 }
+
+// A store entry altered on disk is not "ok", and the list says why rather than
+// reporting it as merely missing.
+func TestPluginStatusReportsATamperedStoreEntry(t *testing.T) {
+	storeDir := noStore(t)
+	t.Setenv("PATH", t.TempDir())
+	digest := putInStore(t, storeDir, "letsgo-fake", "the pinned bytes")
+
+	entry := filepath.Join(storeDir, "sha256", strings.TrimPrefix(digest, "sha256:"), "letsgo-fake")
+	write(t, entry, "something else")
+
+	status, ok := pluginStatus(config.Plugin{
+		Hook: "ldflags", Command: "letsgo-fake", Version: "v0.1.0", Digest: digest,
+	})
+	if ok || !strings.Contains(status, "tampered") {
+		t.Errorf("status = %q, ok = %v", status, ok)
+	}
+}
+
+// Installing a release proves it matches its own manifest, not the pin: a pin
+// that names a different digest must fail the install, not report success.
+func TestVerifyPinnedFailsWhenTheInstalledBinaryIsNotThePin(t *testing.T) {
+	storeDir := noStore(t)
+	t.Setenv("PATH", t.TempDir())
+	t.Chdir(t.TempDir())
+	installed := putInStore(t, storeDir, "letsgo-fake", "the installed bytes")
+
+	ok := config.Plugin{Command: "letsgo-fake", Version: "v0.1.0", Digest: installed}
+	if err := verifyPinned(ok); err != nil {
+		t.Fatalf("a pin that matches the installed binary failed: %v", err)
+	}
+
+	stale := config.Plugin{Command: "letsgo-fake", Version: "v0.1.0", Digest: "sha256:" + strings.Repeat("a", 64)}
+	err := verifyPinned(stale)
+	if err == nil || !strings.Contains(err.Error(), "update the pin") {
+		t.Errorf("err = %v", err)
+	}
+}

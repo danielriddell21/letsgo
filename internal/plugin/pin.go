@@ -27,6 +27,9 @@ type Resolution struct {
 	// that failed the check when Mismatch.
 	Path string
 
+	// Stored is true when Path is in the plugin store, not on PATH.
+	Stored bool
+
 	// Digest is what Path actually hashes to, set for Mismatch.
 	Digest string
 
@@ -56,7 +59,7 @@ func Resolve(command, digest, dir string) Resolution {
 			return Resolution{State: Broken, Err: err}
 		}
 		if ok {
-			return Resolution{State: Installed, Path: path}
+			return Resolution{State: Installed, Path: path, Stored: true}
 		}
 	}
 

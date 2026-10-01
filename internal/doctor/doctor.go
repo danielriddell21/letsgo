@@ -129,7 +129,7 @@ func Run(ctx context.Context, dir string) (*Result, error) {
 
 	r.checkConfig(cfgErr)
 	if cfgErr == nil {
-		r.checkPlugins(cfg)
+		r.checkPlugins(cfg, root.Dir)
 	}
 	r.checkHistory(ctx, root.Dir, git, scope)
 	r.checkRemote(ctx, root.Dir)
