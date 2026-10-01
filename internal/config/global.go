@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 )
 
 // GlobalConfigEnvOverride names the global config file directly, overriding
@@ -291,22 +290,6 @@ func globalArity(file string, line *Line) error {
 	return errAt(file, line.P, "%s takes %s", line.Keyword, globalKnown[line.Keyword])
 }
 
-var (
-	globalOnce sync.Once
-	global     *Global
-	globalErr  error
-)
-
-// LoadGlobal reads and decodes the global config file, memoized for the
-// process: every caller during one run must see the same machine
-// configuration, and the file does not change while letsgo is running.
-func LoadGlobal() (*Global, error) {
-	globalOnce.Do(func() {
-		global, globalErr = loadGlobal()
-	})
-	return global, globalErr
-}
-
 // GlobalPath is where LoadGlobal reads from: GlobalConfigEnvOverride if set,
 // else os.UserConfigDir()/letsgo/config.mod. explicit reports whether the
 // path came from the override, since a missing override is an error while a
@@ -322,9 +305,10 @@ func GlobalPath() (path string, explicit bool, err error) {
 	return filepath.Join(dir, "letsgo", "config.mod"), false, nil
 }
 
-// loadGlobal is LoadGlobal's unmemoized body, kept separate so tests can
-// exercise it directly against varied environments.
-func loadGlobal() (*Global, error) {
+// LoadGlobal reads and decodes the global config file. Nothing is cached: the
+// composition root reads it and hands the result to whatever needs it, so no
+// state outlives the call and tests can vary the environment freely.
+func LoadGlobal() (*Global, error) {
 	path, explicit, err := GlobalPath()
 	if err != nil {
 		return nil, err

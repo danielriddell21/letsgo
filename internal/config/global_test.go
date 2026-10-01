@@ -173,9 +173,9 @@ func TestDecodeGlobalRejectsABlock(t *testing.T) {
 func TestLoadGlobalDefaultsWhenTheFileIsAbsent(t *testing.T) {
 	t.Setenv(GlobalConfigEnvOverride, "")
 
-	g, err := loadGlobal()
+	g, err := LoadGlobal()
 	if err != nil {
-		t.Fatalf("loadGlobal: %v", err)
+		t.Fatalf("LoadGlobal: %v", err)
 	}
 	if g.Go != "" || g.Proxy != "" {
 		t.Errorf("expected a zero Global, got %+v", g)
@@ -189,9 +189,9 @@ func TestLoadGlobalHonoursTheEnvOverride(t *testing.T) {
 	}
 	t.Setenv(GlobalConfigEnvOverride, path)
 
-	g, err := loadGlobal()
+	g, err := LoadGlobal()
 	if err != nil {
-		t.Fatalf("loadGlobal: %v", err)
+		t.Fatalf("LoadGlobal: %v", err)
 	}
 	if g.Proxy != "https://p.internal" {
 		t.Errorf("Proxy = %q", g.Proxy)
@@ -208,7 +208,7 @@ func TestLoadGlobalRejectsAMalformedFile(t *testing.T) {
 	}
 	t.Setenv(GlobalConfigEnvOverride, path)
 
-	if _, err := loadGlobal(); err == nil {
+	if _, err := LoadGlobal(); err == nil {
 		t.Fatal("expected an error")
 	}
 }
@@ -240,7 +240,7 @@ func TestGlobalPathDefaultsToUserConfigDir(t *testing.T) {
 func TestLoadGlobalRejectsAMissingOverride(t *testing.T) {
 	t.Setenv(GlobalConfigEnvOverride, filepath.Join(t.TempDir(), "does-not-exist.mod"))
 
-	if _, err := loadGlobal(); err == nil {
+	if _, err := LoadGlobal(); err == nil {
 		t.Fatal("expected an error")
 	}
 }
