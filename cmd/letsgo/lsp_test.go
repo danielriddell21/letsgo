@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -11,6 +13,36 @@ func TestRunLSPRejectsExtraArgs(t *testing.T) {
 	err := runLSP([]string{"extra"})
 	if err == nil || !strings.HasPrefix(err.Error(), "usage: ") {
 		t.Errorf("runLSP([extra]) = %v, want a usage error", err)
+	}
+}
+
+// A client that shuts the server down cleanly ends the process with success,
+// which is the whole path from the command line to a running server.
+func TestRunLSPServesUntilShutdown(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = stdin; r.Close() })
+
+	frame := func(body string) string {
+		return fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(body), body)
+	}
+	go func() {
+		defer w.Close()
+		fmt.Fprint(w, frame(`{"jsonrpc":"2.0","id":1,"method":"shutdown"}`))
+		fmt.Fprint(w, frame(`{"jsonrpc":"2.0","method":"exit"}`))
+	}()
+
+	var runErr error
+	out := captureStdout(t, func() { runErr = runLSP([]string{"--restricted"}) })
+	if runErr != nil {
+		t.Fatalf("runLSP = %v", runErr)
+	}
+	if !strings.Contains(out, `"id":1`) {
+		t.Errorf("no answer to the shutdown request: %q", out)
 	}
 }
 
