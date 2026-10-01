@@ -817,3 +817,16 @@ func TestRunPluginDirPrintsTheStore(t *testing.T) {
 		t.Errorf("dir = %q, want %q", got, dir)
 	}
 }
+
+func TestRunPluginDirWithoutAHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows resolves the home directory from more than one variable")
+	}
+	t.Setenv(pluginstore.StoreEnvOverride, "")
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("HOME", "")
+
+	if err := runPluginDir(nil); err == nil {
+		t.Fatal("no store location should be an error")
+	}
+}
