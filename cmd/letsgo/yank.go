@@ -16,7 +16,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/yank"
 )
 
-func runYank(args []string) error {
+func (f forge) runYank(args []string) error {
 	fs := flag.NewFlagSet("yank", flag.ExitOnError)
 	var y yankArgs
 	y.bind(fs)
@@ -33,7 +33,7 @@ func runYank(args []string) error {
 
 	ctx := context.Background()
 
-	m, err := resolveModuleRepo(ctx, *token)
+	m, err := f.resolveModuleRepo(ctx, *token)
 	if err != nil {
 		return err
 	}
@@ -43,7 +43,7 @@ func runYank(args []string) error {
 		return err
 	}
 
-	options := yankOptions(ctx, m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap},
+	options := f.yankOptions(ctx, m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap},
 		diffTokens{Token: *token, TapToken: *tapToken})
 	options.Logf = func(format string, args ...any) { fmt.Printf("  "+format+"\n", args...) }
 

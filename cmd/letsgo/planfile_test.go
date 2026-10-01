@@ -12,7 +12,6 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/plan"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
 
@@ -26,10 +25,10 @@ func TestExitCodeTellsDriftFromFailure(t *testing.T) {
 }
 
 func TestRunApplyRejectsWhatItCannotApply(t *testing.T) {
-	if err := runApply([]string{filepath.Join(t.TempDir(), "absent")}); err == nil {
+	if err := unwired.runApply([]string{filepath.Join(t.TempDir(), "absent")}); err == nil {
 		t.Error("runApply accepted a missing file")
 	}
-	if err := runApply([]string{"a.plan", "b.plan"}); err == nil || !strings.Contains(err.Error(), "usage") {
+	if err := unwired.runApply([]string{"a.plan", "b.plan"}); err == nil || !strings.Contains(err.Error(), "usage") {
 		t.Errorf("runApply with two files = %v, want usage", err)
 	}
 }
@@ -59,9 +58,9 @@ func TestApplyWithNoFileNeedsATerminalOrAutoApprove(t *testing.T) {
 	// Nothing is planned, let alone built: the question is settled first.
 	t.Chdir(t.TempDir())
 	out := captureStdout(t, func() {
-		err := runApply(nil)
+		err := unwired.runApply(nil)
 		if err == nil || !strings.Contains(err.Error(), "-auto-approve") {
-			t.Errorf("runApply() = %v, want a request for -auto-approve", err)
+			t.Errorf("unwired.runApply() = %v, want a request for -auto-approve", err)
 		}
 	})
 	if out != "" {
@@ -70,14 +69,14 @@ func TestApplyWithNoFileNeedsATerminalOrAutoApprove(t *testing.T) {
 }
 
 func TestApplyWithNoFileShowsThePlanAndStopsOnNo(t *testing.T) {
-	writableForge(t)
+	f := writableForge(t)
 	t.Chdir(moduleFixture(t))
 	answeringStdin(t, "n\n")
 
 	var err error
-	out := captureStdout(t, func() { err = runApply(nil) })
+	out := captureStdout(t, func() { err = f.runApply(nil) })
 	if err != nil {
-		t.Fatalf("runApply() = %v\n%s", err, out)
+		t.Fatalf("f.runApply() = %v\n%s", err, out)
 	}
 	for _, want := range []string{"+ release", "to add", "Apply? [y/N]", "nothing was published"} {
 		if !strings.Contains(out, want) {
@@ -98,11 +97,11 @@ func TestApplyWithNoFileAppliesThePlanItShowedOnYes(t *testing.T) {
 		"auto-approve":      {[]string{"-auto-approve"}, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			writableForge(t)
+			f := writableForge(t)
 			t.Chdir(moduleFixture(t))
 			answeringStdin(t, tc.reply)
 
-			out := captureStdout(t, func() { _ = runApply(tc.args) })
+			out := captureStdout(t, func() { _ = f.runApply(tc.args) })
 			if !strings.Contains(out, "applying ") || !strings.Contains(out, "for v1.2.3") {
 				t.Errorf("the shown plan was not applied:\n%s", out)
 			}
@@ -114,10 +113,10 @@ func TestApplyWithNoFileAppliesThePlanItShowedOnYes(t *testing.T) {
 }
 
 func TestRunPlanRejectsExitCodeWithoutDiff(t *testing.T) {
-	if err := runPlan([]string{"--exit-code"}); err == nil || !strings.Contains(err.Error(), "--diff") {
+	if err := unwired.runPlan([]string{"--exit-code"}); err == nil || !strings.Contains(err.Error(), "--diff") {
 		t.Errorf("runPlan --exit-code = %v", err)
 	}
-	if err := runPlan([]string{"--json", "-out", "x"}); err == nil {
+	if err := unwired.runPlan([]string{"--json", "-out", "x"}); err == nil {
 		t.Error("runPlan accepted --json with -out")
 	}
 }
@@ -170,20 +169,17 @@ func TestFinishDiffReportsAnUnwritablePlanPath(t *testing.T) {
 }
 
 // emptyForge is a forge with nothing on it: every release lookup is a 404.
-func emptyForge(t *testing.T) {
+func emptyForge(t *testing.T) forge {
 	t.Helper()
-	serveForge(t, false)
+	return forge{endpoint: serveForge(t, false)}
 }
 
 // writableForge is emptyForge that also says the token may write to the
 // repository, which is what a plan that publishes checks first.
-func writableForge(t *testing.T) {
+func writableForge(t *testing.T) forge {
 	t.Helper()
-	endpoint := serveForge(t, true)
-	previous := forgeAPIEndpoint
-	t.Cleanup(func() { forgeAPIEndpoint = previous })
-	forgeAPIEndpoint = endpoint
 	t.Setenv("GITHUB_TOKEN", "test-token")
+	return forge{endpoint: serveForge(t, true)}
 }
 
 func serveForge(t *testing.T, writable bool) string {
@@ -197,24 +193,16 @@ func serveForge(t *testing.T, writable bool) string {
 		_, _ = w.Write([]byte(`{"message":"Not Found"}`))
 	}))
 	t.Cleanup(srv.Close)
-
-	previous := newForgeClient
-	t.Cleanup(func() { newForgeClient = previous })
-	newForgeClient = func(token string) *github.Client {
-		client := github.New(token)
-		client.SetEndpoints(srv.URL, srv.URL)
-		return client
-	}
 	return srv.URL
 }
 
 func TestPlanOutSavesAPlanThatAnApplyWouldCheck(t *testing.T) {
-	emptyForge(t)
+	f := emptyForge(t)
 	t.Chdir(moduleFixture(t))
 	path := filepath.Join(t.TempDir(), "release.plan")
 
 	var err error
-	out := captureStdout(t, func() { err = runPlan([]string{"-out", path, "--exit-code"}) })
+	out := captureStdout(t, func() { err = f.runPlan([]string{"-out", path, "--exit-code"}) })
 	if !errors.Is(err, errPlanChanges) {
 		t.Fatalf("runPlan -out --exit-code = %v, want the plan to have changes\n%s", err, out)
 	}
@@ -239,24 +227,24 @@ func TestPlanOutSavesAPlanThatAnApplyWouldCheck(t *testing.T) {
 }
 
 func TestPlanDiffWithoutARepositoryCannotCompare(t *testing.T) {
-	_, err := planDiff(context.Background(), &plan.Plan{}, diffTokens{})
+	_, err := unwired.planDiff(context.Background(), &plan.Plan{}, diffTokens{})
 	if err == nil || !strings.Contains(err.Error(), "repository") {
 		t.Errorf("planDiff = %v, want a complaint about the missing repository", err)
 	}
 }
 
 func TestApplyStopsWhenThePlanCannotBeResolved(t *testing.T) {
-	emptyForge(t)
+	f := emptyForge(t)
 	t.Chdir(moduleFixture(t))
 	path := filepath.Join(t.TempDir(), "release.plan")
-	_ = captureStdout(t, func() { _ = runPlan([]string{"-out", path}) })
+	_ = captureStdout(t, func() { _ = f.runPlan([]string{"-out", path}) })
 
 	// With no token a release's forge checks fail, so apply stops before it
 	// builds: the point is that it neither panics nor publishes.
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
 	var err error
-	out := captureStdout(t, func() { err = runApply([]string{path}) })
+	out := captureStdout(t, func() { err = f.runApply([]string{path}) })
 	if err == nil {
 		t.Errorf("runApply succeeded without a forge token:\n%s", out)
 	}
@@ -266,13 +254,13 @@ func TestApplyStopsWhenThePlanCannotBeResolved(t *testing.T) {
 }
 
 func TestApplyWithNoFileStopsWhenThePlanFails(t *testing.T) {
-	emptyForge(t)
+	f := emptyForge(t)
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
 	t.Chdir(moduleFixture(t))
 
 	var err error
-	out := captureStdout(t, func() { err = runApply([]string{"-auto-approve"}) })
+	out := captureStdout(t, func() { err = f.runApply([]string{"-auto-approve"}) })
 	if !errors.Is(err, errPlanFailed) {
 		t.Errorf("runApply -auto-approve = %v, want the failed plan\n%s", err, out)
 	}
@@ -282,11 +270,11 @@ func TestApplyWithNoFileStopsWhenThePlanFails(t *testing.T) {
 }
 
 func TestPlanFormatMarkdownWritesOnlyTheSummaryToStdout(t *testing.T) {
-	emptyForge(t)
+	f := emptyForge(t)
 	t.Chdir(moduleFixture(t))
 
 	var err error
-	out := captureStdout(t, func() { err = runPlan([]string{"--format", "md"}) })
+	out := captureStdout(t, func() { err = f.runPlan([]string{"--format", "md"}) })
 	if err != nil {
 		t.Fatalf("runPlan --format md = %v\n%s", err, out)
 	}
@@ -307,10 +295,10 @@ func TestPlanFormatMarkdownWritesOnlyTheSummaryToStdout(t *testing.T) {
 }
 
 func TestPlanFormatRejectsWhatItCannotWrite(t *testing.T) {
-	if err := runPlan([]string{"--format", "yaml"}); err == nil || !strings.Contains(err.Error(), "yaml") {
+	if err := unwired.runPlan([]string{"--format", "yaml"}); err == nil || !strings.Contains(err.Error(), "yaml") {
 		t.Errorf("--format yaml = %v", err)
 	}
-	if err := runPlan([]string{"--format", "md", "--json"}); err == nil || !strings.Contains(err.Error(), "--json") {
+	if err := unwired.runPlan([]string{"--format", "md", "--json"}); err == nil || !strings.Contains(err.Error(), "--json") {
 		t.Errorf("--format md --json = %v", err)
 	}
 }
@@ -335,12 +323,12 @@ func resolvedPlan(tag, commit string) *plan.Plan {
 // A fresh apply plans and builds as one: --no-proxy-warm must be in the plan
 // it saves, or the rebuild would never match it.
 func TestApplyWithNoProxyWarmPlansWithoutIt(t *testing.T) {
-	writableForge(t)
+	f := writableForge(t)
 	t.Chdir(moduleFixture(t))
 	path := filepath.Join(t.TempDir(), "release.plan")
 
 	var err error
-	_ = captureStdout(t, func() { _, err = planForApply(t.Context(), releaseArgs{skipWarm: true}, path) })
+	_ = captureStdout(t, func() { _, err = f.planForApply(t.Context(), releaseArgs{skipWarm: true}, path) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,3 +340,6 @@ func TestApplyWithNoProxyWarmPlansWithoutIt(t *testing.T) {
 		t.Errorf("the plan's manifest does not record proxy-warm as disabled:\n%s", file.Manifest)
 	}
 }
+
+// unwired is the forge a test uses when it never reaches one.
+var unwired forge

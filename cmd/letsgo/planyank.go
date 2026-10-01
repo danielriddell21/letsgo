@@ -35,7 +35,7 @@ type yankTarget struct {
 
 // yankOptions is the one place a retraction is put together, so that doing it,
 // planning it and applying a plan of it all start from the same options.
-func yankOptions(ctx context.Context, m moduleRepo, t yankTarget, tokens diffTokens) yank.Options {
+func (f forge) yankOptions(ctx context.Context, m moduleRepo, t yankTarget, tokens diffTokens) yank.Options {
 	o := yank.Options{
 		Client:   m.Client,
 		Repo:     m.Repo,
@@ -51,23 +51,23 @@ func yankOptions(ctx context.Context, m moduleRepo, t yankTarget, tokens diffTok
 		},
 	}
 	if !t.KeepTap {
-		o.Tap, o.TapAPI, o.TapFilesPlugin, o.PluginRoot = tapFor(m.Module.Dir, tapClientFor(ctx, m.Client, tokens.TapToken, tokens.Token))
+		o.Tap, o.TapAPI, o.TapFilesPlugin, o.PluginRoot = tapFor(m.Module.Dir, f.tapClientFor(ctx, m.Client, tokens.TapToken, tokens.Token))
 	}
 	return o
 }
 
 // planYankCommand is `letsgo plan -yank`.
-func planYankCommand(tag string, y yankArgs, jsonOutput bool, tokens diffTokens, r diffRun) error {
+func (f forge) planYankCommand(tag string, y yankArgs, jsonOutput bool, tokens diffTokens, r diffRun) error {
 	if jsonOutput {
 		return errors.New("letsgo: a yank plan has no JSON form yet")
 	}
-	return planYank(context.Background(), tag, y, tokens, r)
+	return f.planYank(context.Background(), tag, y, tokens, r)
 }
 
 // planYank says what retracting a release would change and, with out, saves it
 // for `letsgo apply`.
-func planYank(ctx context.Context, tag string, y yankArgs, tokens diffTokens, r diffRun) error {
-	m, err := resolveModuleRepo(ctx, tokens.Token)
+func (f forge) planYank(ctx context.Context, tag string, y yankArgs, tokens diffTokens, r diffRun) error {
+	m, err := f.resolveModuleRepo(ctx, tokens.Token)
 	if err != nil {
 		return err
 	}
@@ -75,7 +75,7 @@ func planYank(ctx context.Context, tag string, y yankArgs, tokens diffTokens, r 
 	if err != nil {
 		return err
 	}
-	options := yankOptions(ctx, m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap}, tokens)
+	options := f.yankOptions(ctx, m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap}, tokens)
 
 	fmt.Printf("retract %s from %s\n", tag, m.Repo)
 	actions, err := apply.ObserveYank(ctx, options)
@@ -101,8 +101,8 @@ func planYank(ctx context.Context, tag string, y yankArgs, tokens diffTokens, r 
 
 // applyYank retracts a release as a saved plan agreed: the forge and go.mod
 // must still be as the plan found them, and only what it lists is written.
-func applyYank(ctx context.Context, file *plandiff.File, tokens diffTokens) error {
-	m, err := resolveModuleRepo(ctx, tokens.Token)
+func (f forge) applyYank(ctx context.Context, file *plandiff.File, tokens diffTokens) error {
+	m, err := f.resolveModuleRepo(ctx, tokens.Token)
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func applyYank(ctx context.Context, file *plandiff.File, tokens diffTokens) erro
 
 	// A plan that touches no tap file was made without one.
 	keepTap := !apply.Touches(file.Actions, plandiff.KindTap)
-	options := yankOptions(ctx, m, yankTarget{Tag: file.Tag, Reason: file.Reason, Previous: file.Previous, KeepTap: keepTap}, tokens)
+	options := f.yankOptions(ctx, m, yankTarget{Tag: file.Tag, Reason: file.Reason, Previous: file.Previous, KeepTap: keepTap}, tokens)
 
 	fmt.Println()
 	result, err := apply.Yank(ctx, file, options, say)

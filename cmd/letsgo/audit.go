@@ -14,7 +14,7 @@ import (
 // database and records the result on the release: see docs/hld/audit.md.
 // With a tag, it audits that one release; with none, it audits the newest
 // stable release of every major version in this module's scope.
-func runAudit(args []string) error {
+func (f forge) runAudit(args []string) error {
 	fs := flag.NewFlagSet("audit", flag.ExitOnError)
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	repoFlag := fs.String("repo", "", "repository to audit as owner/name (default: this repository's origin)")
@@ -29,7 +29,7 @@ func runAudit(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	run, err := resolveScratchRun(ctx, *repoFlag, *token, *work, "letsgo-audit-")
+	run, err := f.resolveScratchRun(ctx, *repoFlag, *token, *work, "letsgo-audit-")
 	if err != nil {
 		return err
 	}

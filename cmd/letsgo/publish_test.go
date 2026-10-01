@@ -10,7 +10,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/plan"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
 func releasePlan() *plan.Plan {
@@ -35,7 +34,7 @@ func TestReleaseDraftFlagReachesTheTap(t *testing.T) {
 		{"without --draft", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			emptyForge(t)
+			f := emptyForge(t)
 			// A formula needs a macOS or Linux build to install; a Windows
 			// host has neither, so it is given one.
 			config := "brew you/homebrew-tap\n"
@@ -46,7 +45,7 @@ func TestReleaseDraftFlagReachesTheTap(t *testing.T) {
 
 			args := append([]string{"-snapshot", "-o", filepath.Join(t.TempDir(), "dist")}, tc.args...)
 			var err error
-			out := captureStdout(t, func() { err = runRelease(args) })
+			out := captureStdout(t, func() { err = f.runRelease(args) })
 			if err != nil {
 				t.Fatalf("runRelease = %v\n%s", err, out)
 			}
@@ -96,10 +95,9 @@ func TestTapClientForReusesTheReleaseClient(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
 
-	client := github.New("release-token")
-	client.UserAgent = "letsgo/test"
+	client := unwired.client("release-token")
 
-	if got := tapClientFor(t.Context(), client, "", "release-token"); got != client {
+	if got := unwired.tapClientFor(t.Context(), client, "", "release-token"); got != client {
 		t.Error("a tap with no token of its own got a second client")
 	}
 }
@@ -109,10 +107,9 @@ func TestTapClientForSplitsWhenTheTapHasItsOwnToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
 
-	client := github.New("release-token")
-	client.UserAgent = "letsgo/test"
+	client := unwired.client("release-token")
 
-	got := tapClientFor(t.Context(), client, "tap-token", "release-token")
+	got := unwired.tapClientFor(t.Context(), client, "tap-token", "release-token")
 	if got == client {
 		t.Fatal("the tap token did not produce a client of its own")
 	}
@@ -129,8 +126,8 @@ func TestTapClientForReadsTheEnvironment(t *testing.T) {
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("LETSGO_TAP_TOKEN", "from-env")
 
-	client := github.New("release-token")
-	if got := tapClientFor(t.Context(), client, "", "release-token"); got == client {
+	client := unwired.client("release-token")
+	if got := unwired.tapClientFor(t.Context(), client, "", "release-token"); got == client {
 		t.Error("LETSGO_TAP_TOKEN did not produce a client of its own")
 	}
 }
@@ -143,10 +140,9 @@ func TestReleaseClientForReusesTheMainClient(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
 
-	client := github.New("workflow-token")
-	client.UserAgent = "letsgo/test"
+	client := unwired.client("workflow-token")
 
-	if got := releaseClientFor(t.Context(), client, "", "workflow-token"); got != client {
+	if got := unwired.releaseClientFor(t.Context(), client, "", "workflow-token"); got != client {
 		t.Error("a release with no token of its own got a second client")
 	}
 }
@@ -156,10 +152,9 @@ func TestReleaseClientForSplitsWhenTheReleaseHasItsOwnToken(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GH_TOKEN", "")
 
-	client := github.New("workflow-token")
-	client.UserAgent = "letsgo/test"
+	client := unwired.client("workflow-token")
 
-	got := releaseClientFor(t.Context(), client, "release-token", "workflow-token")
+	got := unwired.releaseClientFor(t.Context(), client, "release-token", "workflow-token")
 	if got == client {
 		t.Fatal("the release token did not produce a client of its own")
 	}
@@ -176,8 +171,8 @@ func TestReleaseClientForReadsTheEnvironment(t *testing.T) {
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("LETSGO_RELEASE_TOKEN", "from-env")
 
-	client := github.New("workflow-token")
-	if got := releaseClientFor(t.Context(), client, "", "workflow-token"); got == client {
+	client := unwired.client("workflow-token")
+	if got := unwired.releaseClientFor(t.Context(), client, "", "workflow-token"); got == client {
 		t.Error("LETSGO_RELEASE_TOKEN did not produce a client of its own")
 	}
 }

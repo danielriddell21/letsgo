@@ -14,8 +14,8 @@ import (
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
 
-// forge serves one release, enough for the updater to reach a decision.
-func forge(t *testing.T, tag string, m *manifest.Manifest) string {
+// releaseForge serves one release, enough for the updater to reach a decision.
+func releaseForge(t *testing.T, tag string, m *manifest.Manifest) string {
 	t.Helper()
 
 	var server *httptest.Server
@@ -69,7 +69,7 @@ func updaterFor(t *testing.T, current, tag string, m *manifest.Manifest) (update
 	return updater{
 		Options: selfupdate.Options{
 			Repo: "you/tool", Current: current,
-			APIEndpoint: forge(t, tag, m), OS: "linux", Arch: "amd64",
+			APIEndpoint: releaseForge(t, tag, m), OS: "linux", Arch: "amd64",
 		},
 		Current: current,
 		Install: func(context.Context, *selfupdate.Update) error {

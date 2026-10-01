@@ -24,7 +24,7 @@ func TestRunYankResolvesModuleScopeBeforeRequiringAToken(t *testing.T) {
 		t.Setenv(name, "")
 	}
 
-	err := runYank([]string{"--yes", "services/api/v1.2.3"})
+	err := unwired.runYank([]string{"--yes", "services/api/v1.2.3"})
 	if err == nil || !strings.Contains(err.Error(), "no token") {
 		t.Fatalf("runYank error = %v, want it to complain about a missing token", err)
 	}

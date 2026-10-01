@@ -382,7 +382,7 @@ func TestRunTagJSONWorksWithUncommittedChanges(t *testing.T) {
 // An unknown --format is rejected before the two sides are even resolved,
 // so a typo doesn't cost a network round trip.
 func TestRunDiffRejectsAnUnknownFormat(t *testing.T) {
-	err := runDiff([]string{"--format", "yaml", "a.json", "b.json"})
+	err := unwired.runDiff([]string{"--format", "yaml", "a.json", "b.json"})
 	if err == nil || !strings.Contains(err.Error(), `unknown --format "yaml"`) {
 		t.Fatalf("err = %v, want an unknown --format error", err)
 	}
@@ -440,7 +440,7 @@ func TestRunDiffPrintsEachFormat(t *testing.T) {
 	} {
 		var runErr error
 		out := captureStdout(t, func() {
-			runErr = runDiff([]string{"--format", tt.format, from, to})
+			runErr = unwired.runDiff([]string{"--format", tt.format, from, to})
 		})
 		if runErr != nil {
 			t.Fatalf("runDiff --format %s: %v", tt.format, runErr)
@@ -761,16 +761,14 @@ func TestRunDiffDefaultsToTheModulesOwnLatestRelease(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	previous := forgeAPIEndpoint
-	t.Cleanup(func() { forgeAPIEndpoint = previous })
-	forgeAPIEndpoint = srv.URL
+	f := forge{endpoint: srv.URL}
 
 	t.Chdir(moduleDir)
 	local := filepath.Join(t.TempDir(), "letsgo.json")
 	if err := os.WriteFile(local, []byte(`{"schema":1,"version":"1.2.2"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := runDiff([]string{local}); err != nil {
+	if err := f.runDiff([]string{local}); err != nil {
 		t.Fatalf("runDiff: %v", err)
 	}
 }
