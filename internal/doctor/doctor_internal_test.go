@@ -98,7 +98,7 @@ func TestCheckPluginFindsAMatchOnPath(t *testing.T) {
 	t.Setenv("PATH", dir)
 
 	r := &Result{}
-	r.checkPlugin(config.Plugin{Command: "letsgo-fake", Version: "v1.0.0", Digest: digest})
+	r.checkPlugin(config.Plugin{Command: "letsgo-fake", Version: "v1.0.0", Digest: digest}, ".")
 
 	if len(r.Checks) != 1 {
 		t.Fatalf("Checks = %d, want 1", len(r.Checks))
@@ -119,7 +119,7 @@ func TestCheckPluginReportsADigestMismatch(t *testing.T) {
 
 	pinned := "sha256:" + strings.Repeat("0", 64)
 	r := &Result{}
-	r.checkPlugin(config.Plugin{Command: "letsgo-fake", Version: "v1.0.0", Digest: pinned})
+	r.checkPlugin(config.Plugin{Command: "letsgo-fake", Version: "v1.0.0", Digest: pinned}, ".")
 
 	c := r.Checks[0]
 	if c.Status != Fail {

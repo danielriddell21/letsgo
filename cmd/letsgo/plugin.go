@@ -157,6 +157,21 @@ func installAllPins(ctx context.Context, w io.Writer, repo, token, linkDir strin
 		if err := installPlugin(ctx, w, p.Command, options, linkDir, link); err != nil {
 			return fmt.Errorf("letsgo plugin install: %s: %w", p.Command, err)
 		}
+		// Installing proves the release is what it says it is, not that it is
+		// what the config pins: a stale pin would otherwise report success and
+		// fail at the next release.
+		if err := verifyPinned(p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// verifyPinned fails unless p now resolves to the binary its pin names.
+func verifyPinned(p config.Plugin) error {
+	if r := plugin.Resolve(p.Command, p.Digest, "."); r.State != plugin.Installed {
+		return fmt.Errorf("letsgo plugin install: %s %s installed, but it is not the digest the config pins (%s); update the pin",
+			p.Command, p.Version, plugin.Short(p.Digest))
 	}
 	return nil
 }
@@ -425,7 +440,7 @@ func reportUnreferencedStoreEntries(w io.Writer, cfg *config.Config) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  the store also holds, unreferenced by any pin here:")
 	for _, e := range unreferenced {
-		fmt.Fprintf(w, "  %-14s %s\n", e.Name, shortDigest(e.Digest))
+		fmt.Fprintf(w, "  %-14s %s\n", e.Name, plugin.Short(e.Digest))
 	}
 	fmt.Fprintln(w, "  remove them with letsgo plugin prune")
 }
@@ -477,34 +492,27 @@ func pruneStore(w io.Writer) error {
 		return nil
 	}
 	for _, e := range removed {
-		fmt.Fprintf(w, "removed %-14s %s\n", e.Name, shortDigest(e.Digest))
+		fmt.Fprintf(w, "removed %-14s %s\n", e.Name, plugin.Short(e.Digest))
 	}
 	return nil
 }
 
-// pluginStatus resolves one pin the same way plugin.Run does: the store
-// first, then PATH.
+// pluginStatus reports one pin as plugin.Run would resolve it, for a person
+// to read. The working directory is the repository root, where letsgo.mod is
+// read from.
 func pluginStatus(p config.Plugin) (string, bool) {
-	if store, err := pluginstore.Open(""); err == nil {
-		if path, ok, err := store.Lookup(p.Digest, p.Command); err == nil && ok {
-			return "ok  " + path, true
-		}
-	}
-
-	path, err := exec.LookPath(p.Command)
-	if err != nil {
+	r := plugin.Resolve(p.Command, p.Digest, ".")
+	switch r.State {
+	case plugin.Installed:
+		return "ok  " + r.Path, true
+	case plugin.Missing:
 		return "not installed", false
-	}
-
-	digest, err := plugin.DigestOf(path)
-	if err != nil {
-		return "unreadable: " + path, false
-	}
-	if digest != p.Digest {
+	case plugin.Mismatch:
 		return fmt.Sprintf("pinned %s, but %s is %s",
-			shortDigest(p.Digest), path, shortDigest(digest)), false
+			plugin.Short(p.Digest), r.Path, plugin.Short(r.Digest)), false
+	default:
+		return "unreadable: " + r.Err.Error(), false
 	}
-	return "ok  " + path, true
 }
 
 func loadPluginConfig() (*config.Config, error) {
@@ -597,8 +605,4 @@ func writeExecutable(path string, data []byte) error {
 		return fmt.Errorf("letsgo plugin install: installing %s: %w", path, err)
 	}
 	return nil
-}
-
-func shortDigest(digest string) string {
-	return short(strings.TrimPrefix(digest, "sha256:"))
 }
