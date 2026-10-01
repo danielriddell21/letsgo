@@ -94,3 +94,33 @@ func TestBuildRequiresItsInputs(t *testing.T) {
 		})
 	}
 }
+
+func TestVersion(t *testing.T) {
+	goBin, _, err := Toolchain(nil)
+	if err != nil {
+		t.Skipf("no go command: %v", err)
+	}
+
+	t.Run("reads the version", func(t *testing.T) {
+		got, err := Version(context.Background(), goBin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(got, "go") {
+			t.Errorf("version = %q, want a go version", got)
+		}
+	})
+
+	t.Run("requires the go command", func(t *testing.T) {
+		if _, err := Version(context.Background(), ""); err == nil {
+			t.Error("an empty go command should be an error")
+		}
+	})
+
+	t.Run("reports a command that cannot run", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "go")
+		if _, err := Version(context.Background(), missing); err == nil {
+			t.Error("a missing go command should be an error")
+		}
+	})
+}

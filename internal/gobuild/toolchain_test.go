@@ -228,3 +228,16 @@ func TestToolchainDirIsTheCommandsOwnDirectory(t *testing.T) {
 		t.Errorf("toolchainDir(\"\") = %q, want none", got)
 	}
 }
+
+// Naming the override is the only way out of a machine with no go on PATH,
+// so the error has to say so.
+func TestToolchainNotFound(t *testing.T) {
+	t.Setenv(ToolchainEnvOverride, "")
+	t.Setenv("GOROOT", "")
+	t.Setenv("PATH", t.TempDir())
+
+	_, _, err := Toolchain(nil)
+	if err == nil || !strings.Contains(err.Error(), ToolchainEnvOverride) {
+		t.Errorf("err = %v, want it to name %s", err, ToolchainEnvOverride)
+	}
+}
