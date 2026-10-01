@@ -492,7 +492,7 @@ func planForApply(ctx context.Context, a releaseArgs, path string) (bool, error)
 	if !plandiff.HasChanges(d.Actions) {
 		return false, nil
 	}
-	if _, err := savePlan(p, d, path); err != nil {
+	if _, err := apply.Save(p, d, path, version); err != nil {
 		return false, err
 	}
 	return true, nil

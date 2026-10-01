@@ -7,13 +7,13 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
-	plandiff "github.com/danielriddell21/letsgo/plan"
 )
 
 // newForgeClient is how a command reaches the forge. A variable so that a test
@@ -24,16 +24,6 @@ var newForgeClient = func(token string) *github.Client {
 	return client
 }
 
-// forgeDiff is what reading the forge against a fresh build came to.
-type forgeDiff struct {
-	Actions []plandiff.Action
-
-	// Manifest is the manifest the build produced, and ManifestSHA256 its
-	// digest: what an apply must reproduce.
-	Manifest       []byte
-	ManifestSHA256 string
-}
-
 // diffTokens are the credentials planDiff reads the forge with.
 type diffTokens struct {
 	Token, TapToken, ReleaseToken string
@@ -41,7 +31,7 @@ type diffTokens struct {
 
 // planDiff builds the release into a scratch directory and reads the forge to
 // say what releasing would change.
-func planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*forgeDiff, error) {
+func planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*apply.Diff, error) {
 	if !p.HasRepo {
 		return nil, fmt.Errorf("letsgo: --diff needs a repository on a forge to compare against")
 	}
@@ -92,7 +82,7 @@ func planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*forgeDiff,
 		return nil, err
 	}
 
-	return &forgeDiff{
+	return &apply.Diff{
 		Actions: actions, Manifest: manifestBytes, ManifestSHA256: "sha256:" + hex.EncodeToString(manifestSum),
 	}, nil
 }
