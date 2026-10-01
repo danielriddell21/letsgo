@@ -111,9 +111,9 @@ func tapFilesInput(p *plan.Plan, artifacts []build.Artifact, info *github.RepoIn
 // rolled back exactly as the formula is.
 //
 // Unlike a fresh release, there is no repository description or licence to
-// carry: FormulasFrom does not re-fetch them for the same reason, and yank
-// should not need the forge to answer a question about bytes already
-// published.
+// carry: the formula's rollback is handed them by its caller, but the cask's
+// input has no place for them, and yank should not need the forge to answer a
+// question about bytes already published.
 func TapFilesInputFromManifest(m *manifest.Manifest, repo, tap github.Repo, caveats string) plugin.TapFilesInput {
 	tag := m.Tag
 	if tag == "" {

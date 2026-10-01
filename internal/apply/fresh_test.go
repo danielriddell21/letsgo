@@ -140,7 +140,13 @@ func diffFixture(t *testing.T) publication.Options {
 				Archive: "foo_1.2.3_linux_amd64.tar.gz", OS: "linux", Arch: "amd64", ArchiveSHA256: "a1",
 				Binaries: []build.Binary{{Name: "foo"}},
 			}},
-			Manifest: &manifest.Manifest{},
+			Manifest: &manifest.Manifest{
+				Version: "1.2.3", Tag: "v1.2.3",
+				Artifacts: []manifest.Artifact{{
+					Name: "foo_1.2.3_linux_amd64.tar.gz", OS: "linux", Arch: "amd64", SHA256: "a1",
+					Binary: "foo",
+				}},
+			},
 		},
 	}
 }

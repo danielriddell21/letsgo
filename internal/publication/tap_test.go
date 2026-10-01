@@ -10,6 +10,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
@@ -67,8 +68,18 @@ func releasePlan() *plan.Plan {
 	}
 }
 
+// built is a release of 1.2.3 that produced these artifacts, with the manifest
+// that records them: the formulas are made from the manifest, not the builds.
 func built(artifacts ...build.Artifact) *release.Result {
-	return &release.Result{Artifacts: artifacts}
+	m := &manifest.Manifest{Version: "1.2.3", Tag: "v1.2.3"}
+	for _, a := range artifacts {
+		record := manifest.Artifact{Name: a.Archive, OS: a.OS, Arch: a.Arch, SHA256: a.ArchiveSHA256}
+		for _, b := range a.Binaries {
+			record.Binaries = append(record.Binaries, manifest.Binary{Name: b.Name})
+		}
+		m.Artifacts = append(m.Artifacts, record)
+	}
+	return &release.Result{Artifacts: artifacts, Manifest: m}
 }
 
 func artifact(archive, goos, goarch, sum string, binaries ...string) build.Artifact {
@@ -90,6 +101,7 @@ func TestPublishTapSkipsAPrerelease(t *testing.T) {
 	p.Tap = github.Repo{Owner: "you", Name: "homebrew-tap"}
 
 	result := built(artifact("foo_1.3.0-rc.1_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"))
+	result.Manifest.Version, result.Manifest.Tag = p.Version, p.Tag
 	tap := &fakeTap{}
 
 	if err := publishTap(context.Background(), io.Discard, p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil); err != nil {
@@ -284,6 +296,8 @@ func TestFormulasLeaveOutAVariant(t *testing.T) {
 		artifact("foo_1.2.3_darwin_arm64.tar.gz", "darwin", "arm64", "a2", "foo"),
 		artifact("foo-gui_1.2.3_darwin_arm64.tar.gz", "darwin", "arm64", "g1", "foo"),
 	)
+
+	result.Manifest.Artifacts[2].Variant = "gui"
 
 	got := formulas(p, result, github.Repo{Owner: "you", Name: "foo"}, nil)
 

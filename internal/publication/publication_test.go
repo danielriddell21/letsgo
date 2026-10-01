@@ -297,7 +297,8 @@ func diffFixture(t *testing.T) Options {
 	p.Tap = github.Repo{Owner: "you", Name: "homebrew-tap"}
 
 	result := built(artifact("foo_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"))
-	result.Manifest = &manifest.Manifest{}
+	// The tap's formula is made from the manifest, which built() records.
+	result.Manifest.Schema = manifest.Schema
 
 	recorder := publish.NewRecorder(nil)
 	return Options{

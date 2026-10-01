@@ -12,6 +12,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/diff"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/yank"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
@@ -52,6 +53,11 @@ func (f forge) yankOptions(ctx context.Context, m moduleRepo, t yankTarget, toke
 	}
 	if !t.KeepTap {
 		o.Tap, o.TapAPI, o.TapFilesPlugin, o.PluginRoot = tapFor(m.Module.Dir, f.tapClientFor(ctx, m.Client, tokens.TapToken, tokens.Token))
+		// The release wrote its description, licence and homepage into the
+		// formula, so the rollback has to read them again or it drops them.
+		if o.Tap != (github.Repo{}) {
+			o.RepoInfo = describeRepo(ctx, m.Client, m.Repo)
+		}
 	}
 	return o
 }
