@@ -180,9 +180,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 
 	// A promotion is by definition a public, stable release, whatever the
 	// repository's config says about drafts and prereleases.
-	stable := *p.Config
-	stable.Draft, stable.Prerelease = false, "false"
-	p.Config = &stable
+	p.MarkStable()
 
 	published, err := publication.Publish(ctx, publication.Options{
 		Plan:   p,

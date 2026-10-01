@@ -26,7 +26,7 @@ var sumdbURL = sumdb.DefaultURL
 func gate(ctx context.Context, out io.Writer, o Options) error {
 	p := o.Plan
 	d := sumdbDecision(p, o.Snapshot)
-	if !o.Snapshot && !p.Config.Draft && p.Config.ModuleDir == "" && p.Features.On(feature.ProxyWarm) {
+	if !o.Snapshot && !p.Draft() && p.ModuleDir() == "" && p.Features.On(feature.ProxyWarm) {
 		warmProxy(ctx, out, p)
 	}
 	return checkSumdb(ctx, out, p, d, o.Dir, o.Result)
@@ -39,8 +39,8 @@ func sumdbDecision(p *plan.Plan, snapshot bool) gatepkg.SumdbDecision {
 		Disabled:     !p.Features.On(feature.Sumdb),
 		Snapshot:     snapshot,
 		Untagged:     p.Tag == "",
-		Draft:        p.Config.Draft,
-		Scoped:       p.Config.ModuleDir != "",
+		Draft:        p.Draft(),
+		Scoped:       p.ModuleDir() != "",
 		ProxyWarmOff: !p.Features.On(feature.ProxyWarm),
 		ModulePath:   p.Module.Path,
 	})

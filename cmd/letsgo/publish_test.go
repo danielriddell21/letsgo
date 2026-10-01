@@ -58,11 +58,11 @@ func TestReleaseDraftFlagReachesTheTap(t *testing.T) {
 
 func TestNoDraftFlagLeavesAConfiguredDraftAlone(t *testing.T) {
 	p := releasePlan()
-	p.Config.Draft = true
+	p.MarkDraft()
 
 	applyDraftFlag(p, false)
 
-	if !p.Config.Draft {
+	if !p.Draft() {
 		t.Error("an absent --draft flag cleared draft = true from the config")
 	}
 }

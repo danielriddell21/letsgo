@@ -36,12 +36,12 @@ func publishTap(ctx context.Context, out io.Writer, p *plan.Plan, result *releas
 	// (or a tap-files plugin's output) names. Pointing a tap at a draft would
 	// produce a cask or formula that resolves to a 404 for everyone but its
 	// author.
-	if p.Config.Draft {
+	if p.Draft() {
 		fmt.Fprintln(out, "  ! skipped the Homebrew tap: a draft release serves no public assets")
 		return nil
 	}
 
-	if names := variantNames(p); len(names) > 0 {
+	if names := p.VariantNames(); len(names) > 0 {
 		fmt.Fprintf(out, "  ! no formula for variant %s: a variant's package is the repository's to choose\n",
 			strings.Join(names, ", "))
 	}
@@ -92,19 +92,10 @@ func publishTap(ctx context.Context, out io.Writer, p *plan.Plan, result *releas
 	return nil
 }
 
-// variantNames are the variants this release built, in order.
-func variantNames(p *plan.Plan) []string {
-	names := make([]string, 0, len(p.Config.Variants))
-	for _, v := range p.Config.Variants {
-		names = append(names, v.Name)
-	}
-	return names
-}
-
 // formulas builds the release's formulas from its manifest, the one builder a
 // yank's rollback uses too. See brew.FormulasFor.
 func formulas(p *plan.Plan, result *release.Result, repo github.Repo, info *github.RepoInfo) []brew.Formula {
-	return brew.FormulasFor(result.Manifest, repo, info, p.Project, p.Config.BrewCaveats)
+	return brew.FormulasFor(result.Manifest, repo, info, p.Project, p.BrewCaveats())
 }
 
 // TapObserver lets the tap's publishing decisions run and reports what they
