@@ -361,6 +361,22 @@ func Decode(data []byte) (*Manifest, error) {
 	return &m, nil
 }
 
+// DecodeStrict parses a manifest like Decode and then refuses any Schema other
+// than the one this package understands exactly. It is for a reader that
+// rebuilds or compares a specific release, where an unfamiliar schema is a
+// reason to stop rather than to decode what can be decoded.
+func DecodeStrict(data []byte) (*Manifest, error) {
+	m, err := Decode(data)
+	if err != nil {
+		return nil, err
+	}
+	if m.Schema != Schema {
+		return nil, fmt.Errorf("manifest: schema %d is not supported (this letsgo understands %d)",
+			m.Schema, Schema)
+	}
+	return m, nil
+}
+
 // Write writes the manifest to path.
 func (m *Manifest) Write(path string) error {
 	data, err := m.Encode()
@@ -380,6 +396,15 @@ func Read(path string) (*Manifest, error) {
 		return nil, fmt.Errorf("manifest: reading %s: %w", path, err)
 	}
 	return Decode(data)
+}
+
+// ReadStrict loads a manifest from path with DecodeStrict's schema check.
+func ReadStrict(path string) (*Manifest, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("manifest: reading %s: %w", path, err)
+	}
+	return DecodeStrict(data)
 }
 
 // Artifact finds a published artifact by name.

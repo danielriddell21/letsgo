@@ -9,9 +9,6 @@
 package manifest
 
 import (
-	"fmt"
-	"os"
-
 	pub "github.com/danielriddell21/letsgo/manifest"
 )
 
@@ -41,24 +38,13 @@ type (
 
 // Decode parses a manifest, rejecting schema versions it does not understand.
 func Decode(data []byte) (*Manifest, error) {
-	m, err := pub.Decode(data)
-	if err != nil {
-		return nil, err
-	}
-	if m.Schema != Schema {
-		return nil, fmt.Errorf("manifest: schema %d is not supported (this letsgo understands %d)",
-			m.Schema, Schema)
-	}
-	return m, nil
+	return pub.DecodeStrict(data)
 }
 
-// Read loads a manifest from path.
+// Read loads a manifest from path, rejecting schema versions it does not
+// understand.
 func Read(path string) (*Manifest, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("manifest: reading %s: %w", path, err)
-	}
-	return Decode(data)
+	return pub.ReadStrict(path)
 }
 
 // SummariseModules reads go.sum and reports its digest, the number of distinct

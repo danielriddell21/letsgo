@@ -66,6 +66,47 @@ func TestDecodeRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestDecodeStrictRejectsAnUnfamiliarSchema(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    string
+		wantErr bool
+	}{
+		{name: "the current schema", data: `{"schema": 1}`},
+		{name: "a newer schema", data: `{"schema": 99}`, wantErr: true},
+		{name: "a missing schema", data: `{}`, wantErr: true},
+		{name: "invalid JSON", data: `not json`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := DecodeStrict([]byte(tt.data))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("DecodeStrict(%s) error = %v, wantErr %v", tt.data, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestReadStrict(t *testing.T) {
+	dir := t.TempDir()
+	good, bad := filepath.Join(dir, "good.json"), filepath.Join(dir, "bad.json")
+	if err := sample().Write(good); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bad, []byte(`{"schema": 99}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadStrict(good); err != nil {
+		t.Errorf("ReadStrict(current schema): %v", err)
+	}
+	if _, err := ReadStrict(bad); err == nil {
+		t.Error("ReadStrict accepted schema 99")
+	}
+	if _, err := ReadStrict(filepath.Join(dir, "nope.json")); err == nil {
+		t.Error("ReadStrict should have reported the missing file")
+	}
+}
+
 func TestWriteAndRead(t *testing.T) {
 	path := filepath.Join(t.TempDir(), FileName)
 	if err := sample().Write(path); err != nil {
