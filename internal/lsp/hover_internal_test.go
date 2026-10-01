@@ -32,7 +32,7 @@ func TestHoverAtDocs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := hoverAt(context.Background(), tt.path, tt.text, tt.pos, tt.live, "", "")
+			got, ok := hoverAt(context.Background(), tt.path, tt.text, tt.pos, tt.live, goTargets, "")
 			if ok != (tt.want != "") || !strings.Contains(got, tt.want) {
 				t.Errorf("hoverAt = %q, %v; want a hover containing %q", got, ok, tt.want)
 			}
@@ -60,7 +60,7 @@ func TestHoverAtTargets(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := hoverAt(context.Background(), "letsgo.mod", tt.text, tt.pos, tt.live, "", "")
+			got, ok := hoverAt(context.Background(), "letsgo.mod", tt.text, tt.pos, tt.live, goTargets, "")
 			if ok != (tt.want != "") || !strings.Contains(got, tt.want) {
 				t.Errorf("hoverAt = %q, %v; want a hover containing %q", got, ok, tt.want)
 			}
@@ -159,17 +159,17 @@ func TestHoverAtShowsAPinsInstallState(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := hoverAt(context.Background(), "letsgo.mod", line, tt.pos, tt.live, "", "")
+			got, ok := hoverAt(context.Background(), "letsgo.mod", line, tt.pos, tt.live, goTargets, "")
 			if !ok || !strings.Contains(got, tt.want) {
 				t.Errorf("hoverAt = %q, %v; want a hover containing %q", got, ok, tt.want)
 			}
 		})
 	}
 
-	if got, _ := hoverAt(context.Background(), "letsgo.mod", line, Position{0, 18}, false, "", ""); got != "" {
+	if got, _ := hoverAt(context.Background(), "letsgo.mod", line, Position{0, 18}, false, goTargets, ""); got != "" {
 		t.Errorf("restricted hover over the command = %q, want none", got)
 	}
-	if got, ok := hoverAt(context.Background(), "letsgo.mod", "plugin ldflags letsgo-env\n", Position{0, 18}, true, "", ""); ok {
+	if got, ok := hoverAt(context.Background(), "letsgo.mod", "plugin ldflags letsgo-env\n", Position{0, 18}, true, goTargets, ""); ok {
 		t.Errorf("hover over an unpinned plugin line = %q, want none", got)
 	}
 }
