@@ -471,7 +471,7 @@ func planForApply(ctx context.Context, a releaseArgs, path string) (bool, error)
 	p, err := plan.Resolve(ctx, plan.Options{
 		Dir: ".", Publish: true, Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken,
 		Analyse: true, AllowVulnerable: a.allowVulnerable, AllowBreaking: a.allowBreaking,
-		APIEndpoint: forgeAPIEndpoint,
+		APIEndpoint: forgeAPIEndpoint, DisableProxyWarm: a.skipWarm,
 	})
 	if err != nil {
 		return false, err
