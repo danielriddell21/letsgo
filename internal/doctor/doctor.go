@@ -105,7 +105,7 @@ func (r *Result) add(group, name string, status Status, hint, format string, arg
 // found at all — the same requirement every other command already has —
 // rather than a problem with what was found there, which becomes a check
 // instead so one run reports every issue.
-func Run(ctx context.Context, dir string) (*Result, error) {
+func Run(ctx context.Context, dir string, global *config.Global) (*Result, error) {
 	root, err := discover.FindModule(dir)
 	if err != nil {
 		return nil, err
@@ -129,7 +129,7 @@ func Run(ctx context.Context, dir string) (*Result, error) {
 
 	r.checkConfig(cfgErr)
 	if cfgErr == nil {
-		r.checkPlugins(cfg, root.Dir)
+		r.checkPlugins(cfg, root.Dir, global.PluginsDir)
 	}
 	r.checkHistory(ctx, root.Dir, git, scope)
 	r.checkRemote(ctx, root.Dir)

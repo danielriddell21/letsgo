@@ -28,7 +28,7 @@ func storeInstaller(t *testing.T, body string, err error, asked *[]string) lsp.P
 		if err != nil {
 			return err
 		}
-		store, openErr := pluginstore.Open("")
+		store, openErr := pluginstore.Open("", "")
 		if openErr != nil {
 			return openErr
 		}
@@ -81,7 +81,7 @@ func TestInstallActionIsOfferedForAMissingPin(t *testing.T) {
 
 func TestInstallActionIsNotOfferedWhereNothingNeedsInstalling(t *testing.T) {
 	storeDir, _ := lsp.IsolatePlugins(t)
-	store, err := pluginstore.Open(storeDir)
+	store, err := pluginstore.Open(storeDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

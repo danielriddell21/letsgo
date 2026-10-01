@@ -52,7 +52,7 @@ func (f forge) yankOptions(ctx context.Context, m moduleRepo, t yankTarget, toke
 		},
 	}
 	if !t.KeepTap {
-		o.Tap, o.TapAPI, o.TapFilesPlugin, o.PluginRoot = tapFor(m.Module.Dir, f.tapClientFor(ctx, m.Client, tokens.TapToken, tokens.Token))
+		tapFor(&o, m.Module.Dir, f.tapClientFor(ctx, m.Client, tokens.TapToken, tokens.Token))
 		// The release wrote its description, licence and homepage into the
 		// formula, so the rollback has to read them again or it drops them.
 		if o.Tap != (github.Repo{}) {

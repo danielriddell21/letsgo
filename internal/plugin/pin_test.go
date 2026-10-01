@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/plugin"
+	"github.com/danielriddell21/letsgo/internal/pluginstore"
 )
 
 func TestResolveReportsEachState(t *testing.T) {
@@ -34,7 +35,7 @@ func TestResolveReportsEachState(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			tt.setup(t)
-			got := plugin.Resolve("letsgo-fake", tt.digest, t.TempDir())
+			got := plugin.Resolve("letsgo-fake", tt.digest, t.TempDir(), "")
 			if got.State != tt.want {
 				t.Fatalf("state = %v, want %v (%+v)", got.State, tt.want, got)
 			}
@@ -68,7 +69,7 @@ func TestResolveReportsATamperedStoreEntryAsBroken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := plugin.Resolve("letsgo-fake", digest, t.TempDir())
+	got := plugin.Resolve("letsgo-fake", digest, t.TempDir(), "")
 	if got.State != plugin.Broken || got.Err == nil || !strings.Contains(got.Err.Error(), "tampered") {
 		t.Errorf("got %+v, want Broken for a tampered entry", got)
 	}
@@ -79,7 +80,7 @@ func TestResolveDoesNotCreateTheStore(t *testing.T) {
 	t.Setenv("LETSGO_PLUGIN_STORE", missing)
 	t.Setenv("PATH", t.TempDir())
 
-	plugin.Resolve("letsgo-fake", "sha256:"+strings.Repeat("0", 64), t.TempDir())
+	plugin.Resolve("letsgo-fake", "sha256:"+strings.Repeat("0", 64), t.TempDir(), "")
 
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {
 		t.Errorf("a lookup left a store behind: %v", err)
@@ -95,7 +96,7 @@ func TestResolveAnchorsARelativeCommandToTheRepository(t *testing.T) {
 
 	t.Chdir(t.TempDir())
 
-	got := plugin.Resolve("./letsgo-fake", digest, repo)
+	got := plugin.Resolve("./letsgo-fake", digest, repo, "")
 	if got.State != plugin.Installed || got.Path != filepath.Join(repo, "letsgo-fake") {
 		t.Errorf("got %+v, want the repository's own program", got)
 	}
@@ -118,7 +119,7 @@ func TestRunExecutesTheFileItHashed(t *testing.T) {
 	var out plugin.ArchiveLayoutOutput
 	err := plugin.Run(context.Background(),
 		plugin.Plugin{Hook: plugin.HookArchiveLayout, Command: "./letsgo-fake", Digest: digest},
-		repo, plugin.ArchiveLayoutInput{Project: "x"}, &out)
+		repo, "", plugin.ArchiveLayoutInput{Project: "x"}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,5 +138,21 @@ func TestShort(t *testing.T) {
 		if got := plugin.Short(in); got != want {
 			t.Errorf("Short(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// The store named by the global config's `plugins` directive is the one a pin
+// is looked up in, with nothing on PATH to fall back on.
+func TestResolveFindsAPinInTheConfiguredStore(t *testing.T) {
+	dir, digest := fake(t, `echo '{}'`)
+	storeDir := t.TempDir()
+	t.Setenv(pluginstore.StoreEnvOverride, "")
+	t.Setenv("PATH", t.TempDir())
+	putInStore(t, storeDir, digest, "letsgo-fake", filepath.Join(dir, "letsgo-fake"))
+
+	got := plugin.Resolve("letsgo-fake", digest, t.TempDir(), storeDir)
+
+	if got.State != plugin.Installed || !got.Stored {
+		t.Errorf("Resolve = %+v, want installed from the store", got)
 	}
 }

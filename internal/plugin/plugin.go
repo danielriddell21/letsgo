@@ -71,14 +71,17 @@ const timeout = time.Minute
 // The executable is hashed and compared against the pin before it runs.
 // Checking afterwards would be checking what we already executed.
 //
+// pluginsDir is the global config's `plugins` directive, or empty: where the
+// plugin store lives when nothing overrides it.
+//
 // dir is the repository root, and input's ConfigDir field (present on every
 // hook) names where a plugin's own config lives: dir + "/.letsgo". A plugin
 // needing settings of its own reads a file there rather than guessing, which
 // is how letsgo's own config stays a closed set while a plugin still takes
 // settings. A legacy root-relative file beside letsgo.mod is still read by
 // plugins that have not moved yet, with a plan Warn suggesting they do.
-func Run(ctx context.Context, p Plugin, dir string, input, output any) error {
-	path, err := resolve(p, dir)
+func Run(ctx context.Context, p Plugin, dir, pluginsDir string, input, output any) error {
+	path, err := resolve(p, dir, pluginsDir)
 	if err != nil {
 		return err
 	}
@@ -139,12 +142,12 @@ func withoutEnv(env []string, drop ...string) []string {
 }
 
 // resolve is Resolve, as the error Run refuses with.
-func resolve(p Plugin, dir string) (string, error) {
+func resolve(p Plugin, dir, pluginsDir string) (string, error) {
 	if p.Hook == "" || !p.Hook.Valid() {
 		return "", fmt.Errorf("plugin %s: %q is not a hook letsgo knows", p.Command, p.Hook)
 	}
 
-	r := Resolve(p.Command, p.Digest, dir)
+	r := Resolve(p.Command, p.Digest, dir, pluginsDir)
 	switch r.State {
 	case Installed:
 		return r.Path, nil

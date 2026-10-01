@@ -32,7 +32,7 @@ func TestHoverAtDocs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := hoverAt(context.Background(), tt.path, tt.text, tt.pos, tt.live, "")
+			got, ok := hoverAt(context.Background(), tt.path, tt.text, tt.pos, tt.live, "", "")
 			if ok != (tt.want != "") || !strings.Contains(got, tt.want) {
 				t.Errorf("hoverAt = %q, %v; want a hover containing %q", got, ok, tt.want)
 			}
@@ -60,7 +60,7 @@ func TestHoverAtTargets(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := hoverAt(context.Background(), "letsgo.mod", tt.text, tt.pos, tt.live, "")
+			got, ok := hoverAt(context.Background(), "letsgo.mod", tt.text, tt.pos, tt.live, "", "")
 			if ok != (tt.want != "") || !strings.Contains(got, tt.want) {
 				t.Errorf("hoverAt = %q, %v; want a hover containing %q", got, ok, tt.want)
 			}
@@ -92,7 +92,7 @@ func TestCheckPin(t *testing.T) {
 			digest := PinnedTool(t, t.TempDir(), "scratch", content)
 
 			if tt.inStore != "" {
-				store, err := pluginstore.Open(storeDir)
+				store, err := pluginstore.Open(storeDir, "")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -110,7 +110,7 @@ func TestCheckPin(t *testing.T) {
 				PinnedTool(t, pathDir, tt.command, tt.onPath)
 			}
 
-			got := checkPin(t.TempDir(), pinLine{command: tt.command, version: "v0.1.0", digest: digest})
+			got := checkPin(t.TempDir(), "", pinLine{command: tt.command, version: "v0.1.0", digest: digest})
 			if got.state != tt.state || !strings.Contains(got.detail, tt.detail) {
 				t.Errorf("checkPin = %+v; want state %d, detail containing %q", got, tt.state, tt.detail)
 			}
@@ -123,7 +123,7 @@ func TestCheckPinResolvesARelativeCommandAgainstTheRepository(t *testing.T) {
 	repo := t.TempDir()
 	digest := PinnedTool(t, repo, "tools/env", "in the repository")
 
-	got := checkPin(repo, pinLine{command: "./tools/env", digest: digest})
+	got := checkPin(repo, "", pinLine{command: "./tools/env", digest: digest})
 	if got.state != pinInstalled {
 		t.Errorf("checkPin = %+v, want installed", got)
 	}
@@ -134,7 +134,7 @@ func TestCheckPinLeavesNoStoreBehind(t *testing.T) {
 	absent := filepath.Join(storeDir, "never-created")
 	t.Setenv(pluginstore.StoreEnvOverride, absent)
 
-	checkPin(t.TempDir(), pinLine{command: "letsgo-env", digest: "sha256:abc"})
+	checkPin(t.TempDir(), "", pinLine{command: "letsgo-env", digest: "sha256:abc"})
 	if _, err := os.Stat(absent); !os.IsNotExist(err) {
 		t.Errorf("stat %s: %v; want the store left uncreated", absent, err)
 	}
@@ -159,17 +159,17 @@ func TestHoverAtShowsAPinsInstallState(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := hoverAt(context.Background(), "letsgo.mod", line, tt.pos, tt.live, "")
+			got, ok := hoverAt(context.Background(), "letsgo.mod", line, tt.pos, tt.live, "", "")
 			if !ok || !strings.Contains(got, tt.want) {
 				t.Errorf("hoverAt = %q, %v; want a hover containing %q", got, ok, tt.want)
 			}
 		})
 	}
 
-	if got, _ := hoverAt(context.Background(), "letsgo.mod", line, Position{0, 18}, false, ""); got != "" {
+	if got, _ := hoverAt(context.Background(), "letsgo.mod", line, Position{0, 18}, false, "", ""); got != "" {
 		t.Errorf("restricted hover over the command = %q, want none", got)
 	}
-	if got, ok := hoverAt(context.Background(), "letsgo.mod", "plugin ldflags letsgo-env\n", Position{0, 18}, true, ""); ok {
+	if got, ok := hoverAt(context.Background(), "letsgo.mod", "plugin ldflags letsgo-env\n", Position{0, 18}, true, "", ""); ok {
 		t.Errorf("hover over an unpinned plugin line = %q, want none", got)
 	}
 }

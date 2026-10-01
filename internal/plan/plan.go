@@ -316,6 +316,15 @@ func (p *Plan) resolveGlobalConfig(global *config.Global) {
 	p.note("proxy", proxy, source)
 }
 
+// PluginsDir is the machine's `plugins` directive, or empty when the plan
+// carries no global config (one assembled by hand rather than resolved).
+func (p *Plan) PluginsDir() string {
+	if p.Global == nil {
+		return ""
+	}
+	return p.Global.PluginsDir
+}
+
 // hintPlugins nudges toward a first-party plugin whose job matches this
 // release's shape, without failing anything: building eleven commands
 // without letsgo-multi, or shipping a darwin variant beside a Homebrew tap
@@ -386,7 +395,7 @@ func (p *Plan) applyLayoutPlugin(ctx context.Context) {
 	in.ConfigDir = filepath.Join(p.RootDir, pluginConfigDir)
 
 	var out plugin.ArchiveLayoutOutput
-	if err := plugin.Run(ctx, configured, p.RootDir, in, &out); err != nil {
+	if err := plugin.Run(ctx, configured, p.RootDir, p.PluginsDir(), in, &out); err != nil {
 		p.addAt(p.posOf(pluginDirective+string(configured.Hook)), "plugins", Fail, "%v", err)
 		return
 	}
@@ -437,7 +446,7 @@ func (p *Plan) applyLDFlagsPlugin(ctx context.Context) {
 	in.ConfigDir = filepath.Join(p.RootDir, pluginConfigDir)
 
 	var out plugin.LDFlagsOutput
-	if err := plugin.Run(ctx, configured, p.RootDir, in, &out); err != nil {
+	if err := plugin.Run(ctx, configured, p.RootDir, p.PluginsDir(), in, &out); err != nil {
 		p.addAt(p.posOf(pluginDirective+string(configured.Hook)), "plugins", Fail, "%v", err)
 		return
 	}

@@ -22,8 +22,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"github.com/danielriddell21/letsgo/internal/config"
 )
 
 // StoreEnvOverride names a directory to use as the store instead of the
@@ -39,40 +37,10 @@ type Store struct {
 }
 
 // Open prepares a store under dir. An empty dir uses StoreEnvOverride when
-// set, else the global config's `plugins` directive, else the default
-// location: $XDG_DATA_HOME/letsgo/plugins, or its platform equivalent.
-func Open(dir string) (*Store, error) {
-	return openWith(dir, globalOrEmpty())
-}
-
-// OpenReadOnly resolves the store the way Open does but never creates it: a
-// reader that only asks whether something is installed — an editor hovering a
-// pin — must not leave a directory behind on a machine that has installed
-// nothing. A store that does not exist holds nothing, so Lookup reports a
-// plain miss.
-func OpenReadOnly(dir string) (*Store, error) {
-	resolved, err := storeDir(dir, globalOrEmpty())
-	if err != nil {
-		return nil, err
-	}
-	return &Store{dir: resolved}, nil
-}
-
-// globalOrEmpty is the global config, or an empty one when it cannot be
-// read: a broken global file is plan's to report, not the store's.
-func globalOrEmpty() *config.Global {
-	global, err := config.LoadGlobal()
-	if err != nil {
-		return &config.Global{}
-	}
-	return global
-}
-
-// openWith is Open's core logic, taking the global config directly rather
-// than loading it, so tests can exercise the `plugins` directive without
-// relying on config.LoadGlobal's process-wide memoization.
-func openWith(dir string, global *config.Global) (*Store, error) {
-	dir, err := storeDir(dir, global)
+// set, else configured (the global config's `plugins` directive), else the
+// default location: $XDG_DATA_HOME/letsgo/plugins, or its platform equivalent.
+func Open(dir, configured string) (*Store, error) {
+	dir, err := storeDir(dir, configured)
 	if err != nil {
 		return nil, err
 	}
@@ -82,13 +50,26 @@ func openWith(dir string, global *config.Global) (*Store, error) {
 	return &Store{dir: dir}, nil
 }
 
+// OpenReadOnly resolves the store the way Open does but never creates it: a
+// reader that only asks whether something is installed — an editor hovering a
+// pin — must not leave a directory behind on a machine that has installed
+// nothing. A store that does not exist holds nothing, so Lookup reports a
+// plain miss.
+func OpenReadOnly(dir, configured string) (*Store, error) {
+	resolved, err := storeDir(dir, configured)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{dir: resolved}, nil
+}
+
 // storeDir picks where the store lives, without touching the disk.
-func storeDir(dir string, global *config.Global) (string, error) {
+func storeDir(dir, configured string) (string, error) {
 	if dir == "" {
 		dir = os.Getenv(StoreEnvOverride)
 	}
 	if dir == "" {
-		dir = global.PluginsDir
+		dir = configured
 	}
 	if dir == "" {
 		home, err := dataHome()

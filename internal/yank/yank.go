@@ -63,6 +63,7 @@ type Options struct {
 	// is rolled back from, and PluginRoot is where it runs from.
 	TapFilesPlugin plugin.Plugin
 	PluginRoot     string
+	PluginsDir     string
 
 	// Manifests loads a release's manifest, for regenerating the formula.
 	Manifests func(ctx context.Context, tag string) (*manifest.Manifest, error)
@@ -265,7 +266,7 @@ func (o Options) revertTap(ctx context.Context, result *Result, logf func(string
 		return nil
 	}
 	in := release.TapFilesInputFromManifest(m, o.Repo, o.Tap, o.Caveats)
-	files, err := release.RunTapFiles(ctx, o.TapFilesPlugin, o.PluginRoot, in)
+	files, err := release.RunTapFiles(ctx, o.TapFilesPlugin, o.PluginRoot, o.PluginsDir, in)
 	if err != nil {
 		return err
 	}

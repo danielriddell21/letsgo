@@ -36,7 +36,7 @@ func runLSP(args []string) error {
 		goBin, _ = gobuild.Toolchain()
 	}
 
-	server := lsp.NewServer(os.Stdin, os.Stdout, lsp.Options{Restricted: *restricted, GoBin: goBin, ResolvePin: resolvePin, InstallPin: installPin})
+	server := lsp.NewServer(os.Stdin, os.Stdout, lsp.Options{Restricted: *restricted, GoBin: goBin, PluginsDir: machineConfig().PluginsDir, ResolvePin: resolvePin, InstallPin: installPin})
 	code, err := server.Run(context.Background())
 	if err != nil {
 		return err

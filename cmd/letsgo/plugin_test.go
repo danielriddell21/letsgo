@@ -494,7 +494,7 @@ func TestInstallPluginWritesTheVerifiedBinary(t *testing.T) {
 	digest := "sha256:" + forgetest.Sum([]byte(forgetest.Content("letsgo-env")))
 
 	// The named plugin, not whichever artifact the platform matched first.
-	store, err := pluginstore.Open(storeDir)
+	store, err := pluginstore.Open(storeDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -565,7 +565,7 @@ func TestInstallPluginRefusesATamperedArchive(t *testing.T) {
 		t.Fatal("a tampered archive should be refused")
 	}
 
-	store, err := pluginstore.Open(storeDir)
+	store, err := pluginstore.Open(storeDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -677,7 +677,7 @@ func TestWriteExecutableReportsAnUnwritableDir(t *testing.T) {
 // installed, and returns its digest.
 func putInStore(t *testing.T, storeDir, name, content string) string {
 	t.Helper()
-	store, err := pluginstore.Open(storeDir)
+	store, err := pluginstore.Open(storeDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +710,7 @@ func TestPruneStoreRemovesUnreferencedEntries(t *testing.T) {
 		t.Errorf("printed:\n%s\nwant the referenced entry left out", out.String())
 	}
 
-	store, err := pluginstore.Open(storeDir)
+	store, err := pluginstore.Open(storeDir, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
@@ -79,12 +78,13 @@ func previousRelease(ctx context.Context, client *github.Client, repo github.Rep
 //
 // The client is the tap's rather than the release's, for the same reason the
 // release path separates them: rolling a formula back writes to the tap only.
-func tapFor(moduleDir string, client *github.Client) (github.Repo, brew.FileAPI, plugin.Plugin, string) {
+func tapFor(o *yank.Options, moduleDir string, client *github.Client) {
 	p, err := plan.Resolve(context.Background(), plan.Options{Dir: moduleDir, Snapshot: true, AllowDirty: true})
 	if err != nil || p.Tap == (github.Repo{}) {
-		return github.Repo{}, nil, plugin.Plugin{}, ""
+		return
 	}
-	return p.Tap, client, p.Plugins[plugin.HookTapFiles], p.RootDir
+	o.Tap, o.TapAPI, o.TapFilesPlugin = p.Tap, client, p.Plugins[plugin.HookTapFiles]
+	o.PluginRoot, o.PluginsDir = p.RootDir, p.PluginsDir()
 }
 
 func reportYank(tag string, repo github.Repo, previous string, o yank.Options) {

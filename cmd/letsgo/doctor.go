@@ -21,7 +21,7 @@ func runDoctor(args []string) error {
 		return errUsage("letsgo doctor")
 	}
 
-	result, err := doctor.Run(context.Background(), ".")
+	result, err := doctor.Run(context.Background(), ".", machineConfig())
 	if err != nil {
 		return err
 	}

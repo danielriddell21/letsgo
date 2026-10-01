@@ -16,7 +16,7 @@ import (
 // machine says about a plugin pin or a build target there. live is off in a
 // restricted workspace, where nothing may touch the plugin store, PATH or the
 // go toolchain. Anywhere else it returns ok=false rather than guessing.
-func hoverAt(ctx context.Context, path, text string, pos Position, live bool, goBin string) (contents string, ok bool) {
+func hoverAt(ctx context.Context, path, text string, pos Position, live bool, goBin, pluginsDir string) (contents string, ok bool) {
 	o := outlineOf(path, text)
 	d, found := o.byLine[pos.Line]
 	if !found {
@@ -35,7 +35,7 @@ func hoverAt(ctx context.Context, path, text string, pos Position, live bool, go
 		}
 	}
 	if live && kindOf(path) == kindRepo {
-		if state := liveHover(ctx, path, o, pos.Line, d, at, goBin); state != "" {
+		if state := liveHover(ctx, path, o, pos.Line, d, at, goBin, pluginsDir); state != "" {
 			parts = append(parts, state)
 		}
 	}
@@ -66,9 +66,9 @@ func directiveDoc(path, keyword string) (string, bool) {
 // state from anywhere on its line, or whether the target under the cursor is
 // one the go toolchain can build. at is the argument under the cursor, -1 on
 // the keyword. "" means there is nothing to add.
-func liveHover(ctx context.Context, path string, o outline, lineNo int, d directive, at int, goBin string) string {
+func liveHover(ctx context.Context, path string, o outline, lineNo int, d directive, at int, goBin, pluginsDir string) string {
 	if pin, ok := o.pin(lineNo); ok {
-		return fmt.Sprintf("`%s %s`: %s", pin.command, pin.version, checkPin(filepath.Dir(path), pin).detail)
+		return fmt.Sprintf("`%s %s`: %s", pin.command, pin.version, checkPin(filepath.Dir(path), pluginsDir, pin).detail)
 	}
 	if at >= 0 && isTargetWord(d, at) {
 		return targetHover(ctx, d.args[at].text, goBin)
