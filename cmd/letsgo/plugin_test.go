@@ -809,7 +809,7 @@ func TestRunPluginDirPrintsTheStore(t *testing.T) {
 	t.Setenv(pluginstore.StoreEnvOverride, dir)
 
 	out := captureStdout(t, func() {
-		if err := runPluginDir(nil); err != nil {
+		if err := runPlugin([]string{"dir"}); err != nil {
 			t.Error(err)
 		}
 	})
@@ -826,7 +826,7 @@ func TestRunPluginDirWithoutAHome(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("HOME", "")
 
-	if err := runPluginDir(nil); err == nil {
+	if err := runPlugin([]string{"dir"}); err == nil {
 		t.Fatal("no store location should be an error")
 	}
 }

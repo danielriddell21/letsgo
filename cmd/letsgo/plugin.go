@@ -77,7 +77,7 @@ func runPlugin(args []string) error {
 	case "list":
 		return runPluginList(args[1:])
 	case "dir":
-		return runPluginDir(args[1:])
+		return runPluginDir()
 	case "prune":
 		return runPluginPrune(args[1:])
 	case "help", "-h", "--help":
@@ -469,11 +469,7 @@ func pinsByDigestAndName(cfg *config.Config) map[digestAndName]bool {
 
 // runPluginDir prints where the plugin store is, so a cache step need not
 // know the platform's data directory.
-func runPluginDir(args []string) error {
-	fs := flag.NewFlagSet("plugin dir", flag.ExitOnError)
-	if err := parseFlags(fs, args); err != nil {
-		return err
-	}
+func runPluginDir() error {
 	store, err := pluginstore.OpenReadOnly("", machineConfig().PluginsDir)
 	if err != nil {
 		return err
