@@ -110,7 +110,7 @@ func runPluginInstall(args []string) error {
 	}
 
 	ctx := context.Background()
-	tokenValue, _ := plan.Token(context.Background(), *token)
+	tokenValue, _ := plan.Token(context.Background(), machineConfig(), *token)
 
 	if fs.NArg() == 0 {
 		return installAllPins(ctx, os.Stdout, *repo, tokenValue, *dir, *link)

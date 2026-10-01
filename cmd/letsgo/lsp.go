@@ -57,7 +57,7 @@ func lspOptions(restricted bool, global *config.Global) lsp.Options {
 // release of a plugin into the store, exactly as `letsgo plugin install` would,
 // and reports the pin that names it.
 func latestPin(ctx context.Context, command string) (lsp.Pin, error) {
-	token, _ := plan.Token(ctx, "")
+	token, _ := plan.Token(ctx, machineConfig(), "")
 	release, _, _, err := fetchIntoStore(ctx, selfupdate.Options{
 		Repo:      defaultPluginRepo(),
 		Token:     token,
@@ -76,7 +76,7 @@ func latestPin(ctx context.Context, command string) (lsp.Pin, error) {
 // for the caller to check — the store is content-addressed, so a release that
 // differs simply lands under a different digest.
 func installPinned(ctx context.Context, command, tag string) error {
-	token, _ := plan.Token(ctx, "")
+	token, _ := plan.Token(ctx, machineConfig(), "")
 	_, _, _, err := fetchIntoStore(ctx, selfupdate.Options{
 		Repo:      defaultPluginRepo(),
 		Token:     token,

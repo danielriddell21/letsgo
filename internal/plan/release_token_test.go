@@ -124,7 +124,7 @@ func TestReleaseTokenResolution(t *testing.T) {
 	assertReleaseToken := func(t *testing.T, override, token, env, wantToken, wantSource string) {
 		t.Helper()
 		t.Setenv("LETSGO_RELEASE_TOKEN", env)
-		got, src := plan.ReleaseToken(t.Context(), override, token)
+		got, src := plan.ReleaseToken(t.Context(), nil, override, token)
 		if got != wantToken || src != wantSource {
 			t.Errorf("ReleaseToken(%q, %q) with $LETSGO_RELEASE_TOKEN=%q = %q from %q, want %q from %q",
 				override, token, env, got, src, wantToken, wantSource)
