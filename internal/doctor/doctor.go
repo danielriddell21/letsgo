@@ -110,7 +110,11 @@ func Run(ctx context.Context, dir string, global *config.Global) (*Result, error
 	if err != nil {
 		return nil, err
 	}
-	git, err := discover.FindGit(ctx, root.Dir)
+	gitBin, _, err := discover.GitBinary(global)
+	if err != nil {
+		return nil, err
+	}
+	git, err := discover.FindGit(ctx, gitBin, root.Dir)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +127,7 @@ func Run(ctx context.Context, dir string, global *config.Global) (*Result, error
 
 	r := &Result{}
 	r.checkGo(ctx, root, global)
-	r.checkGit(ctx)
+	r.checkGit(ctx, gitBin)
 	r.checkVulncheck(cfgErr == nil && requiresVulncheck(cfg))
 	r.checkApidiff()
 
@@ -131,8 +135,8 @@ func Run(ctx context.Context, dir string, global *config.Global) (*Result, error
 	if cfgErr == nil {
 		r.checkPlugins(cfg, root.Dir, global.PluginsDir)
 	}
-	r.checkHistory(ctx, root.Dir, git, scope)
-	r.checkRemote(ctx, root.Dir)
+	r.checkHistory(ctx, gitBin, root.Dir, git, scope)
+	r.checkRemote(ctx, gitBin, root.Dir)
 	r.checkWorktree(git)
 	return r, nil
 }
@@ -216,13 +220,7 @@ func parseGoVersion(s string) (semver.Version, bool) {
 }
 
 // checkGit reports the resolved git binary (DR-1, DR-2).
-func (r *Result) checkGit(ctx context.Context) {
-	path, _, err := discover.GitSource()
-	if err != nil {
-		r.add(toolsGroup, "git", Fail, "", "%v", err)
-		return
-	}
-
+func (r *Result) checkGit(ctx context.Context, path string) {
 	version := "unknown version"
 	if out, err := exec.CommandContext(ctx, path, "--version").Output(); err == nil {
 		if v := strings.TrimSpace(string(out)); v != "" {

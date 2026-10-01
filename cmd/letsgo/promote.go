@@ -76,6 +76,7 @@ func (f forge) runPromote(args []string) error {
 		Repo:        repo,
 		RCTag:       rcTag,
 		Dir:         git.TopLevel,
+		GitBin:      m.GitBin,
 		ModuleDir:   m.Module.Dir,
 		Prefix:      scope.Prefix,
 		Shallow:     git.Shallow,

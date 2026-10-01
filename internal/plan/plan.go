@@ -288,29 +288,55 @@ func (p *Plan) checkPluginConfigFiles() {
 	}
 }
 
-// resolveGlobalConfig loads the machine's global config and records where
-// each machine-level value it can influence — the go toolchain, git, and the
+// machineSettings is the machine's global config and the programs resolved
+// from it, settled once before anything shells out so that every later step
+// is handed them rather than re-reading the machine.
+type machineSettings struct {
+	global    *config.Global
+	globalErr error
+
+	goBin, goSource   string
+	gitBin, gitSource string
+	gitErr            error
+}
+
+// resolveMachine settles the machine's configuration: the global config
+// (read here only when the caller did not supply one) and the go and git
+// commands it and the environment select.
+func resolveMachine(global *config.Global) machineSettings {
+	m := machineSettings{global: global}
+	if m.global == nil {
+		m.global, m.globalErr = config.LoadGlobal()
+		if m.globalErr != nil {
+			m.global = &config.Global{}
+		}
+	}
+	if path, source, err := gobuild.Toolchain(m.global); err == nil {
+		m.goBin, m.goSource = path, source
+	}
+	m.gitBin, m.gitSource, m.gitErr = discover.GitBinary(m.global)
+	return m
+}
+
+// recordMachine records the machine settings on the plan, and where each
+// machine-level value it can influence — the go toolchain, git, and the
 // module proxy — actually came from, so `plan --explain` can name the source
 // of each (CD-10). A malformed global file is a Fail here rather than a
 // silent fallback: every other package that consults the global config falls
 // back to its defaults on error, trusting this check to surface the problem
 // once instead of nowhere.
-func (p *Plan) resolveGlobalConfig(global *config.Global) {
-	if global == nil {
-		var err error
-		if global, err = config.LoadGlobal(); err != nil {
-			p.add("global config", Fail, "%v", err)
-			global = &config.Global{}
-		}
+func (p *Plan) recordMachine(m machineSettings) {
+	if m.globalErr != nil {
+		p.add("global config", Fail, "%v", m.globalErr)
 	}
-	p.Global = global
+	p.Global = m.global
+	p.GoBin, p.GitBin = m.goBin, m.gitBin
 
-	if path, source, err := gobuild.Toolchain(p.Global); err == nil {
-		p.GoBin = path
-		p.note("go", path, source)
+	if m.goBin != "" {
+		p.note("go", m.goBin, m.goSource)
 	}
-	if path, source, err := discover.GitSource(); err == nil {
-		p.note("git", path, source)
+	if m.gitErr == nil {
+		p.note("git", m.gitBin, m.gitSource)
 	}
 	proxy, source := publish.ResolveProxy(os.Getenv("GOPROXY"), p.Global.Proxy, p.Global.Path)
 	p.Proxy = proxy
@@ -666,6 +692,10 @@ type Plan struct {
 	Git   discover.Git
 	Scope discover.Scope
 
+	// GitBin is the git command resolved from the environment and global
+	// config, handed to everything that reads the repository.
+	GitBin string
+
 	Repo       discover.Repo
 	HasRepo    bool
 	Config     *config.Config
@@ -809,7 +839,12 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 		return nil, err
 	}
 
-	git, err := discover.FindGit(ctx, root.Dir)
+	machine := resolveMachine(opts.Global)
+	if machine.gitErr != nil {
+		return nil, machine.gitErr
+	}
+
+	git, err := discover.FindGit(ctx, machine.gitBin, root.Dir)
 	if err != nil {
 		return nil, err
 	}
@@ -826,12 +861,12 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 		p.note("scope", scope.Dir, "the module's own directory")
 	}
 
-	if repo, err := discover.FindRepo(ctx, root.Dir); err == nil {
+	if repo, err := discover.FindRepo(ctx, machine.gitBin, root.Dir); err == nil {
 		p.Repo, p.HasRepo = repo, true
 		p.note("repository", repo.String(), "git remote origin")
 	}
 
-	p.resolveGlobalConfig(opts.Global)
+	p.recordMachine(machine)
 
 	// The config is read before the module is settled, because it is what can
 	// move it: `module web` says the go.mod to build is not the one beside
@@ -1061,7 +1096,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 		return
 	}
 
-	tags, err := discover.Tags(ctx, p.RootDir, p.Scope.Prefix)
+	tags, err := discover.Tags(ctx, p.GitBin, p.RootDir, p.Scope.Prefix)
 	if err != nil {
 		p.skip(apiCompatibility, apiGate, "no earlier release to compare against")
 		return
@@ -1072,7 +1107,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 		return
 	}
 
-	old, cleanup, err := checkoutTag(ctx, p.RootDir, previous, p.Scope.Dir)
+	old, cleanup, err := checkoutTag(ctx, p.GitBin, p.RootDir, previous, p.Scope.Dir)
 	if err != nil {
 		p.add(apiCompatibility, Warn, "could not check out %s: %v", previous, err)
 		return
@@ -1145,20 +1180,20 @@ func bumpBetween(previous, current string) string {
 // the repository, exactly as Scope.Dir names it. A worktree always holds the
 // whole repository, so a module nested in it is compared at <worktree>/relDir,
 // never at the worktree's own root.
-func checkoutTag(ctx context.Context, repoDir, tag, relDir string) (dir string, cleanup func(), err error) {
+func checkoutTag(ctx context.Context, gitBin, repoDir, tag, relDir string) (dir string, cleanup func(), err error) {
 	base, err := os.MkdirTemp("", "letsgo-apidiff-")
 	if err != nil {
 		return "", nil, fmt.Errorf("plan: scratch directory: %w", err)
 	}
 
 	worktree := filepath.Join(base, "old")
-	if err := discover.AddWorktree(ctx, repoDir, worktree, tag); err != nil {
+	if err := discover.AddWorktree(ctx, gitBin, repoDir, worktree, tag); err != nil {
 		_ = os.RemoveAll(base)
 		return "", nil, err
 	}
 
 	return filepath.Join(worktree, filepath.FromSlash(relDir)), func() {
-		_ = discover.RemoveWorktree(ctx, repoDir, worktree)
+		_ = discover.RemoveWorktree(ctx, gitBin, repoDir, worktree)
 		_ = os.RemoveAll(base)
 	}, nil
 }
@@ -1670,7 +1705,7 @@ func (p *Plan) resolveProject() {
 func (p *Plan) resolveVersion(ctx context.Context, opts Options) {
 	if p.Snapshot {
 		base := "0.0.0"
-		if prev, err := discover.PreviousTag(ctx, p.RootDir, p.Scope.Prefix); err == nil && prev != "" {
+		if prev, err := discover.PreviousTag(ctx, p.GitBin, p.RootDir, p.Scope.Prefix); err == nil && prev != "" {
 			base = strings.TrimPrefix(strings.TrimPrefix(prev, p.Scope.Prefix), "v")
 		}
 		p.Version = fmt.Sprintf("%s-next+%s", base, p.Git.ShortCommit)
@@ -2132,7 +2167,7 @@ func (p *Plan) expandArchiveFiles(ctx context.Context, entries []string) ([]stri
 
 		// Read once, and only when a directory is actually named.
 		if tracked == nil {
-			if tracked, err = discover.TrackedFiles(ctx, p.RootDir); err != nil {
+			if tracked, err = discover.TrackedFiles(ctx, p.GitBin, p.RootDir); err != nil {
 				return nil, fmt.Errorf("archive %s: %w", entry, err)
 			}
 		}

@@ -29,7 +29,7 @@ func manifestOf(version, goVersion string) *manifest.Manifest {
 // merely from being shown: a nil client proves this returns before it would
 // have made a network call.
 func TestReleaseSkippedWhenChangelogDisabled(t *testing.T) {
-	p := &plan.Plan{Features: feature.Resolve([]string{"changelog"})}
+	p := &plan.Plan{GitBin: "git", Features: feature.Resolve([]string{"changelog"})}
 
 	got, err := Release(context.Background(), Source{Plan: p})
 	if err != nil || got != "" {
@@ -40,7 +40,7 @@ func TestReleaseSkippedWhenChangelogDisabled(t *testing.T) {
 // A first release has no previous tag to diff against, so there is nothing
 // to fetch: whatShipped must return before it would have made a network call.
 func TestWhatShippedSkipsAFirstRelease(t *testing.T) {
-	s := Source{Plan: &plan.Plan{}, Manifest: &manifest.Manifest{Version: "v1.0.0"}}
+	s := Source{Plan: &plan.Plan{GitBin: "git"}, Manifest: &manifest.Manifest{Version: "v1.0.0"}}
 	out, err := s.whatShipped(context.Background(), "")
 	if err != nil || out != "" {
 		t.Errorf("whatShipped = %q, %v, want empty for a first release", out, err)
@@ -52,7 +52,7 @@ func TestWhatShippedSkipsAFirstRelease(t *testing.T) {
 func TestWhatShippedSkipsAPreviousReleaseWithNoManifest(t *testing.T) {
 	var logged []string
 	s := Source{
-		Plan:     &plan.Plan{},
+		Plan:     &plan.Plan{GitBin: "git"},
 		Client:   notestest.Forge(t, "you/demo", "v1.0.0", nil), // no manifest: no asset to find
 		Repo:     repo,
 		Manifest: manifestOf("v1.1.0", "go1.26.2"),
@@ -74,7 +74,7 @@ func TestWhatShippedSkipsAPreviousReleaseWithNoManifest(t *testing.T) {
 // The skip notice is a courtesy: a caller with nowhere to put it still ships.
 func TestWhatShippedSkipsQuietlyWithoutALogger(t *testing.T) {
 	s := Source{
-		Plan: &plan.Plan{}, Client: notestest.Forge(t, "you/demo", "v1.0.0", nil), Repo: repo,
+		Plan: &plan.Plan{GitBin: "git"}, Client: notestest.Forge(t, "you/demo", "v1.0.0", nil), Repo: repo,
 		Manifest: manifestOf("v1.1.0", "go1.26.2"),
 	}
 	if out, err := s.whatShipped(context.Background(), "v1.0.0"); err != nil || out != "" {
@@ -85,7 +85,7 @@ func TestWhatShippedSkipsQuietlyWithoutALogger(t *testing.T) {
 // A release that required diff-notes asked for the failure the tests above
 // tolerate: no previous release, or one with no manifest, is an error.
 func TestWhatShippedFailsWhenRequiredAndNothingToCompare(t *testing.T) {
-	s := Source{Plan: &plan.Plan{Required: []string{"diff-notes"}}, Repo: repo, Manifest: &manifest.Manifest{Version: "v1.1.0"}}
+	s := Source{Plan: &plan.Plan{GitBin: "git", Required: []string{"diff-notes"}}, Repo: repo, Manifest: &manifest.Manifest{Version: "v1.1.0"}}
 
 	if _, err := s.whatShipped(context.Background(), ""); err == nil {
 		t.Error("a first release should fail when diff-notes is required")
@@ -99,7 +99,7 @@ func TestWhatShippedFailsWhenRequiredAndNothingToCompare(t *testing.T) {
 
 func TestWhatShippedRendersTheCollapsedSection(t *testing.T) {
 	s := Source{
-		Plan:     &plan.Plan{},
+		Plan:     &plan.Plan{GitBin: "git"},
 		Client:   notestest.Forge(t, "you/demo", "v1.0.0", manifestOf("v1.0.0", "go1.26.1")),
 		Repo:     repo,
 		Manifest: manifestOf("v1.1.0", "go1.26.2"),
@@ -121,6 +121,7 @@ func TestWhatShippedRendersTheCollapsedSection(t *testing.T) {
 // changelog above it just used, and must be appended after it.
 func TestReleaseAppendsWhatShippedUsingTheChangelogsPreviousRelease(t *testing.T) {
 	p := &plan.Plan{
+		GitBin:   "git",
 		Features: feature.Resolve(nil),
 		Module:   discover.Module{Dir: notestest.History(t)},
 		Tag:      "v1.1.0",
@@ -149,6 +150,7 @@ func TestReleaseAppendsWhatShippedUsingTheChangelogsPreviousRelease(t *testing.T
 // forge is ever asked for the previous manifest.
 func TestReleaseOmitsWhatShippedWhenDisabled(t *testing.T) {
 	p := &plan.Plan{
+		GitBin:   "git",
 		Features: feature.Resolve([]string{"diff-notes"}),
 		Module:   discover.Module{Dir: notestest.History(t)},
 		Tag:      "v1.1.0",
@@ -167,6 +169,7 @@ func TestReleaseOmitsWhatShippedWhenDisabled(t *testing.T) {
 
 func TestReleaseEndsWithTheManifestFingerprint(t *testing.T) {
 	p := &plan.Plan{
+		GitBin:   "git",
 		Features: feature.Resolve([]string{"diff-notes"}),
 		Module:   discover.Module{Dir: notestest.History(t)},
 		Tag:      "v1.1.0",
@@ -195,6 +198,7 @@ func TestReleaseEndsWithTheManifestFingerprint(t *testing.T) {
 
 func TestReleaseOmitsTheFingerprintWhenDisabled(t *testing.T) {
 	p := &plan.Plan{
+		GitBin:   "git",
 		Features: feature.Resolve([]string{"diff-notes", "randomart"}),
 		Module:   discover.Module{Dir: notestest.History(t)},
 		Tag:      "v1.1.0",
@@ -213,7 +217,7 @@ func TestReleaseOmitsTheFingerprintWhenDisabled(t *testing.T) {
 // Without a digest there is nothing to draw, which only matters to a release
 // that required the drawing.
 func TestExtraFailsWhenRandomartIsRequiredAndThereIsNoDigest(t *testing.T) {
-	p := &plan.Plan{Features: feature.Resolve([]string{"diff-notes"}), Required: []string{"randomart"}}
+	p := &plan.Plan{GitBin: "git", Features: feature.Resolve([]string{"diff-notes"}), Required: []string{"randomart"}}
 	if _, err := Extra(context.Background(), Source{Plan: p}, ""); err == nil {
 		t.Error("a required fingerprint with no digest should fail")
 	}
@@ -227,12 +231,13 @@ func TestExtraFailsWhenRandomartIsRequiredAndThereIsNoDigest(t *testing.T) {
 // A failure the changelog cannot recover from, or a required section that
 // cannot be built, stops the release rather than shipping thinner notes.
 func TestReleasePropagatesFailures(t *testing.T) {
-	notRepo := &plan.Plan{Features: feature.Resolve(nil), Module: discover.Module{Dir: t.TempDir()}, Tag: "v1.1.0"}
+	notRepo := &plan.Plan{GitBin: "git", Features: feature.Resolve(nil), Module: discover.Module{Dir: t.TempDir()}, Tag: "v1.1.0"}
 	if _, err := Release(context.Background(), Source{Plan: notRepo}); err == nil {
 		t.Error("a module with no history should fail")
 	}
 
 	required := &plan.Plan{
+		GitBin:   "git",
 		Features: feature.Resolve([]string{"randomart"}),
 		Required: []string{"diff-notes"},
 		Module:   discover.Module{Dir: notestest.History(t)},
@@ -249,7 +254,7 @@ func TestReleasePropagatesFailures(t *testing.T) {
 
 // A shallow clone has no history to read, so the notes say where it comes from.
 func TestReleaseSaysWhenItReadsAShallowCloneFromTheForge(t *testing.T) {
-	p := &plan.Plan{Features: feature.Resolve(nil), Module: discover.Module{Dir: t.TempDir()}, Tag: "v1.1.0"}
+	p := &plan.Plan{GitBin: "git", Features: feature.Resolve(nil), Module: discover.Module{Dir: t.TempDir()}, Tag: "v1.1.0"}
 	p.Git.Shallow = true
 	var logged []string
 	_, _ = Release(context.Background(), Source{

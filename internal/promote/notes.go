@@ -29,7 +29,7 @@ func prereleaseHistory(ctx context.Context, o Options, stableTag string) (string
 		return "", nil
 	}
 
-	tags, err := discover.Tags(ctx, o.Dir, o.Prefix)
+	tags, err := discover.Tags(ctx, o.GitBin, o.Dir, o.Prefix)
 	if err != nil {
 		return "", err
 	}
@@ -53,7 +53,7 @@ func prereleaseHistory(ctx context.Context, o Options, stableTag string) (string
 	var b strings.Builder
 	for _, tag := range rcTags {
 		previous, _ := scope.PreviousTag(tags, tag)
-		commits, err := discover.Commits(ctx, o.Dir, previous, tag, nested...)
+		commits, err := discover.Commits(ctx, o.GitBin, o.Dir, previous, tag, nested...)
 		if err != nil {
 			return "", err
 		}

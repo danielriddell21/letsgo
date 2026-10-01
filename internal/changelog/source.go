@@ -15,6 +15,9 @@ type Source struct {
 	// Dir is the repository.
 	Dir string
 
+	// GitBin is the git command, as resolved by discover.GitBinary.
+	GitBin string
+
 	// Tag is the release being described. It is expected to point at HEAD:
 	// the local path derives the preceding tag by walking back from there, and
 	// a release is only ever made from a tagged HEAD.
@@ -70,7 +73,7 @@ func Collect(ctx context.Context, s Source) (previous string, commits []discover
 	scope := discover.Scope{Prefix: s.Prefix}
 
 	if !s.Shallow {
-		tags, err := discover.Tags(ctx, s.Dir, s.Prefix)
+		tags, err := discover.Tags(ctx, s.GitBin, s.Dir, s.Prefix)
 		if err != nil {
 			return "", nil, err
 		}
@@ -79,7 +82,7 @@ func Collect(ctx context.Context, s Source) (previous string, commits []discover
 		if err != nil {
 			return "", nil, err
 		}
-		commits, err = discover.Commits(ctx, s.Dir, previous, s.Tag, nested...)
+		commits, err = discover.Commits(ctx, s.GitBin, s.Dir, previous, s.Tag, nested...)
 		return previous, commits, err
 	}
 
@@ -90,7 +93,7 @@ func Collect(ctx context.Context, s Source) (previous string, commits []discover
 		if err != nil {
 			return "", nil, err
 		}
-		commits, err = discover.Commits(ctx, s.Dir, "", s.Tag, nested...)
+		commits, err = discover.Commits(ctx, s.GitBin, s.Dir, "", s.Tag, nested...)
 		return "", commits, err
 	}
 

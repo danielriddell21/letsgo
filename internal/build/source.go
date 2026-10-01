@@ -14,10 +14,14 @@ import (
 // SourceOptions describes a source archive to produce.
 type SourceOptions struct {
 	ModuleDir string
-	Name      string
-	Version   string
-	ModTime   time.Time
-	WorkDir   string
+
+	// GitBin is the git command, as resolved by discover.GitBinary.
+	GitBin string
+
+	Name    string
+	Version string
+	ModTime time.Time
+	WorkDir string
 }
 
 // Source is a produced source archive.
@@ -39,11 +43,11 @@ type Source struct {
 // Publishing our own costs one extra asset and removes the dependency
 // entirely. A checksum we generate is a checksum we control.
 func WriteSource(ctx context.Context, o SourceOptions) (Source, error) {
-	if o.WorkDir == "" || o.ModuleDir == "" {
-		return Source{}, fmt.Errorf("build: WorkDir and ModuleDir are required")
+	if o.WorkDir == "" || o.ModuleDir == "" || o.GitBin == "" {
+		return Source{}, fmt.Errorf("build: WorkDir, ModuleDir and GitBin are required")
 	}
 
-	files, err := discover.TrackedFiles(ctx, o.ModuleDir)
+	files, err := discover.TrackedFiles(ctx, o.GitBin, o.ModuleDir)
 	if err != nil {
 		return Source{}, err
 	}

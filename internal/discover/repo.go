@@ -21,8 +21,8 @@ type Repo struct {
 func (r Repo) String() string { return r.Host + "/" + r.Owner + "/" + r.Name }
 
 // FindRepo derives the repository from the "origin" remote.
-func FindRepo(ctx context.Context, dir string) (Repo, error) {
-	url, err := git(ctx, dir, "remote", "get-url", "origin")
+func FindRepo(ctx context.Context, gitBin string, dir string) (Repo, error) {
+	url, err := git(ctx, gitBin, dir, "remote", "get-url", "origin")
 	if err != nil {
 		return Repo{}, fmt.Errorf("discover: no 'origin' remote: %w", err)
 	}

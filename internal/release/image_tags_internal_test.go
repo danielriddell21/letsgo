@@ -61,7 +61,7 @@ func TestImageTagsForAPrerelease(t *testing.T) {
 
 // A snapshot never touches the registry, so it gets no floating tags either.
 func TestImageTagsForASnapshot(t *testing.T) {
-	p := &plan.Plan{Version: "1.3.0", Snapshot: true, RootDir: t.TempDir()}
+	p := &plan.Plan{GitBin: "git", Version: "1.3.0", Snapshot: true, RootDir: t.TempDir()}
 
 	tags, floating, err := imageTags(context.Background(), p)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestImageTagsForASnapshot(t *testing.T) {
 // A stable release's version tag is unconditional; major.minor, major and
 // latest are floating candidates a push only advances if newer (PR-7).
 func TestImageTagsForAStableRelease(t *testing.T) {
-	p := &plan.Plan{Version: "1.3.0", RootDir: tagsRepo(t, "v1.3.0")}
+	p := &plan.Plan{GitBin: "git", Version: "1.3.0", RootDir: tagsRepo(t, "v1.3.0")}
 
 	tags, floating, err := imageTags(context.Background(), p)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestImageTagsForAStableRelease(t *testing.T) {
 // belonging to a different module's tags.
 func TestImageTagsForAStableReleaseCarriesChannelHistory(t *testing.T) {
 	dir := tagsRepo(t, "v1.0.0", "v1.1.0-rc.1", "v1.1.0-rc.2", "v1.1.0-beta.1", "other/v1.1.0-alpha.1")
-	p := &plan.Plan{Version: "1.2.0", RootDir: dir}
+	p := &plan.Plan{GitBin: "git", Version: "1.2.0", RootDir: dir}
 
 	_, floating, err := imageTags(context.Background(), p)
 	if err != nil {
@@ -126,7 +126,7 @@ func TestImageTagsForAStableReleaseCarriesChannelHistory(t *testing.T) {
 // another module's tags sharing the same repository.
 func TestChannelHistoryIgnoresOtherScopes(t *testing.T) {
 	dir := tagsRepo(t, "v1.0.0", "services/api/v1.0.0-rc.1")
-	p := &plan.Plan{RootDir: dir, Scope: discover.Scope{}}
+	p := &plan.Plan{GitBin: "git", RootDir: dir, Scope: discover.Scope{}}
 
 	channels, err := channelHistory(context.Background(), p)
 	if err != nil {
@@ -136,7 +136,7 @@ func TestChannelHistoryIgnoresOtherScopes(t *testing.T) {
 		t.Errorf("channels = %v, want none: the rc tag belongs to services/api", channels)
 	}
 
-	scoped := &plan.Plan{RootDir: dir, Scope: discover.Scope{Dir: "services/api", Prefix: "services/api/"}}
+	scoped := &plan.Plan{GitBin: "git", RootDir: dir, Scope: discover.Scope{Dir: "services/api", Prefix: "services/api/"}}
 	channels, err = channelHistory(context.Background(), scoped)
 	if err != nil {
 		t.Fatal(err)
