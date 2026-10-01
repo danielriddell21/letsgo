@@ -700,3 +700,29 @@ func TestCheckScopedWithNoChannelSkipsPrereleasesDraftsAndYanked(t *testing.T) {
 		t.Fatalf("update = %+v, want %sv1.1.0, the newest stable release in scope", update, prefix)
 	}
 }
+
+// A forge answering with something that is not a release must be reported,
+// not read as a release or as the absence of one.
+func TestCheckRejectsAMalformedForgeAnswer(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, tag, prefix, want string
+	}{
+		{"unparseable list", "not json", "", "services/api/", "parsing releases"},
+		{"tag with no release", "{}", "v1.0.0", "", "has no release v1.0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(server.Close)
+
+			_, err := selfupdate.Check(context.Background(), selfupdate.Options{
+				Repo: "you/tool", Current: "1.0.0", APIEndpoint: server.URL, OS: "linux", Arch: "amd64",
+				Tag: tc.tag, Prefix: tc.prefix,
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
