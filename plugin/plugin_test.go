@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -240,5 +241,50 @@ func TestMainExitsNonZeroForTheWrongHook(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), string(HookLDFlags)) {
 		t.Errorf("stderr = %q, want it to name the hook asked for", stderr.String())
+	}
+}
+
+func TestReadConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		files    map[string]string
+		dir      string
+		wantPath string
+		want     string
+		wantMiss bool
+	}{
+		{name: "config dir wins", files: map[string]string{".letsgo/env.mod": "new", "letsgo-env.mod": "old"}, dir: ".letsgo", wantPath: ".letsgo/env.mod", want: "new"},
+		{name: "legacy fallback", files: map[string]string{"letsgo-env.mod": "old"}, dir: ".letsgo", wantPath: "letsgo-env.mod", want: "old"},
+		{name: "empty dir uses legacy", files: map[string]string{".letsgo/env.mod": "new", "letsgo-env.mod": "old"}, dir: "", wantPath: "letsgo-env.mod", want: "old"},
+		{name: "neither exists", dir: ".letsgo", wantPath: "letsgo-env.mod", wantMiss: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			for p, c := range tt.files {
+				full := filepath.Join(root, p)
+				if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(c), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Chdir(root)
+
+			data, path, err := ReadConfig(tt.dir, "env")
+			if tt.wantMiss {
+				if !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("err = %v, want not-exist", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != tt.want || path != tt.wantPath {
+				t.Errorf("ReadConfig() = %q from %q, want %q from %q", data, path, tt.want, tt.wantPath)
+			}
+		})
 	}
 }
