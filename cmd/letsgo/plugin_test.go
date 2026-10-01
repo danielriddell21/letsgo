@@ -803,3 +803,17 @@ func TestVerifyPinnedFailsWhenTheInstalledBinaryIsNotThePin(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestRunPluginDirPrintsTheStore(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(pluginstore.StoreEnvOverride, dir)
+
+	out := captureStdout(t, func() {
+		if err := runPluginDir(nil); err != nil {
+			t.Error(err)
+		}
+	})
+	if got := strings.TrimSpace(out); got != dir {
+		t.Errorf("dir = %q, want %q", got, dir)
+	}
+}

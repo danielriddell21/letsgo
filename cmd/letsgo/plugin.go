@@ -59,6 +59,7 @@ usage:
   letsgo plugin install --link             also put the plugin on PATH, for running it by hand
   letsgo plugin list [--json]              the plugins this repository pins, and what is installed
   letsgo plugin list --available           the plugins letsgo publishes, and what each answers
+  letsgo plugin dir                        print the directory the plugins are installed in
   letsgo plugin prune                      remove store entries no pin in this repository references
 
 run a subcommand with -h for its options.
@@ -75,6 +76,8 @@ func runPlugin(args []string) error {
 		return runPluginInstall(args[1:])
 	case "list":
 		return runPluginList(args[1:])
+	case "dir":
+		return runPluginDir(args[1:])
 	case "prune":
 		return runPluginPrune(args[1:])
 	case "help", "-h", "--help":
@@ -462,6 +465,21 @@ func pinsByDigestAndName(cfg *config.Config) map[digestAndName]bool {
 		referenced[digestAndName{p.Digest, p.Command}] = true
 	}
 	return referenced
+}
+
+// runPluginDir prints where the plugin store is, so a cache step need not
+// know the platform's data directory.
+func runPluginDir(args []string) error {
+	fs := flag.NewFlagSet("plugin dir", flag.ExitOnError)
+	if err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	store, err := pluginstore.OpenReadOnly("", machineConfig().PluginsDir)
+	if err != nil {
+		return err
+	}
+	fmt.Println(store.Dir())
+	return nil
 }
 
 // runPluginPrune removes every store entry this repository's letsgo.mod does
