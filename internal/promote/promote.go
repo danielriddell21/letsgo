@@ -30,8 +30,9 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
+	"github.com/danielriddell21/letsgo/internal/releases"
+	"github.com/danielriddell21/letsgo/internal/releases/githubsource"
 	"github.com/danielriddell21/letsgo/internal/semver"
-	"github.com/danielriddell21/letsgo/internal/yank"
 )
 
 // Options describe a promotion.
@@ -215,7 +216,7 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 //
 // Split out of Run so that the refusal checks read as one block rather than
 // adding their own branch to the five-step pipeline's own complexity.
-func resolveRC(ctx context.Context, o Options, stableTag string) (*github.Release, *manifest.Manifest, string, error) {
+func resolveRC(ctx context.Context, o Options, stableTag string) (*releases.Published, *manifest.Manifest, string, error) {
 	rc, err := findRelease(ctx, o, o.RCTag)
 	if err != nil {
 		return nil, nil, "", err
@@ -226,7 +227,7 @@ func resolveRC(ctx context.Context, o Options, stableTag string) (*github.Releas
 	if rc.Draft {
 		return nil, nil, "", fmt.Errorf("promote: the release for %s is a draft; publish it before promoting", o.RCTag)
 	}
-	if yank.IsRetracted(rc.Body) {
+	if rc.Retracted() {
 		return nil, nil, "", fmt.Errorf("promote: %s is yanked and cannot be promoted", o.RCTag)
 	}
 
@@ -264,49 +265,35 @@ func stableTagFor(rcTag, prefix string) (string, error) {
 	return fmt.Sprintf("%sv%d.%d.%d", prefix, v.Major, v.Minor, v.Patch), nil
 }
 
-// findRelease looks a release up by tag, drafts included.
-//
-// ReleaseByTag and LatestRelease both exclude drafts, which is right for
-// almost everything that reads a release and wrong here: refusing a draft
-// RC (PR-14) requires seeing it in the first place.
-func findRelease(ctx context.Context, o Options, tag string) (*github.Release, error) {
-	releases, err := o.Client.ListReleases(ctx, o.Repo)
+// findRelease looks a release up by tag, drafts included, because refusing a
+// draft RC (PR-14) requires seeing it in the first place.
+func findRelease(ctx context.Context, o Options, tag string) (*releases.Published, error) {
+	release, err := releases.ByTagIncludingDrafts(ctx, &githubsource.Source{Client: o.Client, Repo: o.Repo}, tag)
 	if err != nil {
 		return nil, fmt.Errorf("promote: listing releases: %w", err)
 	}
-	for _, r := range releases {
-		if r.TagName == tag {
-			return &r, nil
-		}
-	}
-	return nil, nil
+	return release, nil
 }
 
 // fetchManifest downloads the RC's own manifest and the digest of exactly
 // those bytes, for promoted_from.manifest_sha256 and for step 2's commit.
-func fetchManifest(ctx context.Context, o Options, rc *github.Release) (*manifest.Manifest, string, error) {
-	asset, ok := rc.Asset(manifest.FileName)
-	if !ok {
+func fetchManifest(ctx context.Context, o Options, rc *releases.Published) (*manifest.Manifest, string, error) {
+	m, sum, err := releases.Manifest(ctx, &githubsource.Source{Client: o.Client, Repo: o.Repo}, rc)
+	if releases.IsNoManifest(err) {
 		return nil, "", fmt.Errorf(
 			"promote: the %s release has no %s; only a release letsgo published can be promoted",
-			rc.TagName, manifest.FileName)
+			rc.Tag, manifest.FileName)
 	}
-	data, err := o.Client.DownloadAsset(ctx, o.Repo, asset.ID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", fmt.Errorf("promote: reading %s's manifest: %w", rc.Tag, err)
 	}
-	m, err := manifest.Decode(data)
-	if err != nil {
-		return nil, "", fmt.Errorf("promote: decoding %s's manifest: %w", rc.TagName, err)
-	}
-	sum := sha256.Sum256(data)
-	return m, hex.EncodeToString(sum[:]), nil
+	return m, hex.EncodeToString(sum), nil
 }
 
 // restoreRC is step 1.
-func restoreRC(ctx context.Context, o Options, rc *github.Release) (*github.Release, error) {
+func restoreRC(ctx context.Context, o Options, rc *releases.Published) (*github.Release, error) {
 	updated, err := o.Client.UpdateRelease(ctx, o.Repo, rc.ID, github.ReleaseInput{
-		TagName:    rc.TagName,
+		TagName:    rc.Tag,
 		Name:       rc.Name,
 		Body:       rc.Body,
 		Draft:      rc.Draft,
@@ -314,7 +301,7 @@ func restoreRC(ctx context.Context, o Options, rc *github.Release) (*github.Rele
 		MakeLatest: "false",
 	})
 	if err != nil {
-		return nil, fmt.Errorf("promote: restoring %s: %w", rc.TagName, err)
+		return nil, fmt.Errorf("promote: restoring %s: %w", rc.Tag, err)
 	}
 	return updated, nil
 }
