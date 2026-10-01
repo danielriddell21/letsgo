@@ -26,6 +26,12 @@ type Position struct {
 
 func (p Position) String() string { return fmt.Sprintf("%d:%d", p.Line, p.Col) }
 
+// Span is the one-based, end-exclusive column range a word occupies on its
+// line, quotes included, so an editor can place a hover or an edit on it.
+type Span struct {
+	Col, End int
+}
+
 // Stmt is one statement in a file.
 type Stmt interface {
 	Pos() Position
@@ -37,6 +43,12 @@ type Line struct {
 	Args    []string
 	Comment string // trailing comment, without the leading "//"
 	P       Position
+
+	// KeywordSpan and ArgSpans locate the words of the line. A line inside a
+	// block takes its keyword from the block, so its KeywordSpan is empty and
+	// ArgSpans[0] starts at P.Col.
+	KeywordSpan Span
+	ArgSpans    []Span
 }
 
 func (l *Line) Pos() Position { return l.P }
@@ -52,6 +64,13 @@ type Block struct {
 	Lines   []*Line
 	Comment string // trailing comment on the opening line
 	P       Position
+
+	KeywordSpan Span
+	ArgSpans    []Span // of Args
+
+	// Close is where the closing parenthesis is, zero for a block the file
+	// ends inside, which only a lenient parse returns.
+	Close Position
 }
 
 func (b *Block) Pos() Position { return b.P }
@@ -77,6 +96,10 @@ type SyntaxError struct {
 	File string
 	Pos  Position
 	Msg  string
+
+	// Wrong and Suggest are set when the message offers a correction: the
+	// word as written and the one it probably meant.
+	Wrong, Suggest string
 }
 
 func (e *SyntaxError) Error() string {
@@ -109,6 +132,7 @@ func parseLine(file *File, name string, lineNo int, text string, open *Block) (*
 			return nil, err
 		}
 		if closed {
+			open.Close = Position{lineNo, tokens[0].pos.Col}
 			return nil, nil
 		}
 		return open, nil
@@ -146,10 +170,11 @@ func parseInBlock(name string, lineNo int, open *Block, tokens []token, comment 
 	}
 
 	open.Lines = append(open.Lines, &Line{
-		Keyword: open.Keyword,
-		Args:    args,
-		Comment: comment,
-		P:       Position{lineNo, tokens[0].pos.Col},
+		Keyword:  open.Keyword,
+		Args:     args,
+		Comment:  comment,
+		P:        Position{lineNo, tokens[0].pos.Col},
+		ArgSpans: spansOf(tokens),
 	})
 	return false, nil
 }
@@ -180,10 +205,12 @@ func parseStatement(name string, lineNo int, tokens []token, comment string) (St
 			named = append(named, tok.text)
 		}
 		return &Block{
-			Keyword: keyword,
-			Args:    named,
-			Comment: comment,
-			P:       Position{lineNo, tokens[0].pos.Col},
+			Keyword:     keyword,
+			Args:        named,
+			Comment:     comment,
+			P:           Position{lineNo, tokens[0].pos.Col},
+			KeywordSpan: tokens[0].span(),
+			ArgSpans:    spansOf(rest[:len(rest)-1]),
 		}, nil
 	}
 
@@ -196,16 +223,39 @@ func parseStatement(name string, lineNo int, tokens []token, comment string) (St
 	}
 
 	return &Line{
-		Keyword: keyword,
-		Args:    args,
-		Comment: comment,
-		P:       Position{lineNo, tokens[0].pos.Col},
+		Keyword:     keyword,
+		Args:        args,
+		Comment:     comment,
+		P:           Position{lineNo, tokens[0].pos.Col},
+		KeywordSpan: tokens[0].span(),
+		ArgSpans:    spansOf(rest),
 	}, nil
 }
 
-// Parse reads a configuration file.
+// Parse reads a configuration file, failing at the first line it cannot read.
 func Parse(name string, data []byte) (*File, error) {
+	file, errs := parseFile(name, data, false)
+	if len(errs) > 0 {
+		return nil, errs[0]
+	}
+	return file, nil
+}
+
+// ParseLenient reads as much of a file as it can: a line it cannot read is
+// skipped, and a block the file ends inside is kept, open. It returns the file
+// alongside the first error, for an editor, which must make sense of a file
+// halfway through being typed. A caller that acts on the config uses Parse.
+func ParseLenient(name string, data []byte) (*File, error) {
+	file, errs := parseFile(name, data, true)
+	if len(errs) > 0 {
+		return file, errs[0]
+	}
+	return file, nil
+}
+
+func parseFile(name string, data []byte, lenient bool) (*File, []error) {
 	file := &File{Name: name}
+	var errs []error
 
 	var open *Block
 	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
@@ -221,20 +271,35 @@ func Parse(name string, data []byte) (*File, error) {
 
 		next, err := parseLine(file, name, lineNo, text, open)
 		if err != nil {
-			return nil, err
+			errs = append(errs, err)
+			if !lenient {
+				return nil, errs
+			}
+			continue
 		}
 		open = next
 	}
 
 	if open != nil {
-		return nil, errAt(name, open.P, "%s ( is never closed", open.Keyword)
+		errs = append(errs, errAt(name, open.P, "%s ( is never closed", open.Keyword))
 	}
-	return file, nil
+	return file, errs
 }
 
 type token struct {
 	text string
 	pos  Position
+	end  int // column just past the token
+}
+
+func (t token) span() Span { return Span{Col: t.pos.Col, End: t.end} }
+
+func spansOf(tokens []token) []Span {
+	spans := make([]Span, len(tokens))
+	for i, t := range tokens {
+		spans[i] = t.span()
+	}
+	return spans
 }
 
 // tokenise splits one line into tokens and its trailing comment.
@@ -261,7 +326,7 @@ func tokenise(file string, lineNo int, text string) ([]token, string, error) {
 		// visible. An argument that genuinely contains a parenthesis has to be
 		// quoted, which is also true in go.mod.
 		if runes[i] == '(' || runes[i] == ')' {
-			tokens = append(tokens, token{text: string(runes[i]), pos: Position{lineNo, col}})
+			tokens = append(tokens, token{text: string(runes[i]), pos: Position{lineNo, col}, end: col + 1})
 			i++
 			continue
 		}
@@ -271,13 +336,13 @@ func tokenise(file string, lineNo int, text string) ([]token, string, error) {
 			if err != nil {
 				return nil, "", err
 			}
-			tokens = append(tokens, token{text: text, pos: Position{lineNo, col}})
+			tokens = append(tokens, token{text: text, pos: Position{lineNo, col}, end: next + 1})
 			i = next
 			continue
 		}
 
 		i = endOfBareToken(runes, i)
-		tokens = append(tokens, token{text: string(runes[start:i]), pos: Position{lineNo, col}})
+		tokens = append(tokens, token{text: string(runes[start:i]), pos: Position{lineNo, col}, end: i + 1})
 	}
 
 	return tokens, "", nil

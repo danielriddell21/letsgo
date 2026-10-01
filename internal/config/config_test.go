@@ -230,3 +230,65 @@ func TestCarriageReturnsAreHandled(t *testing.T) {
 		t.Errorf("CRLF input produced %+v", cfg)
 	}
 }
+
+func TestParseRecordsWordSpans(t *testing.T) {
+	f, err := Parse("letsgo.mod", []byte("plugin archive \"my plugin\" v1\nbuild x (\n\tlinux/amd64  arm\n)\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := f.Stmts[0].(*Line)
+	if line.KeywordSpan != (Span{1, 7}) {
+		t.Errorf("keyword span = %v, want {1 7}", line.KeywordSpan)
+	}
+	want := []Span{{8, 15}, {16, 27}, {28, 30}}
+	if len(line.ArgSpans) != len(want) {
+		t.Fatalf("arg spans = %v, want %v", line.ArgSpans, want)
+	}
+	for i, w := range want {
+		if line.ArgSpans[i] != w {
+			t.Errorf("arg span %d = %v, want %v", i, line.ArgSpans[i], w)
+		}
+	}
+
+	block := f.Stmts[1].(*Block)
+	if block.KeywordSpan != (Span{1, 6}) || len(block.ArgSpans) != 1 || block.ArgSpans[0] != (Span{7, 8}) || block.Close != (Position{4, 1}) {
+		t.Errorf("block = %+v", block)
+	}
+	inner := block.Lines[0]
+	if inner.ArgSpans[0] != (Span{2, 13}) || inner.ArgSpans[1] != (Span{15, 18}) {
+		t.Errorf("inner spans = %v", inner.ArgSpans)
+	}
+}
+
+func TestParseLenientKeepsWhatItCanRead(t *testing.T) {
+	f, err := ParseLenient("letsgo.mod", []byte("project foo\n)\nplugin (\n\tarchive x v1\n"))
+	var se *SyntaxError
+	if !errors.As(err, &se) || se.Pos.Line != 2 {
+		t.Fatalf("err = %v, want the stray ) on line 2", err)
+	}
+	if len(f.Stmts) != 2 {
+		t.Fatalf("stmts = %d, want 2", len(f.Stmts))
+	}
+	block := f.Stmts[1].(*Block)
+	if block.Close != (Position{}) || len(block.Lines) != 1 {
+		t.Errorf("block = %+v, want open with its line", block)
+	}
+	if _, err := Parse("letsgo.mod", []byte("project foo\n)\n")); err == nil {
+		t.Error("Parse accepted a stray )")
+	}
+}
+
+func TestUnknownNamesCarryTheSuggestion(t *testing.T) {
+	for _, src := range []string{"buidl x\n", "disable chnagelog\n"} {
+		_, err := Decode(parse(t, src))
+		var se *SyntaxError
+		if !errors.As(err, &se) || se.Wrong == "" || se.Suggest == "" {
+			t.Errorf("%q: err = %v, want a suggestion", src, err)
+		}
+	}
+	_, err := Decode(parse(t, "zzzzzzzz x\n"))
+	var se *SyntaxError
+	if !errors.As(err, &se) || se.Suggest != "" {
+		t.Errorf("err = %v, want no suggestion", err)
+	}
+}
