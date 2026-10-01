@@ -13,6 +13,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
+	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
@@ -101,9 +102,7 @@ type Result struct {
 // same test yank itself uses to avoid stacking a second notice: the two
 // tools must agree on what "retracted" means, and a second copy of this
 // check would be a second chance for them to disagree.
-func IsRetracted(body string) bool {
-	return strings.HasPrefix(body, "> [!CAUTION]")
-}
+func IsRetracted(body string) bool { return releases.IsRetracted(body) }
 
 // notice is prepended to the retracted release's description.
 const notice = "> [!CAUTION]\n" +

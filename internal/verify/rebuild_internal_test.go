@@ -1,11 +1,14 @@
 package verify
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/manifest"
+	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/releases"
 )
 
 // The manifest is the authority on layout, not the source tree. A release laid
@@ -161,5 +164,12 @@ func TestRebuildGroupsSeparatesAVariantFromTheReleaseItVaries(t *testing.T) {
 	}
 	if got := recordedTags(base.artifacts); len(got) != 0 {
 		t.Errorf("base tags = %q, want none", got)
+	}
+}
+
+func TestSourceFromArchiveWithoutSource(t *testing.T) {
+	_, err := SourceFromArchive(context.Background(), nil, github.Repo{}, &releases.Published{Tag: "v1.0.0"}, &manifest.Manifest{}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "published no source archive") {
+		t.Fatalf("err = %v", err)
 	}
 }

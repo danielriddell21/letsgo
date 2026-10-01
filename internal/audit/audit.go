@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -23,9 +22,9 @@ import (
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/manifest"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
-	"github.com/danielriddell21/letsgo/internal/semver"
+	"github.com/danielriddell21/letsgo/internal/releases"
+	"github.com/danielriddell21/letsgo/internal/releases/githubsource"
 	"github.com/danielriddell21/letsgo/internal/verify"
-	"github.com/danielriddell21/letsgo/internal/yank"
 )
 
 // Schema is the audit.json format version this letsgo writes.
@@ -129,7 +128,7 @@ func (r *Result) Report(w io.Writer) {
 // (same vulndb date and findings), so a re-run against an unchanged
 // database costs nothing to repeat.
 func Run(ctx context.Context, o Options) (*Result, error) {
-	release, err := o.Client.ReleaseByTag(ctx, o.Repo, o.Tag)
+	release, err := releases.ByTag(ctx, o.source(), o.Tag)
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +136,10 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		return nil, fmt.Errorf("audit: %s has no release tagged %s", o.Repo, o.Tag)
 	}
 	return auditRelease(ctx, o, release)
+}
+
+func (o Options) source() *githubsource.Source {
+	return &githubsource.Source{Client: o.Client, Repo: o.Repo}
 }
 
 // RunAll audits the newest non-retracted stable release of each major
@@ -147,44 +150,14 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 // than being skipped with a reason — that edge case is out of scope for
 // this phase.
 func RunAll(ctx context.Context, o Options) ([]*Result, error) {
-	releases, err := o.Client.ListReleases(ctx, o.Repo)
+	perMajor, err := releases.PerMajor(ctx, o.source(), discover.Scope{Prefix: o.Prefix})
 	if err != nil {
 		return nil, err
 	}
 
-	scope := discover.Scope{Prefix: o.Prefix}
-	type candidate struct {
-		release *github.Release
-		version semver.Version
-	}
-	best := map[int]candidate{}
-	for i := range releases {
-		release := &releases[i]
-		if release.Draft || yank.IsRetracted(release.Body) {
-			continue
-		}
-		rest, ok := scope.MatchesTag(release.TagName)
-		if !ok {
-			continue
-		}
-		v, ok := semver.Parse(rest)
-		if !ok || v.IsPrerelease() {
-			continue
-		}
-		if cur, exists := best[v.Major]; !exists || semver.Compare(v, cur.version) > 0 {
-			best[v.Major] = candidate{release: release, version: v}
-		}
-	}
-
-	majors := make([]int, 0, len(best))
-	for major := range best {
-		majors = append(majors, major)
-	}
-	sort.Ints(majors)
-
-	results := make([]*Result, 0, len(majors))
-	for _, major := range majors {
-		result, err := auditRelease(ctx, o, best[major].release)
+	results := make([]*Result, 0, len(perMajor))
+	for _, release := range perMajor {
+		result, err := auditRelease(ctx, o, release)
 		if err != nil {
 			return nil, err
 		}
@@ -199,14 +172,20 @@ func RunAll(ctx context.Context, o Options) ([]*Result, error) {
 // calls this once per major version against the same Options, and
 // SourceFromArchive rejects a directory that already holds another
 // release's extracted archive.
-func auditRelease(ctx context.Context, o Options, release *github.Release) (*Result, error) {
+func auditRelease(ctx context.Context, o Options, release *releases.Published) (*Result, error) {
 	// An immutable release cannot have audit.json attached or replaced, and
 	// an audit that cannot be recorded is not worth running.
 	if release.Immutable {
-		return &Result{Tag: release.TagName, Skipped: "the release is immutable, so audit.json cannot be recorded on it"}, nil
+		return &Result{Tag: release.Tag, Skipped: "the release is immutable, so audit.json cannot be recorded on it"}, nil
 	}
 
-	m, err := verify.FetchManifest(ctx, o.Client, o.Repo, release)
+	m, _, err := releases.Manifest(ctx, o.source(), release)
+	if releases.IsNoManifest(err) {
+		return nil, fmt.Errorf(
+			"verify: release %s has no %s, so there is nothing describing what it should contain\n"+
+				"  only releases published by letsgo can be verified",
+			release.Tag, manifest.FileName)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +222,7 @@ func auditRelease(ctx context.Context, o Options, release *github.Release) (*Res
 		return nil, err
 	}
 
-	result := &Result{Tag: release.TagName, Entry: entry}
+	result := &Result{Tag: release.Tag, Entry: entry}
 	if !shouldAppend(record, entry) {
 		return result, nil
 	}
@@ -289,10 +268,10 @@ func scansFor(m *manifest.Manifest) []gate.Scan {
 
 // loadRecord fetches a release's existing audit.json, or starts a fresh
 // one when the release has never been audited before.
-func loadRecord(ctx context.Context, o Options, release *github.Release) (*Record, error) {
+func loadRecord(ctx context.Context, o Options, release *releases.Published) (*Record, error) {
 	asset, ok := release.Asset(FileName)
 	if !ok {
-		return &Record{Schema: Schema, Tag: release.TagName}, nil
+		return &Record{Schema: Schema, Tag: release.Tag}, nil
 	}
 	data, err := o.Client.DownloadAsset(ctx, o.Repo, asset.ID)
 	if err != nil {
@@ -300,7 +279,7 @@ func loadRecord(ctx context.Context, o Options, release *github.Release) (*Recor
 	}
 	var record Record
 	if err := json.Unmarshal(data, &record); err != nil {
-		return nil, fmt.Errorf("audit: release %s has a %s that does not parse: %w", release.TagName, FileName, err)
+		return nil, fmt.Errorf("audit: release %s has a %s that does not parse: %w", release.Tag, FileName, err)
 	}
 	return &record, nil
 }
@@ -335,7 +314,7 @@ func equalFindings(a, b []Finding) bool {
 // There is no "update asset content" API, so this follows the same
 // delete-then-upload replace pattern internal/publish uses (AU-8: nothing
 // else about the release is touched).
-func saveRecord(ctx context.Context, o Options, release *github.Release, record *Record) error {
+func saveRecord(ctx context.Context, o Options, release *releases.Published, record *Record) error {
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return fmt.Errorf("audit: %w", err)

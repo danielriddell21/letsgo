@@ -213,7 +213,7 @@ func Manifest(ctx context.Context, d Downloader, p *Published) (*manifest.Manife
 	}
 	m, err := manifest.Decode(data)
 	if err != nil {
-		return nil, nil, fmt.Errorf("decoding %s's %s: %w", p.Tag, manifest.FileName, err)
+		return nil, nil, err
 	}
 	sum := sha256.Sum256(data)
 	return m, sum[:], nil
