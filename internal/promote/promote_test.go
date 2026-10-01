@@ -637,9 +637,19 @@ func TestRunRefusalConditions(t *testing.T) {
 			rcTag: "v1.3.0-rc.1",
 			setup: func(f *fakeForge) {
 				f.seedRC("v1.3.0-rc.1", []byte(`{}`))
+				// Somebody else's release: it carries no manifest of ours.
+				f.seedRC("v1.3.0", nil).assets = nil
+			},
+			want: "already exists and was not promoted from",
+		},
+		{
+			name:  "target whose manifest cannot be read",
+			rcTag: "v1.3.0-rc.1",
+			setup: func(f *fakeForge) {
+				f.seedRC("v1.3.0-rc.1", []byte(`{}`))
 				f.seedRC("v1.3.0", []byte(`{}`))
 			},
-			want: "already exists",
+			want: "reading v1.3.0's manifest",
 		},
 	}
 
@@ -662,6 +672,28 @@ func TestRunRefusalConditions(t *testing.T) {
 			assertForgeCalls(t, forge, 0, 0)
 		})
 	}
+}
+
+// PR-15: a promotion whose Publication failed leaves a stable release behind,
+// and promoting the same RC again resumes it instead of refusing.
+func TestRunResumesAPromotionThatAlreadyCreatedTheRelease(t *testing.T) {
+	dir := demoRepo(t, "v1.3.0-rc.1")
+	forge := seededForge(t, dir, "v1.3.0-rc.1")
+	client := forge.client()
+
+	first, err := runPromote(t, client, "v1.3.0-rc.1", dir)
+	if err != nil {
+		t.Fatalf("first promote.Run: %v", err)
+	}
+
+	second, err := runPromote(t, client, "v1.3.0-rc.1", dir)
+	if err != nil {
+		t.Fatalf("second promote.Run = %v, want it to resume", err)
+	}
+	if second.Published.Release.ID != first.Published.Release.ID {
+		t.Errorf("resume published release %d, want the existing %d", second.Published.Release.ID, first.Published.Release.ID)
+	}
+	assertForgeCalls(t, forge, 3, 1)
 }
 
 func TestRunNamesTheNotesItCouldNotBuild(t *testing.T) {

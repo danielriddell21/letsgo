@@ -228,7 +228,13 @@ func resolveRC(ctx context.Context, o Options, stableTag string) (*releases.Publ
 		return nil, nil, "", err
 	}
 	if existing != nil {
-		return nil, nil, "", fmt.Errorf("promote: %s already exists; refusing to run again", stableTag)
+		resumable, err := promotedFromRC(ctx, o, existing)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		if !resumable {
+			return nil, nil, "", fmt.Errorf("promote: %s already exists and was not promoted from %s; refusing to overwrite it", stableTag, o.RCTag)
+		}
 	}
 
 	rcManifest, rcManifestSHA256, err := fetchManifest(ctx, o, rc)
@@ -236,6 +242,22 @@ func resolveRC(ctx context.Context, o Options, stableTag string) (*releases.Publ
 		return nil, nil, "", err
 	}
 	return rc, rcManifest, rcManifestSHA256, nil
+}
+
+// promotedFromRC reports whether an existing stable release is an earlier
+// run of this same promotion, which makes a re-run a resume (PR-15) rather
+// than a conflict: its manifest says it was promoted from the RC being
+// promoted. A release with no manifest, or one promoted from elsewhere, is
+// somebody else's and is left alone.
+func promotedFromRC(ctx context.Context, o Options, existing *releases.Published) (bool, error) {
+	m, _, err := releases.Manifest(ctx, &githubsource.Source{Client: o.Client, Repo: o.Repo}, existing)
+	if releases.IsNoManifest(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("promote: reading %s's manifest: %w", existing.Tag, err)
+	}
+	return m.PromotedFrom != nil && m.PromotedFrom.Tag == o.RCTag, nil
 }
 
 // stableTagFor derives the target tag: the RC's own tag minus its prerelease
