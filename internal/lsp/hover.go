@@ -17,24 +17,25 @@ import (
 // restricted workspace, where nothing may touch the plugin store, PATH or the
 // go toolchain. Anywhere else it returns ok=false rather than guessing.
 func hoverAt(ctx context.Context, path, text string, pos Position, live bool, goBin string) (contents string, ok bool) {
-	lines := strings.Split(text, "\n")
-	if pos.Line < 0 || pos.Line >= len(lines) {
+	o := outlineOf(path, text)
+	d, found := o.byLine[pos.Line]
+	if !found {
 		return "", false
 	}
-	tokens := tokensOf(lines[pos.Line])
-	at := tokenAt(tokens, pos.Character)
-	if at < 0 {
+	at := d.wordAt(pos.Character)
+	onKeyword := d.onKeyword(pos.Character)
+	if at < 0 && !onKeyword {
 		return "", false
 	}
 
 	var parts []string
-	if at == 0 {
-		if doc, ok := directiveDoc(path, tokens[0].text); ok {
+	if onKeyword {
+		if doc, ok := directiveDoc(path, d.keyword); ok {
 			parts = append(parts, doc)
 		}
 	}
 	if live && kindOf(path) == kindRepo {
-		if state := liveHover(ctx, path, lines, pos.Line, tokens, at, goBin); state != "" {
+		if state := liveHover(ctx, path, o, pos.Line, d, at, goBin); state != "" {
 			parts = append(parts, state)
 		}
 	}
@@ -63,36 +64,27 @@ func directiveDoc(path, keyword string) (string, bool) {
 
 // liveHover is the machine-dependent half of a hover: a plugin pin's install
 // state from anywhere on its line, or whether the target under the cursor is
-// one the go toolchain can build. "" means there is nothing to add.
-func liveHover(ctx context.Context, path string, lines []string, lineNo int, tokens []token, at int, goBin string) string {
-	switch {
-	case tokens[0].text == "plugin":
-		pin, ok := pinOnLine(lines[lineNo])
-		if !ok {
-			return ""
-		}
+// one the go toolchain can build. at is the argument under the cursor, -1 on
+// the keyword. "" means there is nothing to add.
+func liveHover(ctx context.Context, path string, o outline, lineNo int, d directive, at int, goBin string) string {
+	if pin, ok := o.pin(lineNo); ok {
 		return fmt.Sprintf("`%s %s`: %s", pin.command, pin.version, checkPin(filepath.Dir(path), pin).detail)
-	case isTargetToken(tokens, at, openBlockKeyword(lines, lineNo)):
-		return targetHover(ctx, tokens[at].text, goBin)
+	}
+	if at >= 0 && isTargetWord(d, at) {
+		return targetHover(ctx, d.args[at].text, goBin)
 	}
 	return ""
 }
 
-// isTargetToken reports whether the word at index at names a goos/goarch
-// target: an argument of `build`, the first argument of `budget`, or any word
-// inside a `build ( ... )` block.
-func isTargetToken(tokens []token, at int, opener string) bool {
-	text := tokens[at].text
-	if text == "(" || text == ")" {
-		return false
-	}
-	switch {
-	case opener == "build":
+// isTargetWord reports whether argument at names a goos/goarch target: an
+// argument of `build` (on its own line or inside its block), or the first
+// argument of `budget`.
+func isTargetWord(d directive, at int) bool {
+	switch d.keyword {
+	case "build":
 		return true
-	case tokens[0].text == "build":
-		return at > 0
-	case tokens[0].text == "budget":
-		return at == 1
+	case "budget":
+		return at == 0
 	}
 	return false
 }

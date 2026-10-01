@@ -34,7 +34,7 @@ func (s *Server) moveActions(uri, text string, r Range) []CodeAction {
 	lines := strings.Split(text, "\n")
 	var actions []CodeAction
 	if s.canRename {
-		actions = append(actions, legacyConfigActions(uri, filepath.Dir(path), lines, r)...)
+		actions = append(actions, legacyConfigActions(uri, filepath.Dir(path), outlineOf(path, text), r)...)
 	}
 	return append(actions, globalDirectiveActions(uri, path, text, lines, r)...)
 }
@@ -44,11 +44,11 @@ func (s *Server) moveActions(uri, text string, r Range) []CodeAction {
 // .letsgo/<short name>.mod — the move plan's legacy-config warning asks for.
 // It stays silent when the new file already exists, since that is plan's
 // Fail and there is no telling which of the two to keep.
-func legacyConfigActions(uri, dir string, lines []string, r Range) []CodeAction {
+func legacyConfigActions(uri, dir string, o outline, r Range) []CodeAction {
 	var actions []CodeAction
 	seen := map[string]bool{}
-	for n := max(r.Start.Line, 0); n <= r.End.Line && n < len(lines); n++ {
-		pin, ok := pinOnLine(lines[n])
+	for n := max(r.Start.Line, 0); n <= min(r.End.Line, o.last); n++ {
+		pin, ok := o.pin(n)
 		if !ok || seen[pin.command] || strings.ContainsAny(pin.command, `/\`) {
 			continue
 		}

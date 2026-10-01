@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -39,22 +38,6 @@ type pinLine struct {
 	version       string
 	digest        string
 	start, endCol int // version start and digest end, as byte offsets in the line
-}
-
-// pinOnLine reads a single-line `plugin <hook> <command> <version> <digest>`
-// pin, or reports ok=false for anything else.
-func pinOnLine(line string) (pin pinLine, ok bool) {
-	fields := tokensOf(line)
-	if len(fields) != 5 || fields[0].text != "plugin" {
-		return pinLine{}, false
-	}
-	return pinLine{
-		command: fields[2].text,
-		version: fields[3].text,
-		digest:  fields[4].text,
-		start:   fields[3].start,
-		endCol:  fields[4].end,
-	}, true
 }
 
 // codeActionData rides on an unresolved action to the resolve request, which
@@ -112,9 +95,9 @@ func (s *Server) pinActions(uri, text string, r Range) ([]CodeAction, error) {
 	var actions []CodeAction
 	installs := 0
 	dir := filepath.Dir(uriToPath(uri))
-	lines := strings.Split(text, "\n")
-	for n := max(r.Start.Line, 0); n <= r.End.Line && n < len(lines); n++ {
-		pin, ok := pinOnLine(lines[n])
+	o := outlineOf(uriToPath(uri), text)
+	for n := max(r.Start.Line, 0); n <= min(r.End.Line, o.last); n++ {
+		pin, ok := o.pin(n)
 		if !ok {
 			continue
 		}
@@ -134,7 +117,7 @@ func (s *Server) pinActions(uri, text string, r Range) ([]CodeAction, error) {
 			installs++
 		}
 	}
-	if installs > 0 && len(pinsToInstall(dir, text, allPins)) > 1 {
+	if installs > 0 && len(pinsToInstall(dir, o, allPins)) > 1 {
 		actions = append(actions, installAction("Install all missing pinned plugins", installArgs{URI: uri, Line: allPins}))
 	}
 	return actions, nil
@@ -157,11 +140,7 @@ func (s *Server) handleCodeActionResolve(ctx context.Context, raw json.RawMessag
 	if !ok || !s.updatable(data.URI) {
 		return action, nil
 	}
-	lines := strings.Split(doc.text, "\n")
-	if data.Line < 0 || data.Line >= len(lines) {
-		return action, nil
-	}
-	pin, ok := pinOnLine(lines[data.Line])
+	pin, ok := outlineOf(uriToPath(data.URI), doc.text).pin(data.Line)
 	if !ok {
 		return action, nil // the line changed since the action was offered
 	}

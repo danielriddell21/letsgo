@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"sort"
-	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/feature"
@@ -11,69 +10,45 @@ import (
 	"github.com/danielriddell21/letsgo/internal/plugin"
 )
 
-// completionContext is what precedes the cursor on the current line: the
-// tokens already typed, and — when the cursor sits inside an unclosed block —
+// completionContext is what precedes the cursor: the directive being written
+// and the arguments already typed, and — when the cursor sits inside a block —
 // that block's keyword.
 type completionContext struct {
-	tokens      []string // complete tokens before the word being typed
+	tokens      []string // keyword, then each complete argument before the word being typed
 	blockOpener string   // "" outside any block
 }
 
-// lineContext works out where in the line the cursor sits: which tokens are
-// already complete, and whether the cursor is inside an open block, by
-// scanning every earlier line for an unbalanced "(".
-//
-// This is a token count, not a real parser state machine — good enough for
-// completion, where returning an item the client's own filtering then
-// discards costs nothing, but missing a genuine directive would.
-func lineContext(lines []string, lineNo, character int) completionContext {
-	line := ""
-	if lineNo >= 0 && lineNo < len(lines) {
-		line = lines[lineNo]
-	}
-	if character > len(line) {
-		character = len(line)
-	}
-	prefix := line[:character]
-
-	tokens := strings.Fields(prefix)
-	if len(tokens) > 0 && character > 0 && !isSpace(prefix[character-1]) {
-		// The cursor is inside or at the end of a word: that word is being
-		// typed, not yet a complete token of context.
-		tokens = tokens[:len(tokens)-1]
+// lineContext works out where the cursor sits from the parsed document. A line
+// inside a block takes the block's keyword as its own, so `disable (` offers
+// feature names on its lines the way `disable` does.
+func lineContext(o outline, lineNo, character int) completionContext {
+	lc := completionContext{blockOpener: o.blockAt(lineNo)}
+	if lc.blockOpener != "" {
+		lc.tokens = append(lc.tokens, lc.blockOpener)
 	}
 
-	return completionContext{tokens: tokens, blockOpener: openBlockKeyword(lines, lineNo)}
-}
-
-func isSpace(b byte) bool { return b == ' ' || b == '\t' }
-
-// openBlockKeyword returns the keyword of the block still open when line
-// lineNo starts, by counting parentheses on every earlier line.
-func openBlockKeyword(lines []string, lineNo int) string {
-	depth := 0
-	opener := ""
-	for i := 0; i < lineNo && i < len(lines); i++ {
-		fields := strings.Fields(lines[i])
-		for _, tok := range fields {
-			depth += strings.Count(tok, "(") - strings.Count(tok, ")")
-		}
-		if depth > 0 && opener == "" && len(fields) > 0 {
-			opener = fields[0]
-		}
-		if depth <= 0 {
-			opener = ""
+	d, ok := o.byLine[lineNo]
+	if !ok {
+		return lc
+	}
+	// A word the cursor is in or at the end of is being typed, not yet a
+	// complete token of context.
+	if !d.inBlock && d.kw.end < character {
+		lc.tokens = append(lc.tokens, d.kw.text)
+	}
+	for _, w := range d.args {
+		if w.end < character {
+			lc.tokens = append(lc.tokens, w.text)
 		}
 	}
-	return opener
+	return lc
 }
 
 // completions returns the completion list for one position in one document.
 // exec controls whether target completion may run `go tool dist list` — off
 // in --restricted mode, which runs nothing beyond the letsgo process itself.
 func completions(ctx context.Context, path, text string, lineNo, character int, exec bool, goBin string) []CompletionItem {
-	lines := strings.Split(text, "\n")
-	lc := lineContext(lines, lineNo, character)
+	lc := lineContext(outlineOf(path, text), lineNo, character)
 
 	if lc.blockOpener == "build" {
 		return targetCompletions(ctx, exec, goBin)

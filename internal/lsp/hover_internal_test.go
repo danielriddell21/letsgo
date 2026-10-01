@@ -27,6 +27,8 @@ func TestHoverAtDocs(t *testing.T) {
 		{"negative line", "letsgo.mod", "build linux/amd64\n", Position{-1, 0}, true, ""},
 		{"inside a comment", "letsgo.mod", "// build linux/amd64\n", Position{0, 10}, true, ""},
 		{"syntax-only file", ".letsgo/env.mod", "build linux/amd64\n", Position{0, 10}, true, ""},
+		{"block keyword", "letsgo.mod", "disable (\n  sbom\n)\n", Position{0, 3}, false, "disable"},
+		{"block entry has no directive doc", "letsgo.mod", "disable (\n  sbom\n)\n", Position{1, 3}, false, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
