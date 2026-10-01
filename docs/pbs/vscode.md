@@ -36,6 +36,7 @@ language server, and the `letsgo-vscode` extension.
 | ED-11 | In an untrusted workspace the extension MUST NOT run `plan`, tasks or plugins, and MUST start `lsp --restricted`. | 11 |
 | ED-12 | `lsp` MUST work with any LSP client (no VS Code-specific extensions required). | 12 |
 | ED-13 | Every `--json` output MUST carry `schema`, and field removals MUST bump it. | 13 |
+| ED-13a | `tag --json` MUST carry `ref`, the full scope-prefixed tag. With `--yes` it MUST create the tag and set `tagged`. `version --json` MUST carry `version` and `capabilities`, which a client MUST read instead of keeping its own version table. | 13 |
 | ED-14 | The extension MUST NOT publish releases or store tokens. | — |
 
 ## Errors and edge cases
@@ -43,7 +44,9 @@ language server, and the `letsgo-vscode` extension.
 - letsgo not found: one notification offering `go install`. No repeated
   errors.
 - A letsgo version older than the one with `--json`/`lsp`: the extension
-  lists which features are unavailable.
+  lists which features are unavailable. A binary that predates
+  `version --json` reports no capabilities, and the extension falls back to
+  the version number alone.
 - A plan timeout on save: the diagnostics from parsing stay; the plan
   diagnostics are marked stale.
 

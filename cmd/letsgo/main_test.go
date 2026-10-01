@@ -252,6 +252,67 @@ func TestRunTagCreatesAPrereleaseTag(t *testing.T) {
 	}
 }
 
+// --json --yes creates the tag and reports its full, scope-prefixed ref, so a
+// caller never scrapes prose for it; --json alone creates nothing.
+func TestRunTagJSONReportsTheRef(t *testing.T) {
+	repoDir, moduleDir := scopedModuleFixture(t)
+	t.Chdir(moduleDir)
+
+	tagsAtHead := func() string {
+		out, err := exec.Command("git", "-C", repoDir, "tag", "--points-at", "HEAD").CombinedOutput()
+		if err != nil {
+			t.Fatalf("git tag --points-at HEAD: %v\n%s", err, out)
+		}
+		return string(out)
+	}
+
+	dry := captureStdout(t, func() {
+		if err := runTag([]string{"--json"}); err != nil {
+			t.Fatalf("runTag --json: %v", err)
+		}
+	})
+	if !strings.Contains(dry, `"ref": "services/api/v0.1.0"`) || strings.Contains(dry, `"tagged"`) {
+		t.Errorf("dry run = %s, want the ref and no tagged flag", dry)
+	}
+	if strings.Contains(tagsAtHead(), "v0.1.0") {
+		t.Fatal("--json alone created a tag")
+	}
+
+	made := captureStdout(t, func() {
+		if err := runTag([]string{"--json", "--yes"}); err != nil {
+			t.Fatalf("runTag --json --yes: %v", err)
+		}
+	})
+	if !strings.Contains(made, `"ref": "services/api/v0.1.0"`) || !strings.Contains(made, `"tagged": true`) {
+		t.Errorf("created = %s, want the ref and tagged: true", made)
+	}
+	if !strings.Contains(tagsAtHead(), "services/api/v0.1.0") {
+		t.Error("--json --yes did not create the tag")
+	}
+}
+
+func TestRunVersionJSONListsCapabilities(t *testing.T) {
+	out := captureStdout(t, func() {
+		if err := runVersion([]string{"--json"}); err != nil {
+			t.Fatalf("runVersion: %v", err)
+		}
+	})
+	for _, want := range []string{`"schema": 1`, `"version": "` + version + `"`, `"tag-ref"`, `"lsp"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("version --json = %s, want %q", out, want)
+		}
+	}
+
+	plain := captureStdout(t, func() {
+		if err := runVersion(nil); err != nil {
+			t.Fatalf("runVersion: %v", err)
+		}
+	})
+	if strings.TrimSpace(plain) != "letsgo "+version {
+		t.Errorf("version = %q, want the one-line form", plain)
+	}
+}
+
 // commitAndTag writes a file, commits it, and (if tag is non-empty) tags the
 // commit — the shared pattern behind every test that moves HEAD past an
 // existing tag before letting runTag propose from a fresh, untagged commit.
