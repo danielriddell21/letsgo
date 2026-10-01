@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"slices"
+
+	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
 
 // Options configure a Server.
@@ -47,6 +49,25 @@ type Server struct {
 	docs         map[string]*document
 	shuttingDown bool
 	canRename    bool // the client said a workspace edit may rename files
+	supported    []gobuild.Target
+}
+
+// targetLister lists the targets the go toolchain can build for.
+type targetLister func(ctx context.Context) ([]gobuild.Target, error)
+
+// supportedTargets asks the toolchain once and remembers the answer for the
+// life of the server, which handles one request at a time. A failure is not
+// remembered, so a cancelled request does not poison the next one.
+func (s *Server) supportedTargets(ctx context.Context) ([]gobuild.Target, error) {
+	if s.supported != nil {
+		return s.supported, nil
+	}
+	list, err := gobuild.Supported(ctx, s.opts.GoBin)
+	if err != nil {
+		return nil, err
+	}
+	s.supported = list
+	return list, nil
 }
 
 // NewServer builds a Server reading requests from r and writing responses
@@ -262,7 +283,7 @@ func (s *Server) handleCompletion(ctx context.Context, raw json.RawMessage) (any
 		return []CompletionItem{}, nil
 	}
 	path := uriToPath(p.TextDocument.URI)
-	items := completions(ctx, path, doc.text, p.Position.Line, p.Position.Character, !s.opts.Restricted, s.opts.GoBin)
+	items := completions(ctx, path, doc.text, p.Position.Line, p.Position.Character, !s.opts.Restricted, s.supportedTargets)
 	if items == nil {
 		items = []CompletionItem{}
 	}
@@ -278,7 +299,7 @@ func (s *Server) handleHover(ctx context.Context, raw json.RawMessage) (any, err
 	if !ok {
 		return nil, nil
 	}
-	contents, ok := hoverAt(ctx, uriToPath(p.TextDocument.URI), doc.text, p.Position, !s.opts.Restricted, s.opts.GoBin, s.opts.PluginsDir)
+	contents, ok := hoverAt(ctx, uriToPath(p.TextDocument.URI), doc.text, p.Position, !s.opts.Restricted, s.supportedTargets, s.opts.PluginsDir)
 	if !ok {
 		return nil, nil
 	}

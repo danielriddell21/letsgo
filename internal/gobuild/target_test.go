@@ -2,6 +2,7 @@ package gobuild
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -73,6 +74,13 @@ func TestValidate(t *testing.T) {
 	// worth guiding rather than merely rejecting.
 	if !strings.Contains(err.Error(), "did you mean") {
 		t.Errorf("error offers no suggestion:\n%s", err)
+	}
+}
+
+func TestSupportedReportsAMissingToolchain(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-go")
+	if _, err := Supported(t.Context(), missing); err == nil {
+		t.Error("Supported with a missing go: want an error")
 	}
 }
 

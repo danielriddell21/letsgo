@@ -7,7 +7,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 )
 
 // ReleaseTargets is the default build matrix.
@@ -56,31 +55,26 @@ func ParseTargets(list []string) ([]Target, error) {
 	return out, nil
 }
 
-var (
-	supportedOnce sync.Once
-	supportedList []Target
-	supportedErr  error
-)
-
 // Supported returns every target the toolchain can build for, as reported by
 // the toolchain itself rather than a list we would have to keep current.
+//
+// Every call asks the toolchain: a caller that asks repeatedly, like a
+// long-lived server, keeps the answer itself.
 func Supported(ctx context.Context, goBin string) ([]Target, error) {
-	supportedOnce.Do(func() {
-		if goBin == "" {
-			goBin = "go"
+	if goBin == "" {
+		goBin = "go"
+	}
+	out, err := exec.CommandContext(ctx, goBin, "tool", "dist", "list").Output()
+	if err != nil {
+		return nil, fmt.Errorf("gobuild: listing supported targets: %w", err)
+	}
+	var targets []Target
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if target, err := ParseTarget(line); err == nil {
+			targets = append(targets, target)
 		}
-		out, err := exec.CommandContext(ctx, goBin, "tool", "dist", "list").Output()
-		if err != nil {
-			supportedErr = fmt.Errorf("gobuild: listing supported targets: %w", err)
-			return
-		}
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			if target, err := ParseTarget(line); err == nil {
-				supportedList = append(supportedList, target)
-			}
-		}
-	})
-	return supportedList, supportedErr
+	}
+	return targets, nil
 }
 
 // Validate reports any target the toolchain cannot build for.

@@ -6,7 +6,6 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/feature"
-	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 )
 
@@ -47,20 +46,20 @@ func lineContext(o outline, lineNo, character int) completionContext {
 // completions returns the completion list for one position in one document.
 // exec controls whether target completion may run `go tool dist list` — off
 // in --restricted mode, which runs nothing beyond the letsgo process itself.
-func completions(ctx context.Context, path, text string, lineNo, character int, exec bool, goBin string) []CompletionItem {
+func completions(ctx context.Context, path, text string, lineNo, character int, exec bool, targets targetLister) []CompletionItem {
 	lc := lineContext(outlineOf(path, text), lineNo, character)
 
 	if lc.blockOpener == "build" {
-		return targetCompletions(ctx, exec, goBin)
+		return targetCompletions(ctx, exec, targets)
 	}
 
 	switch len(lc.tokens) {
 	case 0:
 		return directiveCompletions(path)
 	case 1:
-		return argumentCompletions(ctx, lc.tokens[0], nil, exec, goBin)
+		return argumentCompletions(ctx, lc.tokens[0], nil, exec, targets)
 	default:
-		return argumentCompletions(ctx, lc.tokens[0], lc.tokens[1:], exec, goBin)
+		return argumentCompletions(ctx, lc.tokens[0], lc.tokens[1:], exec, targets)
 	}
 }
 
@@ -81,10 +80,10 @@ func directiveCompletions(path string) []CompletionItem {
 	return items
 }
 
-func argumentCompletions(ctx context.Context, keyword string, priorArgs []string, exec bool, goBin string) []CompletionItem {
+func argumentCompletions(ctx context.Context, keyword string, priorArgs []string, exec bool, targets targetLister) []CompletionItem {
 	switch keyword {
 	case "build":
-		return targetCompletions(ctx, exec, goBin)
+		return targetCompletions(ctx, exec, targets)
 	case "plugin":
 		if len(priorArgs) == 0 {
 			return hookCompletions()
@@ -99,16 +98,16 @@ func argumentCompletions(ctx context.Context, keyword string, priorArgs []string
 	}
 }
 
-func targetCompletions(ctx context.Context, exec bool, goBin string) []CompletionItem {
+func targetCompletions(ctx context.Context, exec bool, targets targetLister) []CompletionItem {
 	if !exec {
 		return nil
 	}
-	targets, err := gobuild.Supported(ctx, goBin)
+	list, err := targets(ctx)
 	if err != nil {
 		return nil
 	}
-	items := make([]CompletionItem, 0, len(targets))
-	for _, t := range targets {
+	items := make([]CompletionItem, 0, len(list))
+	for _, t := range list {
 		items = append(items, CompletionItem{Label: t.String(), Kind: CompletionValue})
 	}
 	return items

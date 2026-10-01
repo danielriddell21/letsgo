@@ -4,6 +4,8 @@ import (
 	"context"
 	"slices"
 	"testing"
+
+	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
 
 func TestLineContext(t *testing.T) {
@@ -61,7 +63,7 @@ func TestLineContextInsideABlock(t *testing.T) {
 
 func TestCompletionsInsideABlockOfFeatures(t *testing.T) {
 	for _, keyword := range []string{"disable", "require"} {
-		items := completions(context.Background(), "letsgo.mod", keyword+" (\n  \n)\n", 1, 2, false, "")
+		items := completions(context.Background(), "letsgo.mod", keyword+" (\n  \n)\n", 1, 2, false, goTargets)
 		if len(items) == 0 {
 			t.Fatalf("%s block: no completions", keyword)
 		}
@@ -75,14 +77,14 @@ func TestCompletionsInsideABlockOfFeatures(t *testing.T) {
 
 func TestCompletionsInsideABuildBlockOffersTargets(t *testing.T) {
 	text := "build (\n  \n)\n"
-	items := completions(context.Background(), "letsgo.mod", text, 1, 2, false, "")
+	items := completions(context.Background(), "letsgo.mod", text, 1, 2, false, goTargets)
 	if items != nil {
 		t.Errorf("items = %+v, want nil: exec is false, so no subprocess should run", items)
 	}
 }
 
 func TestCompletionsWithNoTokensOffersDirectives(t *testing.T) {
-	items := completions(context.Background(), "letsgo.mod", "", 0, 0, false, "")
+	items := completions(context.Background(), "letsgo.mod", "", 0, 0, false, goTargets)
 	found := false
 	for _, item := range items {
 		if item.Label == "build" {
@@ -98,7 +100,7 @@ func TestCompletionsWithNoTokensOffersDirectives(t *testing.T) {
 }
 
 func TestCompletionsWithNoTokensOffersGlobalDirectivesForConfigMod(t *testing.T) {
-	items := completions(context.Background(), "config.mod", "", 0, 0, false, "")
+	items := completions(context.Background(), "config.mod", "", 0, 0, false, goTargets)
 	found := false
 	for _, item := range items {
 		if item.Label == "go" {
@@ -114,7 +116,7 @@ func TestCompletionsWithNoTokensOffersGlobalDirectivesForConfigMod(t *testing.T)
 }
 
 func TestArgumentCompletionsForPlugin(t *testing.T) {
-	items := argumentCompletions(context.Background(), "plugin", nil, false, "")
+	items := argumentCompletions(context.Background(), "plugin", nil, false, goTargets)
 	found := false
 	for _, item := range items {
 		if item.Label == "archive-layout" {
@@ -127,7 +129,7 @@ func TestArgumentCompletionsForPlugin(t *testing.T) {
 }
 
 func TestArgumentCompletionsForPluginNameFiltersByHook(t *testing.T) {
-	items := argumentCompletions(context.Background(), "plugin", []string{"ldflags"}, false, "")
+	items := argumentCompletions(context.Background(), "plugin", []string{"ldflags"}, false, goTargets)
 	if len(items) == 0 {
 		t.Fatal("items is empty, want at least letsgo-env")
 	}
@@ -139,14 +141,14 @@ func TestArgumentCompletionsForPluginNameFiltersByHook(t *testing.T) {
 }
 
 func TestArgumentCompletionsForPluginNameFallsBackToEveryKnownPlugin(t *testing.T) {
-	items := argumentCompletions(context.Background(), "plugin", []string{"not-a-real-hook"}, false, "")
+	items := argumentCompletions(context.Background(), "plugin", []string{"not-a-real-hook"}, false, goTargets)
 	if len(items) < 2 {
 		t.Errorf("items = %+v, want every known plugin as a fallback", items)
 	}
 }
 
 func TestArgumentCompletionsForDisableOffersDisableableFeatures(t *testing.T) {
-	items := argumentCompletions(context.Background(), "disable", nil, false, "")
+	items := argumentCompletions(context.Background(), "disable", nil, false, goTargets)
 	if len(items) == 0 {
 		t.Fatal("items is empty, want at least one disableable feature")
 	}
@@ -158,34 +160,39 @@ func TestArgumentCompletionsForDisableOffersDisableableFeatures(t *testing.T) {
 }
 
 func TestArgumentCompletionsForUnknownKeywordReturnsNil(t *testing.T) {
-	if items := argumentCompletions(context.Background(), "not-a-real-directive", nil, false, ""); items != nil {
+	if items := argumentCompletions(context.Background(), "not-a-real-directive", nil, false, goTargets); items != nil {
 		t.Errorf("items = %+v, want nil", items)
 	}
 }
 
 func TestArgumentCompletionsForBuildOffersTargets(t *testing.T) {
-	items := argumentCompletions(context.Background(), "build", nil, true, "")
+	items := argumentCompletions(context.Background(), "build", nil, true, goTargets)
 	if len(items) == 0 {
 		t.Fatal("items is empty, want the toolchain's supported targets")
 	}
 }
 
 func TestArgumentCompletionsForRequireOffersRequireableFeatures(t *testing.T) {
-	items := argumentCompletions(context.Background(), "require", nil, false, "")
+	items := argumentCompletions(context.Background(), "require", nil, false, goTargets)
 	if len(items) == 0 {
 		t.Fatal("items is empty, want at least one requireable feature")
 	}
 }
 
 func TestTargetCompletionsIsEmptyWhenNotExec(t *testing.T) {
-	if items := targetCompletions(context.Background(), false, ""); items != nil {
+	if items := targetCompletions(context.Background(), false, goTargets); items != nil {
 		t.Errorf("items = %+v, want nil in restricted mode", items)
 	}
 }
 
 func TestTargetCompletionsListsTheHostToolchainsTargets(t *testing.T) {
-	items := targetCompletions(context.Background(), true, "")
+	items := targetCompletions(context.Background(), true, goTargets)
 	if len(items) == 0 {
 		t.Fatal("items is empty, want the toolchain's supported targets")
 	}
+}
+
+// goTargets lists targets from the go on PATH, as a server with no GoBin does.
+func goTargets(ctx context.Context) ([]gobuild.Target, error) {
+	return gobuild.Supported(ctx, "")
 }
