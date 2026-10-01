@@ -12,6 +12,10 @@ _Avoid_: Dry run, preview
 A versioned set of built artefacts produced from a Plan for one tag.
 _Avoid_: Build, deployment
 
+**Published Release**:
+A Release as it exists on the forge after a Publication: its tag, its assets and its Manifest. What `verify`, `diff`, `audit`, `promote` and `yank` read back. A draft or pre-release is still a Published Release.
+_Avoid_: Forge release, remote release
+
 **Publication**:
 The act of making a built Release available: the forge release, the checksum and proxy gate, the Homebrew tap formula and the container images. It starts from a built Release and does not include the build.
 _Avoid_: Deploy, upload, push
