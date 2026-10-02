@@ -1,6 +1,6 @@
 # ADR-0021: Plan/apply enforcement moves into an internal Apply module
 
-- Status: accepted
+- Status: accepted, amended by [ADR-0026](0026-releaser-owns-the-release-flow.md)
 - Date: 2026-09-30
 - Issue: [#148](https://github.com/danielriddell21/letsgo/issues/148)
 
