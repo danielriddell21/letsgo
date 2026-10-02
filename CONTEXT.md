@@ -36,6 +36,18 @@ _Avoid_: Lockfile
 The `letsgo.mod` file where a project states how its releases are made.
 _Avoid_: Settings
 
+**Plugin**:
+A separate binary, pinned by digest in letsgo.mod, that answers one or more Hooks. It never sees a token, and `verify` never runs it.
+_Avoid_: Extension, add-on
+
+**Hook**:
+A point in a Release where letsgo asks a Plugin a question and records the answer: `ldflags`, `archive-layout` or `tap-files`.
+_Avoid_: Callback, event
+
+**Plugin config**:
+A Plugin's own `.letsgo/<name>.mod`, written in the same syntax as the Config. A legacy `letsgo-<name>.mod` at the repository root is still read.
+_Avoid_: Plugin settings
+
 **Tap**:
 The Homebrew repository that holds a project's formula.
 _Avoid_: Brew repo

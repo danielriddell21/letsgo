@@ -1,6 +1,6 @@
 # ADR-0023: Plugins stay separate binaries; they share core's wire contract, not its code
 
-- Status: accepted
+- Status: accepted, amended by [ADR-0025](0025-core-owns-plugin-config-syntax.md)
 - Date: 2026-09-30
 - Issue: [#150](https://github.com/danielriddell21/letsgo/issues/150)
 - Amends: [ADR-0003](0003-plugin-logic-in-core-thin-mains.md)
