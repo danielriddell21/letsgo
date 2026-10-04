@@ -124,7 +124,7 @@ func Build(t *testing.T, module, tag string) (dist string, result *release.Resul
 	}
 
 	dist = t.TempDir()
-	result, err = release.Build(ctx, p, dist, "test", nil, nil)
+	result, err = release.Build(ctx, release.BuildOptions{Plan: p, Dir: dist, ToolVersion: "test"})
 	if err != nil {
 		t.Fatalf("release.Build: %v", err)
 	}

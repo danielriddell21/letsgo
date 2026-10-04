@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/build"
-	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/manifest"
+	pub "github.com/danielriddell21/letsgo/plugin"
 )
 
 // applyTapFilesPlugin asks the tap-files plugin what else belongs in the
@@ -28,14 +28,14 @@ import (
 // the manifest included — is even written to disk.
 //
 // info is the repository's description, licence and homepage, already read
-// from the forge by the caller — nil when there is none to read, which
+// from the forge by the caller — zero when there is none to read, which
 // leaves those fields empty rather than failing the release over them.
-func applyTapFilesPlugin(ctx context.Context, p *plan.Plan, artifacts []build.Artifact, info *github.RepoInfo) ([]plugin.TapFile, error) {
+func applyTapFilesPlugin(ctx context.Context, p *plan.Plan, artifacts []build.Artifact, info RepoInfo) ([]plugin.TapFile, error) {
 	configured, ok := p.Plugins[plugin.HookTapFiles]
 	if !ok {
 		return nil, nil
 	}
-	if p.Tap == (github.Repo{}) {
+	if !p.HasTap() {
 		return nil, fmt.Errorf("release: %s answers tap-files, but no Homebrew tap is configured (`brew` directive)",
 			configured.Command)
 	}
@@ -67,24 +67,22 @@ func RunTapFiles(ctx context.Context, configured plugin.Plugin, rootDir, plugins
 
 // tapFilesInput assembles the tap-files hook's input from what the release
 // already knows: the same facts a Homebrew formula is written from.
-func tapFilesInput(p *plan.Plan, artifacts []build.Artifact, info *github.RepoInfo) plugin.TapFilesInput {
-	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
+func tapFilesInput(p *plan.Plan, artifacts []build.Artifact, info RepoInfo) plugin.TapFilesInput {
+	repo := p.Repo.Owner + "/" + p.Repo.Name
 
 	in := plugin.TapFilesInput{
 		Project:   p.Project,
 		Version:   p.Version,
 		Tag:       p.Tag,
-		Repo:      repo.String(),
+		Repo:      repo,
 		Tap:       p.Tap.String(),
-		Homepage:  "https://github.com/" + repo.String(),
+		Homepage:  "https://github.com/" + repo,
 		Caveats:   p.BrewCaveats(),
 		Artifacts: make([]plugin.TapArtifact, 0, len(artifacts)),
 	}
-	if info != nil {
-		in.Description, in.License = info.Description, info.License
-		if info.Homepage != "" {
-			in.Homepage = info.Homepage
-		}
+	in.Description, in.License = info.Description, info.License
+	if info.Homepage != "" {
+		in.Homepage = info.Homepage
 	}
 
 	for _, a := range artifacts {
@@ -98,7 +96,7 @@ func tapFilesInput(p *plan.Plan, artifacts []build.Artifact, info *github.RepoIn
 			OS:       a.OS,
 			Arch:     a.Arch,
 			SHA256:   a.ArchiveSHA256,
-			URL:      github.DownloadURL(repo, p.Tag, a.Archive),
+			URL:      pub.DownloadURL(repo, p.Tag, a.Archive),
 			Binaries: binaries,
 		})
 	}

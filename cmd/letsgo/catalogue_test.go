@@ -310,7 +310,7 @@ func builtFile(name string) func(*testing.T, []string) bool {
 	return func(t *testing.T, disabled []string) bool {
 		t.Helper()
 		p := resolvePlan(t, linuxTarget()+directives(disabled, nil), nil, plan.Options{})
-		result, err := release.Build(context.Background(), p, filepath.Join(t.TempDir(), "dist"), "test", nil, nil)
+		result, err := release.Build(context.Background(), release.BuildOptions{Plan: p, Dir: filepath.Join(t.TempDir(), "dist"), ToolVersion: "test"})
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}

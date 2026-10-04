@@ -8,9 +8,9 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/feature"
-	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	pub "github.com/danielriddell21/letsgo/plugin"
 )
 
 // writeInstaller generates the self-verifying installer and returns its name
@@ -41,7 +41,7 @@ func writeInstaller(p *plan.Plan, artifacts []build.Artifact, dir string) (strin
 		Project: p.Project,
 		Version: p.Version,
 		BaseURL: strings.TrimSuffix(
-			github.DownloadURL(github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}, p.Tag, ""), "/"),
+			pub.DownloadURL(p.Repo.Owner+"/"+p.Repo.Name, p.Tag, ""), "/"),
 		Targets: targets,
 	})
 	if err != nil {

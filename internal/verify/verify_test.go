@@ -132,7 +132,7 @@ func buildReleaseWithConfig(t *testing.T, letsgoMod string) *published {
 	}
 
 	dist := t.TempDir()
-	result, err := release.Build(context.Background(), p, dist, "test", nil, nil)
+	result, err := release.Build(context.Background(), release.BuildOptions{Plan: p, Dir: dist, ToolVersion: "test"})
 	if err != nil {
 		t.Fatalf("release.Build: %v", err)
 	}
@@ -545,7 +545,7 @@ func TestMonorepoRootAndNestedModuleReleaseAndVerifyIndependently(t *testing.T) 
 			t.Fatalf("plan(%s): %v %+v", modDir, err, p.Checks)
 		}
 		dist := t.TempDir()
-		result, err := release.Build(context.Background(), p, dist, "test", nil, nil)
+		result, err := release.Build(context.Background(), release.BuildOptions{Plan: p, Dir: dist, ToolVersion: "test"})
 		if err != nil {
 			t.Fatalf("release.Build(%s): %v", modDir, err)
 		}

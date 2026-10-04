@@ -6,12 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/oci/ocitest"
+
 	"github.com/danielriddell21/letsgo/internal/oci"
 )
 
 // seedBase puts a two-platform base image into the fake registry and returns
 // its repository.
-func seedBase(t *testing.T, fake *fakeRegistry) string {
+func seedBase(t *testing.T, fake *ocitest.Registry) string {
 	t.Helper()
 	const repo = "distroless/static"
 
@@ -40,11 +42,11 @@ func seedBase(t *testing.T, fake *fakeRegistry) string {
 			t.Fatal(err)
 		}
 
-		fake.mu.Lock()
-		fake.blobs[repo+"/"+string(oci.DigestOf(layer))] = layer
-		fake.blobs[repo+"/"+string(oci.DigestOf(config))] = config
-		fake.manifests[repo+"/"+string(oci.DigestOf(manifest))] = manifest
-		fake.mu.Unlock()
+		fake.Mu.Lock()
+		fake.Blobs[repo+"/"+string(oci.DigestOf(layer))] = layer
+		fake.Blobs[repo+"/"+string(oci.DigestOf(config))] = config
+		fake.Manifests[repo+"/"+string(oci.DigestOf(manifest))] = manifest
+		fake.Mu.Unlock()
 
 		manifests = append(manifests, oci.Descriptor{
 			MediaType: oci.MediaTypeManifest,
@@ -69,15 +71,15 @@ func seedBase(t *testing.T, fake *fakeRegistry) string {
 		t.Fatal(err)
 	}
 
-	fake.mu.Lock()
-	fake.manifests[repo+"/nonroot"] = index
-	fake.mu.Unlock()
+	fake.Mu.Lock()
+	fake.Manifests[repo+"/nonroot"] = index
+	fake.Mu.Unlock()
 
 	return repo
 }
 
 func TestResolveBaseSelectsThePlatform(t *testing.T) {
-	fake := newFakeRegistry(t)
+	fake := ocitest.New(t)
 	repo := seedBase(t, fake)
 
 	ref, err := oci.ParseReference("gcr.io/" + repo + ":nonroot")
@@ -85,7 +87,7 @@ func TestResolveBaseSelectsThePlatform(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	base, err := oci.ResolveBase(context.Background(), fake.client(), ref,
+	base, err := oci.ResolveBase(context.Background(), fake.Client(), ref,
 		oci.Platform{OS: "linux", Architecture: "arm64"})
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +110,7 @@ func TestResolveBaseSelectsThePlatform(t *testing.T) {
 }
 
 func TestResolveBaseReportsAMissingPlatform(t *testing.T) {
-	fake := newFakeRegistry(t)
+	fake := ocitest.New(t)
 	repo := seedBase(t, fake)
 
 	ref, err := oci.ParseReference("gcr.io/" + repo + ":nonroot")
@@ -116,7 +118,7 @@ func TestResolveBaseReportsAMissingPlatform(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = oci.ResolveBase(context.Background(), fake.client(), ref,
+	_, err = oci.ResolveBase(context.Background(), fake.Client(), ref,
 		oci.Platform{OS: "linux", Architecture: "riscv64"})
 	if err == nil {
 		t.Fatal("want an error for a platform the base does not have")
@@ -130,9 +132,9 @@ func TestResolveBaseReportsAMissingPlatform(t *testing.T) {
 // End to end: resolve a base, stack on it, push, and confirm the base's layers
 // arrived alongside ours.
 func TestBaseStackedAndPushed(t *testing.T) {
-	fake := newFakeRegistry(t)
+	fake := ocitest.New(t)
 	repo := seedBase(t, fake)
-	reg := fake.client()
+	reg := fake.Client()
 
 	ref, err := oci.ParseReference("gcr.io/" + repo + ":nonroot")
 	if err != nil {
@@ -160,11 +162,11 @@ func TestBaseStackedAndPushed(t *testing.T) {
 	}
 
 	for _, layer := range base.Layers {
-		if !fake.has("you/tool", layer.Digest) {
+		if !fake.Has("you/tool", layer.Digest) {
 			t.Errorf("base layer %s never reached the target", layer.Digest.Short())
 		}
 	}
-	if !fake.has("you/tool", img.Layer.Digest) {
+	if !fake.Has("you/tool", img.Layer.Digest) {
 		t.Error("our own layer never reached the target")
 	}
 }

@@ -1,8 +1,10 @@
-package release
+package publication
 
 import (
 	"fmt"
 	"testing"
+
+	"github.com/danielriddell21/letsgo/internal/release"
 
 	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/semver"
@@ -17,7 +19,7 @@ func TestObserveTag(t *testing.T) {
 	releasing, _ := semver.Parse("1.2.0")
 	current := map[string]string{"1.2.0": "1.2.0", "1": "1.1.0", "2": "1.3.0"}
 	f := newFakeManifests(t, current)
-	built := ImageBuild{Registry: "ghcr.io", Repository: "you/tool"}
+	built := release.ImageBuild{Registry: "ghcr.io", Repository: "you/tool"}
 	same := string(oci.DigestOf([]byte(indexBody("1.2.0"))))
 
 	tests := []struct {
@@ -57,7 +59,7 @@ func TestObserveTag(t *testing.T) {
 }
 
 func TestObserveImagesRejectsAVersionItCannotCompare(t *testing.T) {
-	_, err := ObserveImages(t.Context(), []ImageBuild{{
+	_, err := ObserveImages(t.Context(), []release.ImageBuild{{
 		APIHost: "127.0.0.1:1", Repository: "you/tool", Version: "not-a-version", Floating: []string{"latest"},
 	}}, "")
 	if err == nil {

@@ -297,3 +297,15 @@ func imageRecords(builds []ImageBuild) []manifest.Image {
 	}
 	return out
 }
+
+// Describe renders what was assembled, for a build that is not publishing.
+func Describe(builds []ImageBuild) string {
+	if len(builds) == 0 {
+		return ""
+	}
+	out := ""
+	for _, b := range builds {
+		out += fmt.Sprintf("  %s  %s\n", b.Reference(), b.Index.Digest)
+	}
+	return out
+}

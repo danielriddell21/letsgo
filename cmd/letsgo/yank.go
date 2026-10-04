@@ -81,7 +81,7 @@ func previousRelease(ctx context.Context, client *github.Client, repo github.Rep
 // release path separates them: rolling a formula back writes to the tap only.
 func tapFor(o *yank.Options, moduleDir string, client *github.Client) {
 	p, err := plan.Resolve(context.Background(), plan.Options{Dir: moduleDir, Snapshot: true, AllowDirty: true})
-	if err != nil || p.Tap == (github.Repo{}) {
+	if err != nil || !p.HasTap() {
 		return
 	}
 	o.Tap, o.TapAPI, o.TapFilesPlugin = p.Tap, client, p.Plugins[plugin.HookTapFiles]

@@ -38,8 +38,9 @@ func Diff(ctx context.Context, p *plan.Plan, o Options) (*apply.Diff, error) {
 
 	info := RepoInfo(ctx, o.Clients.Read, p, o.Log)
 
-	result, err := release.Build(ctx, p, dir, o.ToolVersion, info, func(format string, args ...any) {
-		o.log("    ! "+format, args...)
+	result, err := release.Build(ctx, release.BuildOptions{
+		Plan: p, Dir: dir, ToolVersion: o.ToolVersion, Repo: publication.ReleaseRepoInfo(info),
+		Warnf: func(format string, args ...any) { o.log("    ! "+format, args...) },
 	})
 	if err != nil {
 		return nil, fmt.Errorf("letsgo: %w", err)
