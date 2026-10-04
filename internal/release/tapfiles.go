@@ -105,46 +105,6 @@ func tapFilesInput(p *plan.Plan, artifacts []build.Artifact, info *github.RepoIn
 	return in
 }
 
-// TapFilesInputFromManifest rebuilds the tap-files hook's input from a
-// previously published release's manifest, for yank: the plugin is asked the
-// same question about a release that already happened, so its cask can be
-// rolled back exactly as the formula is.
-//
-// Unlike a fresh release, there is no repository description or licence to
-// carry: the formula's rollback is handed them by its caller, but the cask's
-// input has no place for them, and yank should not need the forge to answer a
-// question about bytes already published.
-func TapFilesInputFromManifest(m *manifest.Manifest, repo, tap github.Repo, caveats string) plugin.TapFilesInput {
-	tag := m.Tag
-	if tag == "" {
-		tag = "v" + m.Version
-	}
-
-	in := plugin.TapFilesInput{
-		Project:   m.Project,
-		Version:   m.Version,
-		Tag:       tag,
-		Repo:      repo.String(),
-		Tap:       tap.String(),
-		Homepage:  "https://" + repo.String(),
-		Caveats:   caveats,
-		Artifacts: make([]plugin.TapArtifact, 0, len(m.Artifacts)),
-	}
-
-	for _, a := range m.Artifacts {
-		in.Artifacts = append(in.Artifacts, plugin.TapArtifact{
-			Archive:  a.Name,
-			Variant:  a.Variant,
-			OS:       a.OS,
-			Arch:     a.Arch,
-			SHA256:   a.SHA256,
-			URL:      github.DownloadURL(repo, tag, a.Name),
-			Binaries: a.BinaryNames(),
-		})
-	}
-	return in
-}
-
 // validateTapFiles checks what a tap-files plugin answered before anything is
 // written: the plugin decides what goes in the tap, not where in the
 // repository it may write.
