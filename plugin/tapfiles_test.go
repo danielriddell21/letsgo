@@ -24,7 +24,7 @@ func TestTapFilesInputFromManifestRebuildsFromThePreviousRelease(t *testing.T) {
 
 	if in.Project != "gambit" || in.Version != "1.2.0" || in.Tag != "v1.2.0" ||
 		in.Repo != "you/gambit" || in.Tap != "you/homebrew-tap" || in.Caveats != "a caveat" ||
-		in.Homepage != "https://you/gambit" {
+		in.Homepage != "https://github.com/you/gambit" {
 		t.Errorf("in = %+v", in)
 	}
 	if len(in.Artifacts) != 1 {

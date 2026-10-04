@@ -76,7 +76,7 @@ func tapFilesInput(p *plan.Plan, artifacts []build.Artifact, info *github.RepoIn
 		Tag:       p.Tag,
 		Repo:      repo.String(),
 		Tap:       p.Tap.String(),
-		Homepage:  "https://" + repo.String(),
+		Homepage:  "https://github.com/" + repo.String(),
 		Caveats:   p.BrewCaveats(),
 		Artifacts: make([]plugin.TapArtifact, 0, len(artifacts)),
 	}

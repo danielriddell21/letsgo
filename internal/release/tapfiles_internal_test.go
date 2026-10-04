@@ -188,3 +188,16 @@ func TestTapFileRecordsDigestTheContent(t *testing.T) {
 		t.Errorf("tapFileRecords(nil) = %+v, want nil", got)
 	}
 }
+
+// A repository that names no homepage of its own is still at its forge page,
+// the same default a formula is written with.
+func TestTapFilesInputDefaultsTheHomepageToTheRepositoryPage(t *testing.T) {
+	p := pinnedPlan(t, "letsgo-cask", "")
+
+	if got := tapFilesInput(p, nil, nil).Homepage; got != "https://github.com/you/gambit" {
+		t.Errorf("Homepage = %q, want the repository's page on the forge", got)
+	}
+	if got := tapFilesInput(p, nil, &github.RepoInfo{Homepage: "https://gambit.example"}).Homepage; got != "https://gambit.example" {
+		t.Errorf("Homepage = %q, want the one the repository names", got)
+	}
+}

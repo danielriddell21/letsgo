@@ -46,7 +46,7 @@ func TapFilesInputFromManifest(m *manifest.Manifest, repo, tap, caveats string) 
 		Tag:       tag,
 		Repo:      repo,
 		Tap:       tap,
-		Homepage:  "https://" + repo,
+		Homepage:  "https://github.com/" + repo,
 		Caveats:   caveats,
 		Artifacts: make([]TapArtifact, 0, len(m.Artifacts)),
 	}
