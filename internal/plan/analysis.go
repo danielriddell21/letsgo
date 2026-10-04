@@ -3,9 +3,6 @@ package plan
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
@@ -98,7 +95,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 		return
 	}
 
-	old, cleanup, err := checkoutTag(ctx, p.GitBin, p.RootDir, previous, p.Scope.Dir)
+	old, cleanup, err := discover.CheckoutTag(ctx, p.GitBin, p.RootDir, previous, p.Scope.Dir)
 	if err != nil {
 		p.add(apiCompatibility, Warn, "could not check out %s: %v", previous, err)
 		return
@@ -164,27 +161,4 @@ func bumpBetween(previous, current string) string {
 	default:
 		return "patch"
 	}
-}
-
-// checkoutTag checks out tag into a scratch worktree and returns the
-// module's own directory within it — relDir, slash-separated and relative to
-// the repository, exactly as Scope.Dir names it. A worktree always holds the
-// whole repository, so a module nested in it is compared at <worktree>/relDir,
-// never at the worktree's own root.
-func checkoutTag(ctx context.Context, gitBin, repoDir, tag, relDir string) (dir string, cleanup func(), err error) {
-	base, err := os.MkdirTemp("", "letsgo-apidiff-")
-	if err != nil {
-		return "", nil, fmt.Errorf("plan: scratch directory: %w", err)
-	}
-
-	worktree := filepath.Join(base, "old")
-	if err := discover.AddWorktree(ctx, gitBin, repoDir, worktree, tag); err != nil {
-		_ = os.RemoveAll(base)
-		return "", nil, err
-	}
-
-	return filepath.Join(worktree, filepath.FromSlash(relDir)), func() {
-		_ = discover.RemoveWorktree(ctx, gitBin, repoDir, worktree)
-		_ = os.RemoveAll(base)
-	}, nil
 }

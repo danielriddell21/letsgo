@@ -3,7 +3,9 @@ package discover
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -324,4 +326,29 @@ func TagCommit(ctx context.Context, gitBin string, dir, tag string) (string, err
 func PushTag(ctx context.Context, gitBin string, dir, remote, tag string) error {
 	_, err := git(ctx, gitBin, dir, "push", remote, "refs/tags/"+tag)
 	return err
+}
+
+// CheckoutTag checks out tag into a scratch worktree and returns the module's
+// own directory within it, and a cleanup that removes the worktree. relDir is
+// the module's directory relative to the repository, slash-separated, exactly
+// as Scope.Dir names it: a worktree always holds the whole repository, so a
+// module nested in it is compared at <worktree>/relDir, never at the
+// worktree's own root, which for a scoped module holds sibling directories the
+// release has nothing to do with. An empty relDir is the worktree's root.
+func CheckoutTag(ctx context.Context, gitBin, repoDir, tag, relDir string) (dir string, cleanup func(), err error) {
+	base, err := os.MkdirTemp("", "letsgo-checkout-")
+	if err != nil {
+		return "", nil, fmt.Errorf("discover: scratch directory: %w", err)
+	}
+
+	worktree := filepath.Join(base, "tag")
+	if err := AddWorktree(ctx, gitBin, repoDir, worktree, tag); err != nil {
+		_ = os.RemoveAll(base)
+		return "", nil, err
+	}
+
+	return filepath.Join(worktree, filepath.FromSlash(relDir)), func() {
+		_ = RemoveWorktree(ctx, gitBin, repoDir, worktree)
+		_ = os.RemoveAll(base)
+	}, nil
 }

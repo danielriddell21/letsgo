@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/bump"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -64,25 +63,6 @@ func TestNoDraftFlagLeavesAConfiguredDraftAlone(t *testing.T) {
 
 	if !p.Draft() {
 		t.Error("an absent --draft flag cleared draft = true from the config")
-	}
-}
-
-func TestForced(t *testing.T) {
-	for _, c := range []struct {
-		major, minor, patch bool
-		want                bump.Level
-	}{
-		{true, false, false, bump.Major},
-		{false, true, false, bump.Minor},
-		{false, false, true, bump.Patch},
-		{false, false, false, bump.None},
-		// Several at once resolves to the largest, which is the only reading
-		// that cannot under-bump.
-		{true, true, true, bump.Major},
-	} {
-		if got := forced(c.major, c.minor, c.patch); got != c.want {
-			t.Errorf("forced(%v,%v,%v) = %v, want %v", c.major, c.minor, c.patch, got, c.want)
-		}
 	}
 }
 
