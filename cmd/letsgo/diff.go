@@ -9,7 +9,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/diff"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/github"
-	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/manifest"
 )
 
@@ -58,8 +57,7 @@ func (f forge) runDiff(args []string) error {
 			return err
 		}
 		scope = discover.Scope{Prefix: prefix}
-		tokenValue, _ := plan.Token(context.Background(), machineConfig(), *token)
-		client = f.client(tokenValue)
+		client = f.client(forgeToken(context.Background(), *token))
 	}
 
 	before, err := loadManifest(ctx, client, repo, scope, from)

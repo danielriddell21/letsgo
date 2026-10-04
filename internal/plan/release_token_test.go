@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
@@ -108,40 +110,11 @@ func TestReleaseGateProbesTheReleaseToken(t *testing.T) {
 			t.Setenv("LETSGO_RELEASE_TOKEN", tt.env)
 
 			got := releaseTokenCheck(t, plan.Options{
-				Token: tt.token, ReleaseToken: tt.releaseToken, NewClient: plan.ClientAt(releaseForge(t, tt.serverAllows)),
+				Credentials: creds(t, credential.Flags{Token: tt.token, ReleaseToken: tt.releaseToken}), NewClient: plan.ClientAt(releaseForge(t, tt.serverAllows)),
 			}).Status
 			if got != tt.want {
 				t.Errorf("token check = %q, want %q", got, tt.want)
 			}
 		})
 	}
-}
-
-func TestReleaseTokenResolution(t *testing.T) {
-	noAmbientReleaseTokens(t)
-	t.Setenv("GITHUB_TOKEN", "release-env")
-
-	assertReleaseToken := func(t *testing.T, override, token, env, wantToken, wantSource string) {
-		t.Helper()
-		t.Setenv("LETSGO_RELEASE_TOKEN", env)
-		got, src := plan.ReleaseToken(t.Context(), nil, override, token)
-		if got != wantToken || src != wantSource {
-			t.Errorf("ReleaseToken(%q, %q) with $LETSGO_RELEASE_TOKEN=%q = %q from %q, want %q from %q",
-				override, token, env, got, src, wantToken, wantSource)
-		}
-	}
-
-	t.Run("the flag wins over everything", func(t *testing.T) {
-		assertReleaseToken(t, "flag", "token-flag", "env", "flag", "--release-token")
-	})
-	t.Run("the environment wins over the plain token", func(t *testing.T) {
-		assertReleaseToken(t, "", "token-flag", "env", "env", "LETSGO_RELEASE_TOKEN")
-	})
-	t.Run("falls back to the plain token's own flag", func(t *testing.T) {
-		assertReleaseToken(t, "", "token-flag", "", "token-flag", "--token")
-	})
-	t.Run("falls back to the plain token's own environment", func(t *testing.T) {
-		// The fallback that keeps every existing repository working.
-		assertReleaseToken(t, "", "", "", "release-env", "GITHUB_TOKEN")
-	})
 }

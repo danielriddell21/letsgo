@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/github"
@@ -64,9 +66,9 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 		return
 	}
 
-	token, source := Token(ctx, p.Global, opts.Token)
+	token, source := opts.Credentials.Forge.Value, opts.Credentials.Forge.Source
 	if token == "" {
-		p.add("token", Fail, "no token; set %s", strings.Join(TokenEnvVars, " or "))
+		p.add("token", Fail, "no token; set %s", strings.Join(credential.EnvVars, " or "))
 		return
 	}
 
@@ -83,7 +85,7 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 		p.add("token", Fail, "%s is archived and cannot receive a release", p.Repo)
 		return
 	}
-	p.note("token", source, tokenNoteFrom(source))
+	p.note("token", source, opts.Credentials.Forge.From())
 
 	if !p.checkRelease(ctx, opts, repo, token, client, access) {
 		return
@@ -93,11 +95,12 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 	// Probing the release's credential instead is how a plan passes and the
 	// release then fails on its last step, which is the one failure this
 	// gate exists to prevent.
-	tapToken, tapSource := TapToken(ctx, p.Global, opts.TapToken, opts.Token)
+	tapCred := opts.Credentials.Tap
+	tapToken, tapSource := tapCred.Value, tapCred.Source
 	tapClient := client
 	if tapToken != token {
 		tapClient = opts.client(tapToken)
-		p.note("tap token", tapSource, tokenNoteFrom(tapSource))
+		p.note("tap token", tapSource, tapCred.From())
 	}
 
 	p.checkTap(ctx, tapClient, tapSource)
@@ -134,7 +137,8 @@ func ClientAt(endpoint string) func(token string) *github.Client {
 func (p *Plan) checkRelease(
 	ctx context.Context, opts Options, repo github.Repo, token string, client *github.Client, access github.Access,
 ) bool {
-	releaseToken, releaseSource := ReleaseToken(ctx, p.Global, opts.ReleaseToken, opts.Token)
+	releaseCred := opts.Credentials.Release
+	releaseToken, releaseSource := releaseCred.Value, releaseCred.Source
 	releaseClient, releaseAccess := client, access
 	if releaseToken != token {
 		releaseClient = opts.client(releaseToken)
@@ -148,7 +152,7 @@ func (p *Plan) checkRelease(
 			p.add("token", Fail, "%s is archived and cannot receive a release", p.Repo)
 			return false
 		}
-		p.note("release token", releaseSource, tokenNoteFrom(releaseSource))
+		p.note("release token", releaseSource, releaseCred.From())
 	}
 
 	switch {
@@ -223,7 +227,7 @@ func (p *Plan) checkTap(ctx context.Context, client *github.Client, source strin
 		p.add(brewTap, Warn,
 			"whether %s can write to %s cannot be confirmed from inside Actions\n"+
 				"  a workflow token cannot write to another repository; set %s to an App token scoped to the tap",
-			source, p.Tap, TapTokenEnvVars[0])
+			source, p.Tap, credential.TapEnvVars[0])
 	default:
 		p.add(brewTap, Fail, "%s cannot write to %s", source, p.Tap)
 	}

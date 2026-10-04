@@ -5,6 +5,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/danielriddell21/letsgo/internal/credential"
+	"github.com/danielriddell21/letsgo/internal/github"
+	"github.com/danielriddell21/letsgo/internal/releaser"
 )
 
 // The flag has to survive the trip from the command line to the publishers:
@@ -41,93 +45,68 @@ func TestReleaseDraftFlagReachesTheTap(t *testing.T) {
 	}
 }
 
-// The release client is reused when no tap token is configured. A second
-// client holding the same token would mean a second connection pool for no
-// reason, and it would make the single-credential arrangement look like a
-// different code path than it is.
-func TestTapClientForReusesTheReleaseClient(t *testing.T) {
-	t.Setenv("LETSGO_TAP_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("GH_TOKEN", "")
+// The forge's client is reused for the tap and the release when they carry the
+// same credential. A second client holding the same token would mean a second
+// connection pool for no reason, and it would make the single-credential
+// arrangement look like a different code path than it is.
+func TestClientsReuseTheForgeClientWhenNothingIsSplit(t *testing.T) {
+	forgeCred := credential.Credential{Value: "workflow-token", Source: "GITHUB_TOKEN"}
+	set := credential.Set{Forge: forgeCred, Tap: forgeCred, Release: forgeCred}
 
-	client := unwired.client("release-token")
-
-	if got := unwired.tapClientFor(t.Context(), client, "", "release-token"); got != client {
-		t.Error("a tap with no token of its own got a second client")
+	c := unwired.clients(set)
+	if c.Release != forgeRead(c) || c.Tap != forgeRead(c) {
+		t.Error("a tap and a release with no credential of their own got second clients")
 	}
 }
 
-func TestTapClientForSplitsWhenTheTapHasItsOwnToken(t *testing.T) {
-	t.Setenv("LETSGO_TAP_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("GH_TOKEN", "")
+func forgeRead(c releaser.Clients) *github.Client { return c.Read }
 
-	client := unwired.client("release-token")
+// Each of the tap and the release is split on its own: a credential of its own
+// gets a client of its own, and the other keeps sharing the forge's.
+func TestClientsSplitOnlyWhatHasItsOwnCredential(t *testing.T) {
+	forgeCred := credential.Credential{Value: "workflow-token", Source: "GITHUB_TOKEN"}
+	tapCred := credential.Credential{Value: "tap-token", Source: "--tap-token"}
+	releaseCred := credential.Credential{Value: "release-token", Source: "LETSGO_RELEASE_TOKEN"}
 
-	got := unwired.tapClientFor(t.Context(), client, "tap-token", "release-token")
-	if got == client {
-		t.Fatal("the tap token did not produce a client of its own")
+	tests := []struct {
+		name     string
+		set      credential.Set
+		tapSplit bool
+		relSplit bool
+	}{
+		{"tap only", credential.Set{Forge: forgeCred, Tap: tapCred, Release: forgeCred}, true, false},
+		{"release only", credential.Set{Forge: forgeCred, Tap: forgeCred, Release: releaseCred}, false, true},
+		{"both", credential.Set{Forge: forgeCred, Tap: tapCred, Release: releaseCred}, true, true},
 	}
-	// The user agent has to carry over, or the tap's requests arrive
-	// unidentified and GitHub is entitled to refuse them.
-	if got.UserAgent != client.UserAgent {
-		t.Errorf("UserAgent = %q, want %q", got.UserAgent, client.UserAgent)
-	}
-}
-
-// The environment is read when the flag is absent, which is how CI passes it.
-func TestTapClientForReadsTheEnvironment(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("GH_TOKEN", "")
-	t.Setenv("LETSGO_TAP_TOKEN", "from-env")
-
-	client := unwired.client("release-token")
-	if got := unwired.tapClientFor(t.Context(), client, "", "release-token"); got == client {
-		t.Error("LETSGO_TAP_TOKEN did not produce a client of its own")
-	}
-}
-
-// releaseClientFor mirrors tapClientFor exactly, for the same reason: the
-// single-credential arrangement must not change until a repository opts into
-// publishing the release under a bot identity of its own.
-func TestReleaseClientForReusesTheMainClient(t *testing.T) {
-	t.Setenv("LETSGO_RELEASE_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("GH_TOKEN", "")
-
-	client := unwired.client("workflow-token")
-
-	if got := unwired.releaseClientFor(t.Context(), client, "", "workflow-token"); got != client {
-		t.Error("a release with no token of its own got a second client")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := unwired.clients(tt.set)
+			if got := c.Tap != c.Read; got != tt.tapSplit {
+				t.Errorf("tap split = %v, want %v", got, tt.tapSplit)
+			}
+			if got := c.Release != c.Read; got != tt.relSplit {
+				t.Errorf("release split = %v, want %v", got, tt.relSplit)
+			}
+			// The user agent has to carry over, or a split client's requests
+			// arrive unidentified and GitHub is entitled to refuse them.
+			for name, client := range map[string]*github.Client{"tap": c.Tap.(*github.Client), "release": c.Release.(*github.Client)} {
+				if client.UserAgent != c.Read.UserAgent {
+					t.Errorf("%s UserAgent = %q, want %q", name, client.UserAgent, c.Read.UserAgent)
+				}
+			}
+		})
 	}
 }
 
-func TestReleaseClientForSplitsWhenTheReleaseHasItsOwnToken(t *testing.T) {
-	t.Setenv("LETSGO_RELEASE_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("GH_TOKEN", "")
+// credentials reads the environment when the flag is absent, which is how CI
+// passes the tap and release tokens.
+func TestCredentialsReadTheEnvironmentWhenNoFlagIsGiven(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "workflow-token")
+	t.Setenv("LETSGO_TAP_TOKEN", "tap-from-env")
+	t.Setenv("LETSGO_RELEASE_TOKEN", "release-from-env")
 
-	client := unwired.client("workflow-token")
-
-	got := unwired.releaseClientFor(t.Context(), client, "release-token", "workflow-token")
-	if got == client {
-		t.Fatal("the release token did not produce a client of its own")
-	}
-	// The user agent has to carry over, or the release's requests arrive
-	// unidentified and GitHub is entitled to refuse them.
-	if got.UserAgent != client.UserAgent {
-		t.Errorf("UserAgent = %q, want %q", got.UserAgent, client.UserAgent)
-	}
-}
-
-// The environment is read when the flag is absent, which is how CI passes it.
-func TestReleaseClientForReadsTheEnvironment(t *testing.T) {
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("GH_TOKEN", "")
-	t.Setenv("LETSGO_RELEASE_TOKEN", "from-env")
-
-	client := unwired.client("workflow-token")
-	if got := unwired.releaseClientFor(t.Context(), client, "", "workflow-token"); got == client {
-		t.Error("LETSGO_RELEASE_TOKEN did not produce a client of its own")
+	c := unwired.clients(credentials(t.Context(), credential.Flags{}))
+	if c.Tap == c.Read || c.Release == c.Read {
+		t.Error("LETSGO_TAP_TOKEN and LETSGO_RELEASE_TOKEN did not produce clients of their own")
 	}
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -30,7 +32,8 @@ func (f forge) runYank(args []string) error {
 
 	ctx := context.Background()
 
-	m, err := f.resolveModuleRepo(ctx, *token)
+	set := credentials(ctx, credential.Flags{Token: *token, TapToken: *tapToken})
+	m, err := f.resolveModuleRepo(ctx, set.Forge)
 	if err != nil {
 		return err
 	}
@@ -41,7 +44,7 @@ func (f forge) runYank(args []string) error {
 	}
 
 	options := f.yankOptions(ctx, m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap},
-		diffTokens{Token: *token, TapToken: *tapToken})
+		set)
 	options.Logf = func(format string, args ...any) { fmt.Printf("  "+format+"\n", args...) }
 
 	reportYank(tag, m.Repo, previous, options)
@@ -118,7 +121,7 @@ func confirmYank(tag string) bool {
 	return readYes()
 }
 
-func envList() string { return strings.Join(plan.TokenEnvVars, " or ") }
+func envList() string { return strings.Join(credential.EnvVars, " or ") }
 
 // brewCaveats reads the formula's caveats from the config, so a rollback
 // republishes the formula the release published rather than one missing a

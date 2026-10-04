@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/selfupdate"
 )
 
@@ -48,7 +47,7 @@ func runUpdate(args []string) error {
 		return err
 	}
 
-	tokenValue, _ := plan.Token(context.Background(), machineConfig(), *token)
+	tokenValue := forgeToken(context.Background(), *token)
 
 	u := updater{
 		Options: selfupdate.Options{
