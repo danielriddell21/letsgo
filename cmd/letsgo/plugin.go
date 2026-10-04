@@ -25,8 +25,8 @@ const pluginRepo = "danielriddell21/letsgo-plugins"
 
 // defaultPluginRepo is pluginRepo, unless the global config's `plugin-repo`
 // directive names another one for this machine.
-func defaultPluginRepo() string {
-	return defaultPluginRepoWith(machineConfig())
+func (f forge) defaultPluginRepo() string {
+	return defaultPluginRepoWith(f.machine())
 }
 
 // defaultPluginRepoWith is defaultPluginRepo's core logic, taking the global
@@ -53,7 +53,7 @@ usage:
 run a subcommand with -h for its options.
 `
 
-func runPlugin(args []string) error {
+func (f forge) runPlugin(args []string) error {
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, pluginUsage)
 		os.Exit(2)
@@ -61,13 +61,13 @@ func runPlugin(args []string) error {
 
 	switch command := args[0]; command {
 	case "install":
-		return runPluginInstall(args[1:])
+		return f.runPluginInstall(args[1:])
 	case "list":
-		return runPluginList(args[1:])
+		return f.runPluginList(args[1:])
 	case "dir":
-		return runPluginDir()
+		return f.runPluginDir()
 	case "prune":
-		return runPluginPrune(args[1:])
+		return f.runPluginPrune(args[1:])
 	case "help", "-h", "--help":
 		fmt.Print(pluginUsage)
 	default:
@@ -85,11 +85,11 @@ func runPlugin(args []string) error {
 //
 // With no arguments it installs every plugin this repository pins in
 // letsgo.mod — one command for a fresh clone, and one step in CI.
-func runPluginInstall(args []string) error {
+func (f forge) runPluginInstall(args []string) error {
 	fs := flag.NewFlagSet("plugin install", flag.ExitOnError)
 	dir := fs.String("o", "", "with --link, directory to link into (default: $GOBIN, or $GOPATH/bin)")
 	link := fs.Bool("link", false, "also put the plugin on PATH, for running it by hand")
-	repo := fs.String("repo", defaultPluginRepo(), "repository to install from, as owner/name")
+	repo := fs.String("repo", f.defaultPluginRepo(), "repository to install from, as owner/name")
 	token := fs.String("token", "", "forge token (default: $GITHUB_TOKEN or $GH_TOKEN)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
@@ -100,10 +100,10 @@ func runPluginInstall(args []string) error {
 	}
 
 	ctx := context.Background()
-	tokenValue := forgeToken(ctx, *token)
+	tokenValue := f.forgeToken(ctx, *token)
 
 	if fs.NArg() == 0 {
-		return installAllPins(ctx, os.Stdout, *repo, tokenValue, *dir, *link)
+		return f.installAllPins(ctx, os.Stdout, *repo, tokenValue, *dir, *link)
 	}
 
 	name, requested := splitPluginRef(fs.Arg(0))
@@ -124,12 +124,12 @@ func runPluginInstall(args []string) error {
 		options.Tag = requested
 	}
 
-	return installPlugin(ctx, os.Stdout, name, options, *dir, *link)
+	return f.installPlugin(ctx, os.Stdout, name, options, *dir, *link)
 }
 
 // installAllPins installs every plugin the repository's own config pins, in
 // the order they appear in the file.
-func installAllPins(ctx context.Context, w io.Writer, repo, token, linkDir string, link bool) error {
+func (f forge) installAllPins(ctx context.Context, w io.Writer, repo, token, linkDir string, link bool) error {
 	cfg, err := loadPluginConfig()
 	if err != nil {
 		return err
@@ -150,13 +150,13 @@ func installAllPins(ctx context.Context, w io.Writer, repo, token, linkDir strin
 			Binary:    p.Command,
 			Tag:       p.Version,
 		}
-		if err := installPlugin(ctx, w, p.Command, options, linkDir, link); err != nil {
+		if err := f.installPlugin(ctx, w, p.Command, options, linkDir, link); err != nil {
 			return fmt.Errorf("letsgo plugin install: %s: %w", p.Command, err)
 		}
 		// Installing proves the release is what it says it is, not that it is
 		// what the config pins: a stale pin would otherwise report success and
 		// fail at the next release.
-		if err := verifyPinned(p); err != nil {
+		if err := f.verifyPinned(p); err != nil {
 			return err
 		}
 	}
@@ -164,8 +164,8 @@ func installAllPins(ctx context.Context, w io.Writer, repo, token, linkDir strin
 }
 
 // verifyPinned fails unless p now resolves to the binary its pin names.
-func verifyPinned(p config.Plugin) error {
-	if r := plugin.Resolve(p.Command, p.Digest, ".", machineConfig().PluginsDir); r.State != plugin.Installed {
+func (f forge) verifyPinned(p config.Plugin) error {
+	if r := plugin.Resolve(p.Command, p.Digest, ".", f.machine().PluginsDir); r.State != plugin.Installed {
 		return fmt.Errorf("letsgo plugin install: %s %s installed, but it is not the digest the config pins (%s); update the pin",
 			p.Command, p.Version, plugin.Short(p.Digest))
 	}
@@ -182,8 +182,8 @@ func verifyPinned(p config.Plugin) error {
 // asserting — that a verified binary lands where it was asked to, and that the
 // pin printed afterwards names its digest — can be tested against a forge
 // rather than against the network.
-func installPlugin(ctx context.Context, w io.Writer, name string, options selfupdate.Options, linkDir string, link bool) error {
-	release, binary, path, err := fetchIntoStore(ctx, options)
+func (f forge) installPlugin(ctx context.Context, w io.Writer, name string, options selfupdate.Options, linkDir string, link bool) error {
+	release, binary, path, err := f.fetchIntoStore(ctx, options)
 	if err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func installPlugin(ctx context.Context, w io.Writer, name string, options selfup
 	fmt.Fprintf(w, "  archive %s\n  binary  %s\n", short(release.SHA256), short(release.BinarySHA256))
 
 	if link {
-		dest, err := gobuild.InstallDir(ctx, machineConfig(), linkDir)
+		dest, err := gobuild.InstallDir(ctx, f.machine(), linkDir)
 		if err != nil {
 			return fmt.Errorf("letsgo plugin install: %w", err)
 		}
@@ -211,8 +211,8 @@ func installPlugin(ctx context.Context, w io.Writer, name string, options selfup
 // fetchIntoStore resolves the release options names, downloads and checks
 // it, and writes the executable into the plugin store at its own digest. It is
 // the part of an install that the language server's "update pin" shares.
-func fetchIntoStore(ctx context.Context, options selfupdate.Options) (release *selfupdate.Update, binary []byte, path string, err error) {
-	store, err := pluginstore.Open("", machineConfig().PluginsDir)
+func (f forge) fetchIntoStore(ctx context.Context, options selfupdate.Options) (release *selfupdate.Update, binary []byte, path string, err error) {
+	store, err := pluginstore.Open("", f.machine().PluginsDir)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("letsgo plugin install: %w", err)
 	}
@@ -290,7 +290,7 @@ func pinnedHook(name string) string {
 	return ""
 }
 
-func runPluginList(args []string) error {
+func (f forge) runPluginList(args []string) error {
 	fs := flag.NewFlagSet("plugin list", flag.ExitOnError)
 	available := fs.Bool("available", false, "list the plugins letsgo publishes, not what this repository pins")
 	jsonOutput := fs.Bool("json", false, "print what this repository pins as JSON")
@@ -300,7 +300,7 @@ func runPluginList(args []string) error {
 	if *available {
 		return listAvailablePlugins(os.Stdout)
 	}
-	return listPlugins(os.Stdout, *jsonOutput)
+	return f.listPlugins(os.Stdout, *jsonOutput)
 }
 
 // listAvailablePlugins prints the plugins letsgo publishes: the hook each
@@ -343,14 +343,14 @@ type jsonPluginsResult struct {
 // Takes a writer for the same reason the updater does: what it reports is the
 // behaviour worth testing, and that is not checkable while it is tangled up
 // with os.Stdout.
-func listPlugins(w io.Writer, jsonOutput bool) error {
+func (f forge) listPlugins(w io.Writer, jsonOutput bool) error {
 	cfg, err := loadPluginConfig()
 	if err != nil {
 		return err
 	}
 
 	if jsonOutput {
-		return printPluginsJSON(w, cfg)
+		return f.printPluginsJSON(w, cfg)
 	}
 
 	if len(cfg.Plugins) == 0 {
@@ -360,7 +360,7 @@ func listPlugins(w io.Writer, jsonOutput bool) error {
 
 	var unmet bool
 	for _, p := range cfg.Plugins {
-		status, ok := pluginStatus(p)
+		status, ok := f.pluginStatus(p)
 		if !ok {
 			unmet = true
 		}
@@ -373,16 +373,16 @@ func listPlugins(w io.Writer, jsonOutput bool) error {
 		fmt.Fprintln(w, "  letsgo plugin install <name>@<version>")
 	}
 
-	reportUnreferencedStoreEntries(w, cfg)
+	f.reportUnreferencedStoreEntries(w, cfg)
 	return nil
 }
 
 // printPluginsJSON is listPlugins' --json path: the same store/PATH
 // resolution, minus the column-padded text formatting.
-func printPluginsJSON(w io.Writer, cfg *config.Config) error {
+func (f forge) printPluginsJSON(w io.Writer, cfg *config.Config) error {
 	entries := make([]pluginEntry, 0, len(cfg.Plugins))
 	for _, p := range cfg.Plugins {
-		status, ok := pluginStatus(p)
+		status, ok := f.pluginStatus(p)
 		entries = append(entries, pluginEntry{
 			Hook: p.Hook, Command: p.Command, Version: p.Version, Digest: p.Digest,
 			OK: ok, Status: strings.TrimPrefix(status, "ok  "),
@@ -399,8 +399,8 @@ func printPluginsJSON(w io.Writer, cfg *config.Config) error {
 
 // reportUnreferencedStoreEntries names what letsgo plugin prune would remove,
 // so pruning is never a surprise.
-func reportUnreferencedStoreEntries(w io.Writer, cfg *config.Config) {
-	store, err := pluginstore.Open("", machineConfig().PluginsDir)
+func (f forge) reportUnreferencedStoreEntries(w io.Writer, cfg *config.Config) {
+	store, err := pluginstore.Open("", f.machine().PluginsDir)
 	if err != nil {
 		return
 	}
@@ -428,8 +428,8 @@ func pinsOf(cfg *config.Config) []pluginstore.Pin {
 
 // runPluginDir prints where the plugin store is, so a cache step need not
 // know the platform's data directory.
-func runPluginDir() error {
-	store, err := pluginstore.OpenReadOnly("", machineConfig().PluginsDir)
+func (f forge) runPluginDir() error {
+	store, err := pluginstore.OpenReadOnly("", f.machine().PluginsDir)
 	if err != nil {
 		return err
 	}
@@ -439,20 +439,20 @@ func runPluginDir() error {
 
 // runPluginPrune removes every store entry this repository's letsgo.mod does
 // not pin.
-func runPluginPrune(args []string) error {
+func (f forge) runPluginPrune(args []string) error {
 	fs := flag.NewFlagSet("plugin prune", flag.ExitOnError)
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
-	return pruneStore(os.Stdout)
+	return f.pruneStore(os.Stdout)
 }
 
-func pruneStore(w io.Writer) error {
+func (f forge) pruneStore(w io.Writer) error {
 	cfg, err := loadPluginConfig()
 	if err != nil {
 		return err
 	}
-	store, err := pluginstore.Open("", machineConfig().PluginsDir)
+	store, err := pluginstore.Open("", f.machine().PluginsDir)
 	if err != nil {
 		return fmt.Errorf("letsgo plugin prune: %w", err)
 	}
@@ -475,8 +475,8 @@ func pruneStore(w io.Writer) error {
 // pluginStatus reports one pin as plugin.Run would resolve it, for a person
 // to read. The working directory is the repository root, where letsgo.mod is
 // read from.
-func pluginStatus(p config.Plugin) (string, bool) {
-	r := plugin.Resolve(p.Command, p.Digest, ".", machineConfig().PluginsDir)
+func (f forge) pluginStatus(p config.Plugin) (string, bool) {
+	r := plugin.Resolve(p.Command, p.Digest, ".", f.machine().PluginsDir)
 	switch r.State {
 	case plugin.Installed:
 		return "ok  " + r.Path, true

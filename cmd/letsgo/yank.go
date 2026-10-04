@@ -32,7 +32,7 @@ func (f forge) runYank(args []string) error {
 
 	ctx := context.Background()
 
-	set := credentials(ctx, credential.Flags{Token: *token, TapToken: *tapToken})
+	set := f.credentials(ctx, credential.Flags{Token: *token, TapToken: *tapToken})
 	m, err := f.resolveModuleRepo(ctx, set.Forge)
 	if err != nil {
 		return err
@@ -79,8 +79,8 @@ func previousRelease(ctx context.Context, client *github.Client, repo github.Rep
 //
 // The client is the tap's rather than the release's, for the same reason the
 // release path separates them: rolling a formula back writes to the tap only.
-func tapFor(o *yank.Options, moduleDir string, client *github.Client) {
-	p, err := plan.Resolve(context.Background(), plan.Options{Dir: moduleDir, Snapshot: true, AllowDirty: true})
+func (f forge) tapFor(o *yank.Options, moduleDir string, client *github.Client) {
+	p, err := plan.Resolve(context.Background(), f.planOptions(plan.Options{Dir: moduleDir, Snapshot: true, AllowDirty: true}))
 	if err != nil || !p.HasTap() {
 		return
 	}

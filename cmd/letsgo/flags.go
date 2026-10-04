@@ -83,12 +83,17 @@ func errUsage(usage string) error {
 	return fmt.Errorf("usage: %s", usage)
 }
 
-// machineConfig is the global config, or an empty one when it cannot be
-// read: a broken global file is plan's to report, not every command's.
-func machineConfig() *config.Global {
+// loadGlobal reads the machine's global config once, in main. A file that
+// cannot be read yields an empty config and the reason, which plan reports as
+// a failed check: every other command falls back to its defaults and trusts
+// the plan to surface the problem once instead of nowhere.
+//
+// Nothing below main reads the machine on its own, so a test never depends on
+// the one it runs on, and no command pays for reading it twice.
+func loadGlobal() (*config.Global, error) {
 	global, err := config.LoadGlobal()
 	if err != nil {
-		return &config.Global{}
+		return &config.Global{}, err
 	}
-	return global
+	return global, nil
 }

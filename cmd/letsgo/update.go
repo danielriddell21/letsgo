@@ -37,7 +37,7 @@ type updater struct {
 	Install func(ctx context.Context, u *selfupdate.Update) error
 }
 
-func runUpdate(args []string) error {
+func (f forge) runUpdate(args []string) error {
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 	check := fs.Bool("check", false, "report whether a newer release exists, and change nothing")
 	yes := fs.Bool("yes", false, "install without asking")
@@ -47,7 +47,7 @@ func runUpdate(args []string) error {
 		return err
 	}
 
-	tokenValue := forgeToken(context.Background(), *token)
+	tokenValue := f.forgeToken(context.Background(), *token)
 
 	u := updater{
 		Options: selfupdate.Options{

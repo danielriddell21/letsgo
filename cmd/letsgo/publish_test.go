@@ -105,7 +105,7 @@ func TestCredentialsReadTheEnvironmentWhenNoFlagIsGiven(t *testing.T) {
 	t.Setenv("LETSGO_TAP_TOKEN", "tap-from-env")
 	t.Setenv("LETSGO_RELEASE_TOKEN", "release-from-env")
 
-	c := unwired.clients(credentials(t.Context(), credential.Flags{}))
+	c := unwired.clients(unwired.credentials(t.Context(), credential.Flags{}))
 	if c.Tap == c.Read || c.Release == c.Read {
 		t.Error("LETSGO_TAP_TOKEN and LETSGO_RELEASE_TOKEN did not produce clients of their own")
 	}

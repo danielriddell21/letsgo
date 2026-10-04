@@ -44,7 +44,7 @@ func (f forge) runDiff(args []string) error {
 	)
 	from, to := fs.Arg(0), fs.Arg(1)
 	if !isManifestPath(from) || !isManifestPath(to) {
-		gitBin, err := gitBinary()
+		gitBin, err := f.gitBinary()
 		if err != nil {
 			return err
 		}
@@ -53,7 +53,7 @@ func (f forge) runDiff(args []string) error {
 			return err
 		}
 		repo, scope = t.Repo, discover.Scope{Prefix: t.Prefix}
-		client = f.client(forgeToken(context.Background(), *token))
+		client = f.client(f.forgeToken(context.Background(), *token))
 	}
 
 	before, err := loadManifest(ctx, client, repo, scope, from)

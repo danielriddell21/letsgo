@@ -14,7 +14,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/discover"
 )
 
-func runTag(args []string) error {
+func (f forge) runTag(args []string) error {
 	fs := flag.NewFlagSet("tag", flag.ExitOnError)
 	yes := fs.Bool("yes", false, "create the tag without asking")
 	warranted := fs.Bool("warranted", false,
@@ -30,7 +30,7 @@ func runTag(args []string) error {
 
 	ctx := context.Background()
 
-	gitBin, err := gitBinary()
+	gitBin, err := f.gitBinary()
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func runTag(args []string) error {
 	}
 	previous, _ := scope.LatestStableTag(tags, loc.Git.Tags...)
 
-	repo := bump.Repo{Runner: loc.Runner, Module: loc.Module, Scope: scope, Global: machineConfig()}
+	repo := bump.Repo{Runner: loc.Runner, Module: loc.Module, Scope: scope, Global: f.machine()}
 	proposal, err := repo.ProposeFor(ctx, previous, bump.Forced(*major, *minor, *patch))
 	if err != nil {
 		return err

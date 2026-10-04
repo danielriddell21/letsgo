@@ -13,7 +13,7 @@ func TestRunDoctorPrintsJSONWhenRequested(t *testing.T) {
 	t.Chdir(dir)
 
 	out := captureStdout(t, func() {
-		_ = runDoctor([]string{"--json"})
+		_ = unwired.runDoctor([]string{"--json"})
 	})
 
 	for _, want := range []string{`"schema": 1`, `"checks"`, `"group"`, `"status"`} {
@@ -32,7 +32,7 @@ func TestRunDoctorPrintsTextReportByDefault(t *testing.T) {
 	t.Chdir(dir)
 
 	out := captureStdout(t, func() {
-		_ = runDoctor(nil)
+		_ = unwired.runDoctor(nil)
 	})
 
 	if strings.Contains(out, `"schema"`) {

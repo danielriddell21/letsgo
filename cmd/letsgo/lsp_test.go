@@ -10,9 +10,9 @@ import (
 )
 
 func TestRunLSPRejectsExtraArgs(t *testing.T) {
-	err := runLSP([]string{"extra"})
+	err := unwired.runLSP([]string{"extra"})
 	if err == nil || !strings.HasPrefix(err.Error(), "usage: ") {
-		t.Errorf("runLSP([extra]) = %v, want a usage error", err)
+		t.Errorf("unwired.runLSP([extra]) = %v, want a usage error", err)
 	}
 }
 
@@ -37,7 +37,7 @@ func TestRunLSPServesUntilShutdown(t *testing.T) {
 	}()
 
 	var runErr error
-	out := captureStdout(t, func() { runErr = runLSP([]string{"--restricted"}) })
+	out := captureStdout(t, func() { runErr = unwired.runLSP([]string{"--restricted"}) })
 	if runErr != nil {
 		t.Fatalf("runLSP = %v", runErr)
 	}
@@ -49,12 +49,12 @@ func TestRunLSPServesUntilShutdown(t *testing.T) {
 func TestLSPOptionsFollowRestrictedMode(t *testing.T) {
 	global := &config.Global{PluginsDir: "/plugins", Go: "/nonexistent/go"}
 
-	open := lspOptions(false, &config.Global{PluginsDir: "/plugins"})
+	open := (forge{global: &config.Global{PluginsDir: "/plugins"}}).lspOptions(false)
 	if open.Restricted || open.ResolvePin == nil || open.InstallPin == nil || open.PluginsDir != "/plugins" {
 		t.Errorf("unrestricted options = %+v", open)
 	}
 
-	closed := lspOptions(true, global)
+	closed := (forge{global: global}).lspOptions(true)
 	if !closed.Restricted || closed.GoBin != "" || closed.ResolvePin != nil || closed.InstallPin != nil {
 		t.Errorf("restricted options = %+v", closed)
 	}
@@ -63,7 +63,7 @@ func TestLSPOptionsFollowRestrictedMode(t *testing.T) {
 // A go command the machine config names but that is not there leaves
 // build-target completion empty rather than failing the server.
 func TestLSPOptionsToleratesAnUnresolvableGo(t *testing.T) {
-	opts := lspOptions(false, &config.Global{Path: "config.mod", Go: "/nonexistent/go"})
+	opts := (forge{global: &config.Global{Path: "config.mod", Go: "/nonexistent/go"}}).lspOptions(false)
 	if opts.GoBin != "" {
 		t.Errorf("GoBin = %q, want none", opts.GoBin)
 	}

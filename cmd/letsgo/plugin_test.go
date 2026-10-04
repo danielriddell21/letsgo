@@ -173,7 +173,7 @@ func TestPluginStatusReportsAMismatch(t *testing.T) {
 
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	status, ok := pluginStatus(config.Plugin{
+	status, ok := unwired.pluginStatus(config.Plugin{
 		Hook: "ldflags", Command: "letsgo-fake",
 		Version: "v0.1.0", Digest: "sha256:" + strings.Repeat("d", 64),
 	})
@@ -188,7 +188,7 @@ func TestPluginStatusReportsAMismatch(t *testing.T) {
 func TestPluginStatusReportsAMissingPlugin(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
-	status, ok := pluginStatus(config.Plugin{
+	status, ok := unwired.pluginStatus(config.Plugin{
 		Hook: "ldflags", Command: "letsgo-absent",
 		Version: "v0.1.0", Digest: "sha256:" + strings.Repeat("e", 64),
 	})
@@ -256,7 +256,7 @@ func TestListPluginsReportsEveryPin(t *testing.T) {
 	writeTwoPinFixture(t)
 
 	var out bytes.Buffer
-	if err := listPlugins(&out, false); err != nil {
+	if err := unwired.listPlugins(&out, false); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -280,7 +280,7 @@ func TestListPluginsJSON(t *testing.T) {
 	writeTwoPinFixture(t)
 
 	var out bytes.Buffer
-	if err := listPlugins(&out, true); err != nil {
+	if err := unwired.listPlugins(&out, true); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -310,7 +310,7 @@ func TestListPluginsWithNoPins(t *testing.T) {
 	write(t, "letsgo.mod", "build linux/amd64\n")
 
 	var out bytes.Buffer
-	if err := listPlugins(&out, false); err != nil {
+	if err := unwired.listPlugins(&out, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "pins no plugins") {
@@ -346,8 +346,8 @@ func TestListAvailablePluginsListsTheCatalogue(t *testing.T) {
 func TestRunPluginListAvailableNeedsNoConfig(t *testing.T) {
 	t.Chdir(t.TempDir())
 
-	if err := runPluginList([]string{"--available"}); err != nil {
-		t.Errorf("runPluginList(--available) = %v", err)
+	if err := unwired.runPluginList([]string{"--available"}); err != nil {
+		t.Errorf("unwired.runPluginList(--available) = %v", err)
 	}
 }
 
@@ -355,14 +355,14 @@ func TestListPluginsReportsAMissingConfig(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	var out bytes.Buffer
-	if err := listPlugins(&out, false); err == nil {
+	if err := unwired.listPlugins(&out, false); err == nil {
 		t.Fatal("no letsgo.mod should be an error for list, which has nothing to report without one")
 	}
 }
 
 func TestRunPluginHelp(t *testing.T) {
-	if err := runPlugin([]string{"help"}); err != nil {
-		t.Errorf("runPlugin(help) = %v", err)
+	if err := unwired.runPlugin([]string{"help"}); err != nil {
+		t.Errorf("unwired.runPlugin(help) = %v", err)
 	}
 }
 
@@ -403,7 +403,7 @@ func TestInstallPluginWritesTheVerifiedBinary(t *testing.T) {
 	options.Binary = "letsgo-env"
 
 	var out bytes.Buffer
-	if err := installPlugin(context.Background(), &out, "letsgo-env", options, "", false); err != nil {
+	if err := unwired.installPlugin(context.Background(), &out, "letsgo-env", options, "", false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -449,7 +449,7 @@ func TestInstallPluginWithLinkAlsoPlacesACopyOnPATH(t *testing.T) {
 	options.Binary = "letsgo-multi"
 
 	var out bytes.Buffer
-	if err := installPlugin(context.Background(), &out, "letsgo-multi", options, linkDir, true); err != nil {
+	if err := unwired.installPlugin(context.Background(), &out, "letsgo-multi", options, linkDir, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -476,7 +476,7 @@ func TestInstallPluginRefusesATamperedArchive(t *testing.T) {
 	options := f.Options()
 	options.Binary = "letsgo-multi"
 
-	err := installPlugin(context.Background(), io.Discard, "letsgo-multi", options, "", false)
+	err := unwired.installPlugin(context.Background(), io.Discard, "letsgo-multi", options, "", false)
 	if err == nil {
 		t.Fatal("a tampered archive should be refused")
 	}
@@ -505,7 +505,7 @@ func TestInstallPluginByTag(t *testing.T) {
 	options.Tag = "v0.1.0"
 
 	var out bytes.Buffer
-	if err := installPlugin(context.Background(), &out, "letsgo-multi", options, "", false); err != nil {
+	if err := unwired.installPlugin(context.Background(), &out, "letsgo-multi", options, "", false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "v0.1.0") {
@@ -516,7 +516,7 @@ func TestInstallPluginByTag(t *testing.T) {
 // More than one positional argument is ambiguous: install one plugin, or
 // every pin, never a chosen few.
 func TestRunPluginInstallRejectsMoreThanOnePlugin(t *testing.T) {
-	if err := runPluginInstall([]string{"letsgo-multi", "letsgo-env"}); err == nil {
+	if err := unwired.runPluginInstall([]string{"letsgo-multi", "letsgo-env"}); err == nil {
 		t.Error("runPluginInstall with two plugins should have failed")
 	}
 }
@@ -528,7 +528,7 @@ func TestInstallAllPinsReportsNoPins(t *testing.T) {
 	write(t, "letsgo.mod", "build linux/amd64\n")
 
 	var out bytes.Buffer
-	if err := installAllPins(context.Background(), &out, "you/plugins", "", "", false); err != nil {
+	if err := unwired.installAllPins(context.Background(), &out, "you/plugins", "", "", false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "pins no plugins") {
@@ -542,13 +542,13 @@ func TestRunPluginPrune(t *testing.T) {
 	t.Chdir(t.TempDir())
 	write(t, "letsgo.mod", "build linux/amd64\n")
 
-	if err := runPluginPrune(nil); err != nil {
+	if err := unwired.runPluginPrune(nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestRunPluginInstallNeedsAName(t *testing.T) {
-	err := runPluginInstall([]string{"@v0.2.0"})
+	err := unwired.runPluginInstall([]string{"@v0.2.0"})
 	if err == nil || !strings.Contains(err.Error(), "no plugin name") {
 		t.Errorf("err = %v", err)
 	}
@@ -559,7 +559,7 @@ func TestRunPluginInstallNeedsAName(t *testing.T) {
 func TestRunPluginListWithoutAConfig(t *testing.T) {
 	t.Chdir(t.TempDir())
 
-	if err := runPluginList(nil); err == nil {
+	if err := unwired.runPluginList(nil); err == nil {
 		t.Fatal("list without a letsgo.mod should be an error")
 	}
 }
@@ -572,7 +572,7 @@ func TestRunPluginListPrintsJSONWhenRequested(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		_ = runPluginList([]string{"--json"})
+		_ = unwired.runPluginList([]string{"--json"})
 	})
 
 	if !strings.Contains(out, `"schema": 1`) {
@@ -607,7 +607,7 @@ func TestPruneStoreRemovesUnreferencedEntries(t *testing.T) {
 		"plugin archive-layout letsgo-multi v0.1.0 "+kept+"\n")
 
 	var out bytes.Buffer
-	if err := pruneStore(&out); err != nil {
+	if err := unwired.pruneStore(&out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "letsgo-env") {
@@ -639,7 +639,7 @@ func TestPruneStoreReportsNothingToPrune(t *testing.T) {
 		"plugin archive-layout letsgo-multi v0.1.0 "+kept+"\n")
 
 	var out bytes.Buffer
-	if err := pruneStore(&out); err != nil {
+	if err := unwired.pruneStore(&out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "nothing to prune") {
@@ -659,7 +659,7 @@ func TestListPluginsReportsUnreferencedStoreEntries(t *testing.T) {
 		"plugin archive-layout letsgo-multi v0.1.0 "+kept+"\n")
 
 	var out bytes.Buffer
-	if err := listPlugins(&out, false); err != nil {
+	if err := unwired.listPlugins(&out, false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "unreferenced by any pin here") {
@@ -683,7 +683,7 @@ func TestPluginStatusReportsATamperedStoreEntry(t *testing.T) {
 	entry := filepath.Join(storeDir, "sha256", strings.TrimPrefix(digest, "sha256:"), "letsgo-fake")
 	write(t, entry, "something else")
 
-	status, ok := pluginStatus(config.Plugin{
+	status, ok := unwired.pluginStatus(config.Plugin{
 		Hook: "ldflags", Command: "letsgo-fake", Version: "v0.1.0", Digest: digest,
 	})
 	if ok || !strings.Contains(status, "tampered") {
@@ -700,12 +700,12 @@ func TestVerifyPinnedFailsWhenTheInstalledBinaryIsNotThePin(t *testing.T) {
 	installed := putInStore(t, storeDir, "letsgo-fake", "the installed bytes")
 
 	ok := config.Plugin{Command: "letsgo-fake", Version: "v0.1.0", Digest: installed}
-	if err := verifyPinned(ok); err != nil {
+	if err := unwired.verifyPinned(ok); err != nil {
 		t.Fatalf("a pin that matches the installed binary failed: %v", err)
 	}
 
 	stale := config.Plugin{Command: "letsgo-fake", Version: "v0.1.0", Digest: "sha256:" + strings.Repeat("a", 64)}
-	err := verifyPinned(stale)
+	err := unwired.verifyPinned(stale)
 	if err == nil || !strings.Contains(err.Error(), "update the pin") {
 		t.Errorf("err = %v", err)
 	}
@@ -716,7 +716,7 @@ func TestRunPluginDirPrintsTheStore(t *testing.T) {
 	t.Setenv(pluginstore.StoreEnvOverride, dir)
 
 	out := captureStdout(t, func() {
-		if err := runPlugin([]string{"dir"}); err != nil {
+		if err := unwired.runPlugin([]string{"dir"}); err != nil {
 			t.Error(err)
 		}
 	})
@@ -733,7 +733,7 @@ func TestRunPluginDirWithoutAHome(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", "")
 	t.Setenv("HOME", "")
 
-	if err := runPlugin([]string{"dir"}); err == nil {
+	if err := unwired.runPlugin([]string{"dir"}); err == nil {
 		t.Fatal("no store location should be an error")
 	}
 }

@@ -34,13 +34,12 @@ var latestVersion = func(ctx context.Context) (string, error) {
 // only a test sets it.
 var releaseAPIEndpoint string
 
-// maybeNoticeUpdate is what main calls once a command is done. A global config
-// that does not load is not worth a message here: the commands that need it
-// have already said so.
-func maybeNoticeUpdate(command string, args []string) {
-	if global, err := config.LoadGlobal(); err == nil {
-		printUpdateNotice(os.Stderr, global, command, args)
-	}
+// maybeNoticeUpdate is what main calls once a command is done, with the global
+// config it read at the start. A global config that did not load is not worth a
+// message here: the commands that need it have already said so, and main does
+// not call this.
+func maybeNoticeUpdate(global *config.Global, command string, args []string) {
+	printUpdateNotice(os.Stderr, global, command, args)
 }
 
 // printUpdateNotice writes at most one line to w, telling the user that a newer

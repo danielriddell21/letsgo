@@ -52,21 +52,21 @@ run a command with -h for its options.
 func commands(f forge) map[string]func([]string) error {
 	return map[string]func([]string) error{
 		"plan":     f.runPlan,
-		"build":    runBuild,
+		"build":    f.runBuild,
 		"release":  f.runRelease,
 		"apply":    f.runApply,
 		"verify":   f.runVerify,
-		"doctor":   runDoctor,
+		"doctor":   f.runDoctor,
 		"audit":    f.runAudit,
 		"diff":     f.runDiff,
 		"promote":  f.runPromote,
 		"yank":     f.runYank,
-		"update":   runUpdate,
-		"plugin":   runPlugin,
-		"tag":      runTag,
+		"update":   f.runUpdate,
+		"plugin":   f.runPlugin,
+		"tag":      f.runTag,
 		"fmt":      runFmt,
 		"features": runFeatures,
-		"lsp":      runLSP,
+		"lsp":      f.runLSP,
 
 		"version":   runVersion,
 		"--version": runVersion,
@@ -87,7 +87,9 @@ func main() {
 
 	command, args := os.Args[1], os.Args[2:]
 
-	run, ok := commands(forge{})[command]
+	global, globalErr := loadGlobal()
+	f := forge{global: global, globalErr: globalErr}
+	run, ok := commands(f)[command]
 	if !ok {
 		fmt.Fprintf(os.Stderr, "letsgo: unknown command %q\n\n%s", command, usage)
 		os.Exit(2)
@@ -100,7 +102,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "letsgo:", err)
 		}
 	}
-	maybeNoticeUpdate(command, args)
+	if globalErr == nil {
+		maybeNoticeUpdate(global, command, args)
+	}
 	os.Exit(code)
 }
 

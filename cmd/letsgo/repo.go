@@ -33,7 +33,7 @@ type moduleRepo struct {
 // its scope, and a forge client authenticated with the forge credential the
 // caller resolved.
 func (f forge) resolveModuleRepo(ctx context.Context, cred credential.Credential) (moduleRepo, error) {
-	gitBin, err := gitBinary()
+	gitBin, err := f.gitBinary()
 	if err != nil {
 		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
 	}
@@ -80,7 +80,7 @@ type scratchRun struct {
 // is empty; cleanup removes it, and is a no-op when work was given
 // explicitly.
 func (f forge) resolveScratchRun(ctx context.Context, repoFlag, token, work, tmpPrefix string) (scratchRun, error) {
-	gitBin, err := gitBinary()
+	gitBin, err := f.gitBinary()
 	if err != nil {
 		return scratchRun{}, err
 	}
@@ -99,7 +99,7 @@ func (f forge) resolveScratchRun(ctx context.Context, repoFlag, token, work, tmp
 		cleanup = func() { _ = os.RemoveAll(workDir) }
 	}
 
-	client := f.client(forgeToken(ctx, token))
+	client := f.client(f.forgeToken(ctx, token))
 
 	return scratchRun{Repo: t.Repo, Dir: t.Dir, Prefix: t.Prefix, WorkDir: workDir, Client: client, GitBin: gitBin, cleanup: cleanup}, nil
 }
@@ -149,7 +149,7 @@ func resolveTarget(ctx context.Context, gitBin, explicit, start string) (target,
 }
 
 // gitBinary resolves the git command from the machine's global config.
-func gitBinary() (string, error) {
-	path, _, err := git.Binary(machineConfig())
+func (f forge) gitBinary() (string, error) {
+	path, _, err := git.Binary(f.machine())
 	return path, err
 }

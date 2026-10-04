@@ -24,12 +24,14 @@ type machineSettings struct {
 }
 
 // resolveMachine settles the machine's configuration: the global config
-// (read here only when the caller did not supply one) and the go and git
-// commands it and the environment select.
-func resolveMachine(global *config.Global) machineSettings {
-	m := machineSettings{global: global}
+// (read here only when the caller supplied neither it nor the reason it could
+// not) and the go and git commands it and the environment select.
+func resolveMachine(global *config.Global, globalErr error) machineSettings {
+	m := machineSettings{global: global, globalErr: globalErr}
 	if m.global == nil {
-		m.global, m.globalErr = config.LoadGlobal()
+		if m.globalErr == nil {
+			m.global, m.globalErr = config.LoadGlobal()
+		}
 		if m.globalErr != nil {
 			m.global = &config.Global{}
 		}

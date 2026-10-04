@@ -47,6 +47,11 @@ type Options struct {
 	// handed down. Nil reads it from the file, which is what a command does.
 	Global *config.Global
 
+	// GlobalErr is why the caller could not read the machine's configuration.
+	// With a nil Global, the plan reports it as a failed check instead of
+	// reading the file a second time to find out.
+	GlobalErr error
+
 	// Snapshot builds an untagged working version.
 	Snapshot bool
 
@@ -329,7 +334,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 		dir = "."
 	}
 
-	machine := resolveMachine(opts.Global)
+	machine := resolveMachine(opts.Global, opts.GlobalErr)
 	if machine.gitErr != nil {
 		return nil, machine.gitErr
 	}

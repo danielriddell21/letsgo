@@ -39,7 +39,7 @@ func (f forge) runVerify(args []string) error {
 	}
 	defer run.cleanup()
 
-	goBin, _, _ := gobuild.Toolchain(machineConfig())
+	goBin, _, _ := gobuild.Toolchain(f.machine())
 	result, err := verify.Run(ctx, verify.Options{
 		Client: run.Client, Repo: run.Repo, Tag: fs.Arg(0), Prefix: run.Prefix,
 		Dir: run.Dir, WorkDir: run.WorkDir, SkipRebuild: *noRebuild,

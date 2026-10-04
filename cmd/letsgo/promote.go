@@ -37,7 +37,7 @@ func (f forge) runPromote(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	set := credentials(ctx, credential.Flags{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken})
+	set := f.credentials(ctx, credential.Flags{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken})
 	m, err := f.resolveModuleRepo(ctx, set.Forge)
 	if err != nil {
 		return err
@@ -73,7 +73,7 @@ func (f forge) runPromote(args []string) error {
 	}
 	fmt.Println()
 
-	info := tapRepoInfo(ctx, m.Module.Dir, client)
+	info := f.tapRepoInfo(ctx, m.Module.Dir, client)
 
 	result, err := promote.Run(ctx, promote.Options{
 		Client:      releaseClient,
@@ -107,8 +107,8 @@ func (f forge) runPromote(args []string) error {
 // formula or a tap-files plugin's cask, but only when there is a tap to write
 // one into — mirroring tapFor in yank.go, which probes the same question the
 // same way before spending an API call on an answer nothing will use.
-func tapRepoInfo(ctx context.Context, moduleDir string, client *github.Client) *github.RepoInfo {
-	p, err := plan.Resolve(ctx, plan.Options{Dir: moduleDir, Snapshot: true, AllowDirty: true})
+func (f forge) tapRepoInfo(ctx context.Context, moduleDir string, client *github.Client) *github.RepoInfo {
+	p, err := plan.Resolve(ctx, f.planOptions(plan.Options{Dir: moduleDir, Snapshot: true, AllowDirty: true}))
 	if err != nil || !releaser.WantsRepoInfo(p) {
 		return nil
 	}
