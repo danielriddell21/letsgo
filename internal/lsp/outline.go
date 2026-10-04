@@ -1,6 +1,6 @@
 package lsp
 
-import "github.com/danielriddell21/letsgo/internal/config"
+import "github.com/danielriddell21/letsgo/modsyntax"
 
 // word is one argument of a directive and the character range it occupies.
 type word struct {
@@ -24,7 +24,7 @@ type block struct {
 	openLine, closeLine int
 }
 
-// outline is a document read through config.ParseLenient, the parser `letsgo
+// outline is a document read through modsyntax.ParseLenient, the parser `letsgo
 // plan` uses, so the editor and the tool cannot disagree about where a word or
 // a block is. Lines the parser cannot read are absent.
 type outline struct {
@@ -35,15 +35,15 @@ type outline struct {
 
 func outlineOf(path, text string) outline {
 	o := outline{byLine: map[int]directive{}}
-	f, _ := config.ParseLenient(path, []byte(text))
+	f, _ := modsyntax.ParseLenient(path, []byte(text))
 	if f == nil {
 		return o
 	}
 	for _, stmt := range f.Stmts {
 		switch s := stmt.(type) {
-		case *config.Line:
+		case *modsyntax.Line:
 			o.byLine[s.P.Line-1] = directive{keyword: s.Keyword, kw: wordOf(s.Keyword, s.KeywordSpan), args: wordsOf(s.Args, s.ArgSpans)}
-		case *config.Block:
+		case *modsyntax.Block:
 			o.byLine[s.P.Line-1] = directive{keyword: s.Keyword, kw: wordOf(s.Keyword, s.KeywordSpan), args: wordsOf(s.Args, s.ArgSpans)}
 			closeLine := -1
 			if s.Close.Line > 0 {
@@ -61,11 +61,11 @@ func outlineOf(path, text string) outline {
 	return o
 }
 
-func wordOf(text string, s config.Span) word {
+func wordOf(text string, s modsyntax.Span) word {
 	return word{text: text, start: s.Col - 1, end: s.End - 1}
 }
 
-func wordsOf(texts []string, spans []config.Span) []word {
+func wordsOf(texts []string, spans []modsyntax.Span) []word {
 	words := make([]word, len(texts))
 	for i, text := range texts {
 		words[i] = wordOf(text, spans[i])

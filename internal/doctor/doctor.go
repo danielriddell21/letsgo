@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/modsyntax"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
@@ -142,14 +144,14 @@ func Run(ctx context.Context, dir string, global *config.Global) (*Result, error
 }
 
 // loadConfig reads letsgo.mod the same way plan.Resolve does
-// (config.Parse/Decode): a missing file is the primary path, not an error;
+// (modsyntax.Parse/Decode): a missing file is the primary path, not an error;
 // a parse or decode failure is returned for checkConfig to report (DR-4).
 func loadConfig(moduleDir string) (*config.Config, error) {
 	data, err := os.ReadFile(filepath.Join(moduleDir, plan.ConfigFile))
 	if err != nil {
 		return &config.Config{}, nil //nolint:nilerr // absence is not a failure
 	}
-	file, err := config.Parse(plan.ConfigFile, data)
+	file, err := modsyntax.Parse(plan.ConfigFile, data)
 	if err != nil {
 		return nil, err
 	}

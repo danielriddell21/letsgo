@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/modsyntax"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
@@ -131,7 +133,7 @@ func brewCaveats(moduleDir string) string {
 	if err != nil {
 		return ""
 	}
-	file, err := config.Parse(plan.ConfigFile, data)
+	file, err := modsyntax.Parse(plan.ConfigFile, data)
 	if err != nil {
 		return ""
 	}

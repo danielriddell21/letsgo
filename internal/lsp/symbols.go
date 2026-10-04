@@ -3,14 +3,14 @@ package lsp
 import (
 	"strings"
 
-	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/modsyntax"
 )
 
 // documentSymbols builds the outline VS Code's Outline view and breadcrumbs
 // show: one entry per top-level directive or block, a block's own lines
 // nested underneath it.
 func documentSymbols(path, text string) []DocumentSymbol {
-	f, err := config.Parse(path, []byte(text))
+	f, err := modsyntax.Parse(path, []byte(text))
 	if err != nil {
 		return nil
 	}
@@ -19,16 +19,16 @@ func documentSymbols(path, text string) []DocumentSymbol {
 	var symbols []DocumentSymbol
 	for _, stmt := range f.Stmts {
 		switch s := stmt.(type) {
-		case *config.Line:
+		case *modsyntax.Line:
 			symbols = append(symbols, lineSymbol(lines, s.Keyword, s.Args, s.Pos()))
-		case *config.Block:
+		case *modsyntax.Block:
 			symbols = append(symbols, blockSymbol(lines, s))
 		}
 	}
 	return symbols
 }
 
-func lineSymbol(lines []string, keyword string, args []string, pos config.Position) DocumentSymbol {
+func lineSymbol(lines []string, keyword string, args []string, pos modsyntax.Position) DocumentSymbol {
 	parts := args
 	if keyword != "" {
 		parts = append([]string{keyword}, args...)
@@ -37,7 +37,7 @@ func lineSymbol(lines []string, keyword string, args []string, pos config.Positi
 	return DocumentSymbol{Name: strings.Join(parts, " "), Kind: SymbolKindField, Range: r, SelectionRange: r}
 }
 
-func blockSymbol(lines []string, b *config.Block) DocumentSymbol {
+func blockSymbol(lines []string, b *modsyntax.Block) DocumentSymbol {
 	name := b.Keyword
 	if len(b.Args) > 0 {
 		name += " " + strings.Join(b.Args, " ")

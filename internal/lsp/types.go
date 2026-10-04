@@ -6,7 +6,7 @@ import "encoding/json"
 // this server speaks, hand-transcribed from the spec rather than imported —
 // the interfaces list in docs/pbs/vscode.md, no more.
 
-// Position is zero-based, opposite of config.Position — the wire format is
+// Position is zero-based, opposite of modsyntax.Position — the wire format is
 // not ours to choose.
 type Position struct {
 	Line      int `json:"line"`

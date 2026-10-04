@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/modsyntax"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/feature"
@@ -144,7 +146,7 @@ func requireConfigAgrees(t *testing.T, f feature.Feature) {
 }
 
 func decodeConfig(src string) (*config.Config, error) {
-	file, err := config.Parse("letsgo.mod", []byte(src))
+	file, err := modsyntax.Parse("letsgo.mod", []byte(src))
 	if err != nil {
 		return nil, err
 	}

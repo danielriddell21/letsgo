@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/modsyntax"
 )
 
 // GlobalConfigEnvOverride names the global config file directly, overriding
@@ -77,7 +79,7 @@ var globalKnown = map[string]string{
 }
 
 // globalHandlers folds each global directive into a Global.
-var globalHandlers = map[string]func(g *Global, file string, line *Line) error{
+var globalHandlers = map[string]func(g *Global, file string, line *modsyntax.Line) error{
 	"go":            applyGlobalGo,
 	"git":           applyGlobalGit,
 	"tool":          applyGlobalTool,
@@ -132,17 +134,17 @@ func GlobalDirectives() []string {
 // change a release's bytes, gates, version or publishing is rejected by name
 // rather than silently accepted, so a repository directive pasted into the
 // wrong file fails loudly instead of quietly doing nothing.
-func DecodeGlobal(f *File) (*Global, error) {
+func DecodeGlobal(f *modsyntax.File) (*Global, error) {
 	g := &Global{}
-	seen := map[string]Position{}
+	seen := map[string]modsyntax.Position{}
 
 	for _, stmt := range f.Stmts {
 		switch s := stmt.(type) {
-		case *Comment:
+		case *modsyntax.Comment:
 			continue
-		case *Block:
+		case *modsyntax.Block:
 			return nil, errAt(f.Name, s.Pos(), "%s takes no block in the global config", s.Keyword)
-		case *Line:
+		case *modsyntax.Line:
 			if err := decodeGlobalLine(g, f.Name, seen, s); err != nil {
 				return nil, err
 			}
@@ -151,7 +153,7 @@ func DecodeGlobal(f *File) (*Global, error) {
 	return g, nil
 }
 
-func decodeGlobalLine(g *Global, file string, seen map[string]Position, line *Line) error {
+func decodeGlobalLine(g *Global, file string, seen map[string]modsyntax.Position, line *modsyntax.Line) error {
 	if _, ok := known[line.Keyword]; ok {
 		return errAt(file, line.P, "%s belongs in letsgo.mod, not the global config", line.Keyword)
 	}
@@ -168,7 +170,7 @@ func decodeGlobalLine(g *Global, file string, seen map[string]Position, line *Li
 	return globalHandlers[line.Keyword](g, file, line)
 }
 
-func checkGlobalKnown(file, keyword string, pos Position) error {
+func checkGlobalKnown(file, keyword string, pos modsyntax.Position) error {
 	if _, ok := globalKnown[keyword]; ok {
 		return nil
 	}
@@ -182,7 +184,7 @@ func checkGlobalKnown(file, keyword string, pos Position) error {
 	return unknownName(file, pos, "directive", keyword, names)
 }
 
-func applyGlobalGo(g *Global, file string, line *Line) error {
+func applyGlobalGo(g *Global, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 1 {
 		return globalArity(file, line)
 	}
@@ -190,7 +192,7 @@ func applyGlobalGo(g *Global, file string, line *Line) error {
 	return nil
 }
 
-func applyGlobalGit(g *Global, file string, line *Line) error {
+func applyGlobalGit(g *Global, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 1 {
 		return globalArity(file, line)
 	}
@@ -198,7 +200,7 @@ func applyGlobalGit(g *Global, file string, line *Line) error {
 	return nil
 }
 
-func applyGlobalTool(g *Global, file string, line *Line) error {
+func applyGlobalTool(g *Global, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 2 {
 		return globalArity(file, line)
 	}
@@ -213,7 +215,7 @@ func applyGlobalTool(g *Global, file string, line *Line) error {
 	return nil
 }
 
-func applyGlobalCache(g *Global, file string, line *Line) error {
+func applyGlobalCache(g *Global, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 1 {
 		return globalArity(file, line)
 	}
@@ -225,7 +227,7 @@ func applyGlobalCache(g *Global, file string, line *Line) error {
 	return nil
 }
 
-func applyGlobalPlugins(g *Global, file string, line *Line) error {
+func applyGlobalPlugins(g *Global, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 1 {
 		return globalArity(file, line)
 	}
@@ -233,7 +235,7 @@ func applyGlobalPlugins(g *Global, file string, line *Line) error {
 	return nil
 }
 
-func applyGlobalPluginRepo(g *Global, file string, line *Line) error {
+func applyGlobalPluginRepo(g *Global, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 1 {
 		return globalArity(file, line)
 	}
@@ -244,7 +246,7 @@ func applyGlobalPluginRepo(g *Global, file string, line *Line) error {
 	return nil
 }
 
-func applyGlobalProxy(g *Global, file string, line *Line) error {
+func applyGlobalProxy(g *Global, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 1 {
 		return globalArity(file, line)
 	}
@@ -252,7 +254,7 @@ func applyGlobalProxy(g *Global, file string, line *Line) error {
 	return nil
 }
 
-func applyGlobalTokenCommand(g *Global, file string, line *Line) error {
+func applyGlobalTokenCommand(g *Global, file string, line *modsyntax.Line) error {
 	if len(line.Args) == 0 {
 		return globalArity(file, line)
 	}
@@ -262,7 +264,7 @@ func applyGlobalTokenCommand(g *Global, file string, line *Line) error {
 
 var globalColors = []string{"auto", "always", "never"}
 
-func applyGlobalColor(g *Global, file string, line *Line) error {
+func applyGlobalColor(g *Global, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 1 {
 		return globalArity(file, line)
 	}
@@ -275,7 +277,7 @@ func applyGlobalColor(g *Global, file string, line *Line) error {
 
 var globalUpdateChecks = []string{"off", "daily", "weekly"}
 
-func applyGlobalUpdateCheck(g *Global, file string, line *Line) error {
+func applyGlobalUpdateCheck(g *Global, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 1 {
 		return globalArity(file, line)
 	}
@@ -286,7 +288,7 @@ func applyGlobalUpdateCheck(g *Global, file string, line *Line) error {
 	return nil
 }
 
-func globalArity(file string, line *Line) error {
+func globalArity(file string, line *modsyntax.Line) error {
 	return errAt(file, line.P, "%s takes %s", line.Keyword, globalKnown[line.Keyword])
 }
 
@@ -325,7 +327,7 @@ func LoadGlobal() (*Global, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 
-	f, err := Parse(path, data)
+	f, err := modsyntax.Parse(path, data)
 	if err != nil {
 		return nil, err
 	}

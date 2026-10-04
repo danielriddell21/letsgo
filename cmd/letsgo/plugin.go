@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/modsyntax"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -529,7 +531,7 @@ func loadPluginConfig() (*config.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("letsgo: reading %s: %w", plan.ConfigFile, err)
 	}
-	file, err := config.Parse(filepath.Base(plan.ConfigFile), data)
+	file, err := modsyntax.Parse(filepath.Base(plan.ConfigFile), data)
 	if err != nil {
 		return nil, err
 	}

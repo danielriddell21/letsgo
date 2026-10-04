@@ -3,7 +3,7 @@ package lsp
 import (
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/modsyntax"
 )
 
 func TestFormatEditsReturnsNilWhenAlreadyFormatted(t *testing.T) {
@@ -30,7 +30,7 @@ func TestFormatEditsMatchesFileFormatByteForByte(t *testing.T) {
 		t.Fatalf("len(edits) = %d, want 1", len(edits))
 	}
 
-	f, err := config.Parse("letsgo.mod", []byte(text))
+	f, err := modsyntax.Parse("letsgo.mod", []byte(text))
 	if err != nil {
 		t.Fatal(err)
 	}

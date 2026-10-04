@@ -1,16 +1,17 @@
-// Package config reads letsgo.mod, a configuration file written in the same
-// line-and-block directive syntax as go.mod and go.work.
+// Package modsyntax reads and formats the line-and-block directive syntax
+// shared by letsgo.mod, the global config and every Plugin's own config. It is
+// the same syntax as go.mod and go.work.
 //
 // The format is borrowed rather than invented. Every user of a Go-only release
 // tool already reads this syntax fluently, it has no indentation significance
 // and no type coercion to be surprised by, and a complete parser with useful
 // error messages costs a couple of hundred lines and no dependencies.
 //
-// The package is split the way the go command splits its own: a syntax layer
-// that understands lines, blocks and comments without knowing what any of them
-// mean, and a semantic layer (decode.go) that interprets them. Keeping the two
-// apart is what lets the formatter preserve a file it does not understand.
-package config
+// The package is the syntax layer only: it understands lines, blocks and
+// comments without knowing what any of them mean. What a directive means is
+// left to its reader (internal/config for letsgo.mod). Keeping the two apart
+// is what lets the formatter preserve a file it does not understand.
+package modsyntax
 
 import (
 	"fmt"

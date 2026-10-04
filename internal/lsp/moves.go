@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/modsyntax"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 )
@@ -85,13 +87,13 @@ func legacyConfigActions(uri, dir string, o outline, r Range) []CodeAction {
 // repository on the machine. The title says where the line belongs, so the
 // person can paste it there themselves.
 func globalDirectiveActions(uri, path, text string, lines []string, r Range) []CodeAction {
-	f, err := config.Parse(path, []byte(text))
+	f, err := modsyntax.Parse(path, []byte(text))
 	if err != nil {
 		return nil
 	}
 	var actions []CodeAction
 	for _, stmt := range f.Stmts {
-		line, ok := stmt.(*config.Line)
+		line, ok := stmt.(*modsyntax.Line)
 		if !ok {
 			continue
 		}
