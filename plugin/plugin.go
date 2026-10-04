@@ -6,7 +6,8 @@
 // hook — the wire types for its input and output, and Main to read one and
 // write the other — and this package is exactly those three things and
 // nothing else. It has no dependency on the rest of letsgo, so a plugin
-// importing it pulls in nothing beyond what it already needs.
+// importing it pulls in nothing beyond what it already needs. Its only
+// dependency inside letsgo is modsyntax, the grammar of a Plugin's own config.
 package plugin
 
 import (
@@ -232,6 +233,11 @@ func run[In, Out any](hook Hook, answer func(In) (Out, error)) error {
 // An empty configDir skips the first location. When neither file exists the
 // error satisfies errors.Is(err, fs.ErrNotExist), so a plugin can decide for
 // itself whether a missing config is fatal.
+//
+// Deprecated: ReadConfig returns raw bytes and reads the legacy file relative
+// to the working directory. Use LoadConfig, which parses with letsgo.mod's
+// grammar and derives the root from configDir. ReadConfig is removed at the
+// next breaking release.
 func ReadConfig(configDir, name string) (data []byte, path string, err error) {
 	var candidates []string
 	if configDir != "" {
