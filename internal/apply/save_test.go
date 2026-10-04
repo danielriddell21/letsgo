@@ -53,3 +53,25 @@ func TestWriteReportsAFileItCannotDigest(t *testing.T) {
 		t.Error("Write accepted a manifest that is not JSON")
 	}
 }
+
+func TestSaveYankWritesAReadableYankPlan(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "yank.plan")
+	actions := []plandiff.Action{{Kind: plandiff.KindGoMod, Target: "go.mod", Op: plandiff.Change}}
+
+	digest, err := SaveYank(YankPlan{Repo: "you/demo", Tag: "v1.2.3", Reason: "broken", Previous: "v1.2.2", Actions: actions}, path, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := plandiff.Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := file.Digest()
+	if err != nil || got != digest {
+		t.Fatalf("digest = %q, %v, want %q", got, err, digest)
+	}
+	if file.Kind != plandiff.FileKindYank || file.Repo != "you/demo" || file.Tag != "v1.2.3" ||
+		file.Reason != "broken" || file.Previous != "v1.2.2" || file.LetsgoVersion != "test" || len(file.Actions) != 1 {
+		t.Errorf("file = %+v", file)
+	}
+}

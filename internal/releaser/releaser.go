@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/forgerelease"
 	"github.com/danielriddell21/letsgo/internal/github"
@@ -255,3 +256,54 @@ func fileSum(path string) ([]byte, error) {
 
 // manifestFile is the manifest's path in a built release.
 func manifestFile(dir string) string { return filepath.Join(dir, manifest.FileName) }
+
+// PlanOptions is Options plus what a plan call needs.
+type PlanOptions struct {
+	Options
+
+	// Explain shows where each resolved value came from.
+	Explain bool
+
+	// Diff also builds into a scratch directory and reads the forge, to say
+	// what a release would change there.
+	Diff bool
+}
+
+// Planned is a resolved plan and, when asked for, what releasing it would
+// change.
+type Planned struct {
+	Plan *plan.Plan
+
+	// Diff is nil unless PlanOptions.Diff was set.
+	Diff *apply.Diff
+
+	// Started is when the call began, for the caller's own timing line.
+	Started time.Time
+}
+
+// Plan resolves a plan and reports it: `letsgo plan`, and the first step of
+// `letsgo apply` with no plan file. A plan that fails its gates returns
+// ErrPlanFailed after saying so; nothing was built.
+func Plan(ctx context.Context, o PlanOptions) (*Planned, error) {
+	started := time.Now()
+
+	p, err := plan.Resolve(ctx, o.Plan)
+	if err != nil {
+		return nil, err
+	}
+	p.Report(o.out(), o.Explain)
+
+	if !p.OK() {
+		o.log("\n  plan failed in %s · nothing was built", Took(started))
+		return nil, ErrPlanFailed
+	}
+
+	planned := &Planned{Plan: p, Started: started}
+	if o.Diff {
+		planned.Diff, err = Diff(ctx, p, o.Options)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return planned, nil
+}

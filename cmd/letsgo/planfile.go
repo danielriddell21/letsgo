@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +19,6 @@ var errPlanChanges = errors.New("the plan has changes")
 
 // diffRun is what `letsgo plan --diff` and `-out` are asked to do.
 type diffRun struct {
-	Tokens   diffTokens
 	Out      string
 	ExitCode bool
 	Started  time.Time
@@ -61,17 +59,6 @@ func (r *diffRun) toMarkdown(on bool) func() {
 	os.Stdout = os.Stderr
 	r.Markdown = out
 	return func() { os.Stdout = out }
-}
-
-// diffAndSave prints what a release would change, saves the plan when asked,
-// and, for --exit-code, reports a plan that has changes through the exit
-// status.
-func (f forge) diffAndSave(ctx context.Context, p *plan.Plan, r diffRun) error {
-	d, err := f.planDiff(ctx, p, r.Tokens)
-	if err != nil {
-		return err
-	}
-	return finishDiff(p, d, r)
 }
 
 // finishDiff is everything after the forge has been read: show the actions,

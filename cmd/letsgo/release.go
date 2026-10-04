@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/build"
@@ -176,33 +175,29 @@ func (f forge) applyFresh(ctx context.Context, a releaseArgs, autoApprove bool) 
 // planForApply resolves and diffs a release as `letsgo plan -out` does, shows
 // it, and saves it at path. It reports whether there is anything to apply.
 func (f forge) planForApply(ctx context.Context, a releaseArgs, path string) (bool, error) {
-	started := time.Now()
-	tokens := diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken}
-	p, err := plan.Resolve(ctx, plan.Options{
-		Dir: ".", Publish: true, Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken,
-		Analyse: true, AllowVulnerable: a.allowVulnerable, AllowBreaking: a.allowBreaking,
-		NewClient: f.client, DisableProxyWarm: a.skipWarm,
+	clients, tokenValue := f.clients(ctx, diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken})
+	planned, err := releaser.Plan(ctx, releaser.PlanOptions{
+		Options: releaser.Options{
+			Plan: plan.Options{
+				Dir: ".", Publish: true, Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken,
+				Analyse: true, AllowVulnerable: a.allowVulnerable, AllowBreaking: a.allowBreaking,
+				NewClient: f.client, DisableProxyWarm: a.skipWarm,
+			},
+			Clients: clients, Token: tokenValue, ToolVersion: version, Log: os.Stdout, Warn: os.Stderr,
+		},
+		Diff: true,
 	})
 	if err != nil {
 		return false, err
 	}
-	p.Report(os.Stdout, false)
-	if !p.OK() {
-		fmt.Printf("\n  plan failed in %s · nothing was built\n", took(started))
-		return false, errPlanFailed
-	}
-
-	d, err := f.planDiff(ctx, p, tokens)
-	if err != nil {
-		return false, err
-	}
-	if err := finishPlan(d.Actions, nil, diffRun{Started: started}); err != nil {
+	d := planned.Diff
+	if err := finishPlan(d.Actions, nil, diffRun{Started: planned.Started}); err != nil {
 		return false, err
 	}
 	if !plandiff.HasChanges(d.Actions) {
 		return false, nil
 	}
-	if _, err := apply.Save(p, d, path, version); err != nil {
+	if _, err := apply.Save(planned.Plan, d, path, version); err != nil {
 		return false, err
 	}
 	return true, nil

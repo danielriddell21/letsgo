@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/diff"
@@ -91,20 +90,12 @@ func (f forge) planYank(ctx context.Context, tag string, y yankArgs, tokens diff
 		return err
 	}
 
-	file := &plandiff.File{
-		Schema:        plandiff.FileSchema,
-		LetsgoVersion: version,
-		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
-		Kind:          plandiff.FileKindYank,
-		Repo:          m.Repo.Owner + "/" + m.Repo.Name,
-		Tag:           tag,
-		Reason:        y.reason,
-		Previous:      previous,
-		Actions:       actions,
+	yankPlan := apply.YankPlan{
+		Repo: m.Repo.Owner + "/" + m.Repo.Name, Tag: tag, Reason: y.reason, Previous: previous, Actions: actions,
 	}
 	r.Then = "letsgo yank " + tag
 	r.Title = "letsgo plan: yank " + tag
-	return finishPlan(actions, func(path string) (string, error) { return apply.Write(file, path) }, r)
+	return finishPlan(actions, func(path string) (string, error) { return apply.SaveYank(yankPlan, path, version) }, r)
 }
 
 // applyYank retracts a release as a saved plan agreed: the forge and go.mod

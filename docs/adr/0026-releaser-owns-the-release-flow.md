@@ -41,6 +41,19 @@ already imports release.
 - `cmd/letsgo`'s `release`, `build`, `plan`, `apply` and `tag` commands only
   map flags and print.
 
+## Implementation notes
+
+- `releaser.Plan` joins the three calls: it resolves and reports a plan, and
+  with `Diff` set reads the forge, which is what `letsgo plan` and the first
+  step of `letsgo apply` share.
+- `cmd/letsgo/planfile.go` turned out to hold rendering (the plan's actions
+  as text or Markdown, the `--exit-code` answer), not file handling: saving
+  and reading plan files was already in `internal/apply` and the `plan`
+  package. The rendering stays in `cmd`. What moved to apply is assembling a
+  yank plan file (`apply.SaveYank`), so `planyank.go` no longer builds one.
+- `releaser.Release` and `Diff` require all three clients, and say so by name
+  when one is missing; `Build` needs none.
+
 ## Consequences
 
 - The release flow has one interface that tests drive with `forgetest` and the

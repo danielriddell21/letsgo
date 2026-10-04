@@ -60,34 +60,39 @@ func (f forge) runPlan(args []string) error {
 	}
 
 	ctx := context.Background()
-	started := time.Now()
-	p, err := plan.Resolve(ctx, plan.Options{
+	options := plan.Options{
 		Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty,
 		Publish: *publishGates, Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken,
 		// A diff predicts a release, whose manifest records the gates it ran.
 		Analyse: *analyse || diffing, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
-	})
+	}
+
+	if *jsonOutput {
+		p, err := plan.Resolve(ctx, options)
+		if err != nil {
+			return err
+		}
+		return printPlanJSON(p)
+	}
+
+	planOptions := releaser.PlanOptions{
+		Options: releaser.Options{Plan: options, ToolVersion: version, Log: os.Stdout, Warn: os.Stderr},
+		Explain: *explain,
+		Diff:    diffing,
+	}
+	if diffing {
+		planOptions.Clients, planOptions.Token = f.clients(ctx, diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken})
+	}
+	planned, err := releaser.Plan(ctx, planOptions)
 	if err != nil {
 		return err
 	}
 
-	if *jsonOutput {
-		return printPlanJSON(p)
-	}
-
-	p.Report(os.Stdout, *explain)
-
-	elapsed := took(started)
-	if !p.OK() {
-		fmt.Printf("\n  plan failed in %s · nothing was built\n", elapsed)
-		return errPlanFailed
-	}
 	if diffing {
-		run.Tokens = diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken}
-		run.Started = started
-		return f.diffAndSave(ctx, p, run)
+		run.Started = planned.Started
+		return finishDiff(planned.Plan, planned.Diff, run)
 	}
-	fmt.Printf("\n  plan ok in %s · run `letsgo build` to produce artifacts\n", elapsed)
+	fmt.Printf("\n  plan ok in %s \u00b7 run `letsgo build` to produce artifacts\n", took(planned.Started))
 	return nil
 }
 

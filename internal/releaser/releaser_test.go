@@ -383,3 +383,52 @@ func TestBuildReadsTheRepositoryOnlyForATap(t *testing.T) {
 		})
 	}
 }
+
+func TestPlanReportsAndOptionallyDiffs(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a plan alone builds and reads nothing", func(t *testing.T) {
+		r := newRig(t)
+		planned, err := releaser.Plan(ctx, releaser.PlanOptions{Options: r.options(t), Explain: true})
+		if err != nil {
+			t.Fatalf("Plan = %v\n%s", err, r.log)
+		}
+		if planned.Plan == nil || planned.Diff != nil || planned.Started.IsZero() {
+			t.Errorf("planned = %+v, want a plan, no diff and a start time", planned)
+		}
+		if missed := r.forge.Unhandled(); len(missed) > 0 {
+			t.Errorf("a plan touched endpoints the fake does not serve: %v", missed)
+		}
+		if r.log.Len() == 0 {
+			t.Error("the plan was not reported")
+		}
+	})
+
+	t.Run("with a diff, it says what releasing would change", func(t *testing.T) {
+		r := newRig(t)
+		planned, err := releaser.Plan(ctx, releaser.PlanOptions{Options: r.options(t), Diff: true})
+		if err != nil {
+			t.Fatalf("Plan = %v\n%s", err, r.log)
+		}
+		if planned.Diff == nil || !plandiff.HasChanges(planned.Diff.Actions) {
+			t.Errorf("diff = %+v, want changes against an empty forge", planned.Diff)
+		}
+		if r.forge.Release("v1.2.3") != nil {
+			t.Error("a diff created a release")
+		}
+	})
+
+	t.Run("a failing plan says so once", func(t *testing.T) {
+		r := newRig(t)
+		if err := os.WriteFile(filepath.Join(r.module, "dirty.txt"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := releaser.Plan(ctx, releaser.PlanOptions{Options: r.options(t)})
+		if !errors.Is(err, releaser.ErrPlanFailed) {
+			t.Fatalf("err = %v, want ErrPlanFailed", err)
+		}
+		if got := strings.Count(r.log.String(), "plan failed in"); got != 1 {
+			t.Errorf("failure reported %d times:\n%s", got, r.log)
+		}
+	})
+}
