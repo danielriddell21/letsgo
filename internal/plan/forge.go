@@ -8,7 +8,7 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/config"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/github"
 )
 
 func underActions() bool { return os.Getenv("GITHUB_ACTIONS") == "true" }

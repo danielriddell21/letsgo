@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/danielriddell21/letsgo/internal/plan"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/github"
 )
 
 // tapTokenUsage documents --tap-token once, for the three commands that reach

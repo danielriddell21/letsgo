@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/github"
 )
 
 // forge is where the commands that talk to a forge reach it. It is built once,

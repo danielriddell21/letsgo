@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/changelog"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/github"
 )
 
 func repoWithHistory(t *testing.T) string {

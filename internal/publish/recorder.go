@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/bytesize"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/github"
 )
 
 // Recorder is a Forge that writes down what would have happened instead of

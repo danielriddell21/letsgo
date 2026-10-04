@@ -16,7 +16,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/publish"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/github"
 )
 
 // fakeGitHub is enough of the releases API to exercise resume behaviour.
