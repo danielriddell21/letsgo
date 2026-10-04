@@ -14,7 +14,7 @@ Status: implemented.
 
 | what | where | set by |
 | --- | --- | --- |
-| the release definition | `letsgo.mod` beside `go.mod` (`plan.ConfigFile`) | repository |
+| the release definition | `letsgo.mod` beside `go.mod` (`config.FileName`) | repository |
 | plugin settings | `letsgo-env.mod` at the root (and `letsgo-cask.mod` in #25) | repository |
 | plugin binaries | `$GOBIN` / `$GOPATH/bin`, found on `PATH` (`plugin.resolve`) | `letsgo plugin install` |
 | build cache | `os.UserCacheDir()/letsgo/builds` (`build/cache.go`) | fixed |
