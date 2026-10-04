@@ -166,10 +166,10 @@ func TestRunReleasePublishesThroughTheInjectedForge(t *testing.T) {
 		t.Fatalf("runRelease = %v\n%s", err, out)
 	}
 
-	if missed := ff.unhandled(); len(missed) > 0 {
+	if missed := ff.Unhandled(); len(missed) > 0 {
 		t.Errorf("requests the forge does not serve: %v", missed)
 	}
-	rel := ff.release("v1.2.3")
+	rel := ff.Release("v1.2.3")
 	if rel == nil {
 		t.Fatalf("no release was published\n%s", out)
 	}
@@ -179,7 +179,7 @@ func TestRunReleasePublishesThroughTheInjectedForge(t *testing.T) {
 	if len(rel.Assets) == 0 {
 		t.Fatalf("release has no assets\n%s", out)
 	}
-	if body, ok := ff.asset("v1.2.3", manifest.FileName); !ok || len(body) == 0 {
+	if body, ok := ff.Asset("v1.2.3", manifest.FileName); !ok || len(body) == 0 {
 		t.Errorf("the manifest was not uploaded; assets = %v", rel.Assets)
 	}
 	if !strings.Contains(out, "released in") || !strings.Contains(out, rel.HTMLURL) {
