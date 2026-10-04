@@ -31,16 +31,6 @@ func defaultPluginRepo() string {
 	return defaultPluginRepoWith(machineConfig())
 }
 
-// machineConfig is the global config, or an empty one when it cannot be
-// read: a broken global file is plan's to report, not every command's.
-func machineConfig() *config.Global {
-	global, err := config.LoadGlobal()
-	if err != nil {
-		return &config.Global{}
-	}
-	return global
-}
-
 // defaultPluginRepoWith is defaultPluginRepo's core logic, taking the global
 // config directly rather than loading it, so tests can exercise the
 // `plugin-repo` directive without touching the machine's own config file.
