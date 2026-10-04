@@ -44,6 +44,10 @@ const (
 	KindGoMod   Kind = "gomod"
 )
 
+// Kinds is the closed set of kinds, so a consumer that maps each one to
+// something (the Terraform export) can test that its table misses none.
+var Kinds = []Kind{KindRelease, KindAsset, KindTap, KindImage, KindProxy, KindGoMod}
+
 // Action is one line of a plan.
 //
 // Observed and Planned are fingerprints of the target's state, not the state
