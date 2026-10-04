@@ -77,9 +77,14 @@ func diagnosticFromSyntaxError(err error) Diagnostic {
 }
 
 // planDiagnostics runs a fast, local plan — no analysis gates, no forge, a
-// dirty worktree allowed — and returns a diagnostic for every failing check
-// that carries a position. It is only meaningful for letsgo.mod, and only
-// once the file parses and decodes cleanly, so the caller skips it otherwise.
+// dirty worktree allowed — and returns a diagnostic for every failing or
+// warning check that carries a position. It is only meaningful for letsgo.mod,
+// and only once the file parses and decodes cleanly, so the caller skips it
+// otherwise.
+//
+// This is the one place a plan's problems become editor diagnostics (ADR-0008):
+// an editor client does not publish them a second time from `letsgo plan
+// --json`.
 func planDiagnostics(ctx context.Context, path string) []Diagnostic {
 	p, err := plan.Resolve(ctx, plan.Options{
 		Dir:        filepath.Dir(path),
@@ -95,16 +100,30 @@ func planDiagnostics(ctx context.Context, path string) []Diagnostic {
 
 	var diags []Diagnostic
 	for _, c := range p.Checks {
-		if c.Status != plan.Fail || c.Pos == nil {
+		severity, ok := planSeverity(c.Status)
+		if !ok || c.Pos == nil {
 			continue
 		}
 		line := max(c.Pos.Line-1, 0)
 		col := max(c.Pos.Col-1, 0)
 		diags = append(diags, Diagnostic{
 			Range:    Range{Start: Position{Line: line, Character: col}, End: Position{Line: line, Character: col + 1}},
-			Severity: SeverityError,
+			Severity: severity,
 			Message:  c.Detail,
 		})
 	}
 	return diags
+}
+
+// planSeverity is how a check that did not pass shows in an editor. A passing
+// check is not a problem, and says so with ok false.
+func planSeverity(status plan.Status) (severity int, ok bool) {
+	switch status {
+	case plan.Fail:
+		return SeverityError, true
+	case plan.Warn:
+		return SeverityWarning, true
+	default:
+		return 0, false
+	}
 }
