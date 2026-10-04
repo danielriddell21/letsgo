@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/internal/suggest"
 )
 
 // SymbolStatus describes whether a package-level identifier can carry a value
@@ -172,7 +174,7 @@ func classify(name string, vars map[string]varInfo, consts map[string]bool, all 
 			Status: SymbolMissing,
 			Detail: "no package-level variable with this name",
 		}
-		if near := nearest(name, all); near != "" {
+		if near := suggest.Nearest(name, all); near != "" {
 			s.Suggestion = "did you mean " + near + "?"
 		}
 		return s
@@ -214,63 +216,6 @@ func classify(name string, vars map[string]varInfo, consts map[string]bool, all 
 	}
 
 	return Symbol{Name: name, Status: SymbolOK}
-}
-
-// nearest finds the most plausible intended identifier.
-//
-// A case difference is the overwhelmingly common form of this mistake
-// (main.Version against main.version), so it is checked first and exactly.
-// Beyond that a small edit distance catches ordinary typos, which is worth
-// having because the alternative diagnosis — "no such variable" — gives the
-// reader nothing to act on.
-func nearest(name string, all []string) string {
-	for _, candidate := range all {
-		if candidate != name && strings.EqualFold(candidate, name) {
-			return candidate
-		}
-	}
-
-	budget := 1
-	if len(name) >= 5 {
-		budget = 2
-	}
-
-	best, bestDistance := "", budget+1
-	for _, candidate := range all {
-		if candidate == name {
-			continue
-		}
-		if d := editDistance(strings.ToLower(name), strings.ToLower(candidate)); d < bestDistance {
-			best, bestDistance = candidate, d
-		}
-	}
-	if bestDistance <= budget {
-		return best
-	}
-	return ""
-}
-
-// editDistance is Levenshtein distance over two short identifiers.
-func editDistance(a, b string) int {
-	prev := make([]int, len(b)+1)
-	curr := make([]int, len(b)+1)
-
-	for j := range prev {
-		prev[j] = j
-	}
-
-	for i := 1; i <= len(a); i++ {
-		curr[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			curr[j] = min(prev[j]+1, min(curr[j-1]+1, prev[j-1]+cost))
-		}
-		prev, curr = curr, prev
-	}
-	return prev[len(b)]
 }
 
 // MainPackage describes a command that will be built and shipped.
