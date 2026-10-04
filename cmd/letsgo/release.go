@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,12 +12,9 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/build"
-	"github.com/danielriddell21/letsgo/internal/forgerelease"
-	"github.com/danielriddell21/letsgo/internal/github"
-	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/plan"
-	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/release"
+	"github.com/danielriddell21/letsgo/internal/releaser"
 	"github.com/danielriddell21/letsgo/manifest"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
@@ -32,20 +28,18 @@ func runBuild(args []string) error {
 		return err
 	}
 
-	ctx := context.Background()
-	started := time.Now()
-
-	_, dir, result, _, err := planAndBuild(ctx, planBuildOptions{
-		Out:         *out,
+	res, err := releaser.Build(context.Background(), releaser.Options{
 		Plan:        plan.Options{Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty},
-		FailureNote: "nothing was built",
-		Started:     started,
+		ToolVersion: version,
+		Out:         *out,
+		Log:         os.Stdout,
 	})
 	if err != nil {
 		return err
 	}
+	result, dir := res.Build, res.Dir
 
-	fmt.Printf("\n  built %d files in %s\n", len(result.Files), took(started))
+	fmt.Printf("\n  built %d files in %s\n", len(result.Files), res.Took)
 	for _, a := range result.Artifacts {
 		fmt.Printf("    %s  %s\n", a.ArchiveSHA256[:12], a.Archive)
 	}
@@ -218,172 +212,34 @@ func (f forge) planForApply(ctx context.Context, a releaseArgs, path string) (bo
 // release must keep to: it is held to before anything is published, and only
 // what it lists is written.
 func (f forge) doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error {
-	started := time.Now()
+	tokens := diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken}
+	clients, tokenValue := f.clients(ctx, tokens)
 
-	tokenValue, _ := plan.Token(ctx, machineConfig(), a.token)
-	client := f.client(tokenValue)
-
-	// A rehearsal needs no forge and no token, so the gates that check for
-	// them are not run. The repository's description and licence are read
-	// regardless — a tap-files plugin's cask needs them exactly as a formula
-	// does, and a rehearsal has to reach every decision a real run reaches.
-	p, dir, result, info, err := planAndBuild(ctx, planBuildOptions{
-		Out: a.out,
+	res, err := releaser.Release(ctx, releaser.Options{
 		Plan: plan.Options{
 			Dir: ".", Publish: !a.snapshot, Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken,
 			Snapshot: a.snapshot, Analyse: true, AllowVulnerable: a.allowVulnerable, AllowBreaking: a.allowBreaking,
 			DisableProxyWarm: a.skipWarm, NewClient: f.client,
 		},
-		FailureNote: "nothing was built or published",
-		Started:     started,
-		Describe: func(p *plan.Plan) *github.RepoInfo {
-			if !wantsRepoInfo(p) {
-				return nil
-			}
-			return describeRepo(ctx, client, github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name})
-		},
+		Clients:     clients,
+		Token:       tokenValue,
+		ToolVersion: version,
+		Out:         a.out,
+		Log:         os.Stdout,
+		Warn:        os.Stderr,
+		Applied:     applied,
+		Draft:       a.draft,
+		Snapshot:    a.snapshot,
+		AppendNotes: a.appendNotes,
 	})
 	if err != nil {
 		return err
 	}
-	fmt.Printf("\n  built %d files\n", len(result.Files))
 
-	if applied, err = apply.HoldAndStamp(applied, p, result, say); err != nil {
-		return err
-	}
-
-	// After the plan is held to its file, which records the config's draft and
-	// not a flag given at apply time.
-	applyDraftFlag(p, a.draft)
-
-	// The tap gets its own client, so that the credential which can write to
-	// another repository need not be one that can also write to this one. They
-	// are the same client when no tap token is configured, which is what makes
-	// the split opt-in rather than a migration.
-	tapClient := f.tapClientFor(ctx, client, a.tapToken, a.token)
-
-	// The release itself gets its own client the same way, so it can be
-	// published under the same bot identity as the tap commit instead of
-	// whatever token ran the workflow.
-	releaseClient := f.releaseClientFor(ctx, client, a.releaseToken, a.token)
-
-	repo := github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}
-
-	manifestSum, err := fileSum(filepath.Join(result.Dir, manifest.FileName))
-	if err != nil {
-		return err
-	}
-	notes, err := notes.Release(ctx, notesSource(p, client, repo, result.Manifest, manifestSum))
-	if err != nil {
-		return err
-	}
-
-	// Everything above this line is identical in a rehearsal. Only the thing
-	// that writes to the world is exchanged.
-	targets := publication.Options{
-		Plan: p, Result: result, Dir: dir, Repo: repo, Forge: releaseClient, Tap: tapClient,
-		Info: info, Notes: notes, Token: tokenValue, Snapshot: a.snapshot, Out: os.Stdout,
-	}
-	forge, tapAPI, err := apply.Guard(ctx, applied, targets, say)
-	if err != nil {
-		return err
-	}
-	if a.snapshot {
-		fmt.Println("\n  rehearsal: the calls below would be made, and are not")
-		recorder := forgerelease.NewRecorder(os.Stdout)
-		forge, tapAPI = recorder, recorder
-	}
-
-	targets.Forge, targets.Tap, targets.Append = forge, tapAPI, a.appendNotes
-	done, err := publication.Publish(ctx, targets)
-	if err != nil {
-		return err
-	}
-
-	if a.snapshot {
-		fmt.Printf("\n  rehearsed in %s \u00b7 nothing was published\n  artifacts: %s\n", took(started), dir)
+	if res.Snapshot {
+		fmt.Printf("\n  rehearsed in %s \u00b7 nothing was published\n  artifacts: %s\n", res.Took, res.Dir)
 		return nil
 	}
-
-	fmt.Printf("\n  released in %s\n  %s\n", took(started), done.Forge.Release.HTMLURL)
+	fmt.Printf("\n  released in %s\n  %s\n", res.Took, res.URL)
 	return nil
-}
-
-// planBuildOptions describes the resolve-report-build sequence both `letsgo
-// build` and `letsgo release` open with.
-type planBuildOptions struct {
-	Plan plan.Options
-	Out  string
-
-	// FailureNote says what did not happen when the plan fails, which differs
-	// between building and releasing.
-	FailureNote string
-
-	Started time.Time
-
-	// Describe reads the repository's description, licence and homepage once
-	// the plan is known to have one, for a tap-files plugin's cask. Nil skips
-	// it \u2014 `letsgo build` never touches the network.
-	Describe func(p *plan.Plan) *github.RepoInfo
-}
-
-// planAndBuild resolves a plan, prints its report, and builds it.
-//
-// Shared so that what `letsgo build` produces locally is what `letsgo release`
-// uploads, decided by the same code rather than by two sequences that agree
-// today.
-func planAndBuild(ctx context.Context, o planBuildOptions) (*plan.Plan, string, *release.Result, *github.RepoInfo, error) {
-	p, err := plan.Resolve(ctx, o.Plan)
-	if err != nil {
-		return nil, "", nil, nil, fmt.Errorf("letsgo: %w", err)
-	}
-	p.Report(os.Stdout, false)
-
-	if !p.OK() {
-		fmt.Printf("\n  plan failed in %s \u00b7 %s\n", took(o.Started), o.FailureNote)
-		return nil, "", nil, nil, errPlanFailed
-	}
-
-	dir, err := filepath.Abs(o.Out)
-	if err != nil {
-		return nil, "", nil, nil, fmt.Errorf("letsgo: %w", err)
-	}
-
-	info := repoInfoFor(o, p)
-
-	result, err := release.Build(ctx, p, dir, version, info, func(format string, args ...any) {
-		fmt.Printf("    ! "+format+"\n", args...)
-	})
-	if err != nil {
-		return nil, "", nil, nil, fmt.Errorf("letsgo: %w", err)
-	}
-	return p, dir, result, info, nil
-}
-
-// repoInfoFor runs o.Describe when the caller set one, nil otherwise —
-// `letsgo build` never does.
-func repoInfoFor(o planBuildOptions, p *plan.Plan) *github.RepoInfo {
-	if o.Describe == nil {
-		return nil
-	}
-	return o.Describe(p)
-}
-
-// wantsRepoInfo reports whether a release should read the repository's
-// description before building: only when there is a Homebrew tap to write a
-// formula (or a tap-files plugin's cask) into, so a release with none never
-// touches the endpoint.
-func wantsRepoInfo(p *plan.Plan) bool {
-	return p.Tap != (github.Repo{}) && p.HasRepo
-}
-
-// fileSum is the sha256 of a file, which for the manifest is what identifies a
-// release.
-func fileSum(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	sum := sha256.Sum256(data)
-	return sum[:], nil
 }

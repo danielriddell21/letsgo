@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/releaser"
 )
 
 // errPlanFailed marks a failure already reported in full by the plan output,
 // so main does not print a second, vaguer version of the same thing.
-var errPlanFailed = errors.New("plan failed")
+var errPlanFailed = releaser.ErrPlanFailed
 
 func (f forge) runPlan(args []string) error {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)

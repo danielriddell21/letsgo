@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/releaser"
 )
 
 // tapTokenUsage documents --tap-token once, for the three commands that reach
@@ -41,25 +41,23 @@ func (f forge) releaseClientFor(ctx context.Context, client *github.Client, rele
 	return f.splitClientFor(ctx, client, value, token)
 }
 
-// applyDraftFlag folds `release --draft` into the plan, so the tap and image
-// publishers, which read the plan, hold back for it the same way they do for
-// `draft = true` in the config.
-func applyDraftFlag(p *plan.Plan, draft bool) {
-	if draft {
-		p.MarkDraft()
-	}
-}
+// clients are the three clients a release is written through, built from the
+// credentials the commands were given, and the token value the container
+// registry is written with. Resolving them is the caller's job, not the
+// releaser's: it never reads the environment or the machine config.
+func (f forge) clients(ctx context.Context, tokens diffTokens) (releaser.Clients, string) {
+	value, _ := plan.Token(ctx, machineConfig(), tokens.Token)
+	client := f.client(value)
 
-// describeRepo reads the description and licence the formula should carry.
-//
-// Failure is not fatal: `desc` and `license` are optional in a formula, and a
-// release should not stop because a metadata endpoint did. Returning nil means
-// the formula is rendered without them.
-func describeRepo(ctx context.Context, client *github.Client, repo github.Repo) *github.RepoInfo {
-	info, err := client.Repository(ctx, repo)
-	if err != nil {
-		fmt.Printf("  ! could not read %s's description for the formula: %v\n", repo, err)
-		return nil
-	}
-	return info
+	// The tap gets its own client, so that the credential which can write to
+	// another repository need not be one that can also write to this one. They
+	// are the same client when no tap token is configured, which is what makes
+	// the split opt-in rather than a migration. The release itself is split
+	// the same way, so it can be published under the same bot identity as the
+	// tap commit instead of whatever token ran the workflow.
+	return releaser.Clients{
+		Read:    client,
+		Release: f.releaseClientFor(ctx, client, tokens.ReleaseToken, tokens.Token),
+		Tap:     f.tapClientFor(ctx, client, tokens.TapToken, tokens.Token),
+	}, value
 }

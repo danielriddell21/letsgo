@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"strings"
 	"testing"
 )
@@ -67,4 +68,15 @@ func TestErrUsage(t *testing.T) {
 	if err := errUsage("letsgo yank <tag>"); !strings.HasPrefix(err.Error(), "usage: ") {
 		t.Errorf("errUsage = %v", err)
 	}
+}
+
+// flagSet mirrors the shapes the real subcommands declare: a boolean, a
+// string, and a second string, so permutation is tested against flags that
+// differ in whether they take a value.
+func flagSet() *flag.FlagSet {
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	fs.Bool("yes", false, "")
+	fs.String("reason", "", "")
+	fs.String("token", "", "")
+	return fs
 }

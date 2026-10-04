@@ -97,7 +97,12 @@ func reply(w http.ResponseWriter, status int, body any) {
 }
 
 func (ff *Fake) repoInfo(w http.ResponseWriter, _ *http.Request) {
-	reply(w, http.StatusOK, map[string]any{"permissions": map[string]bool{"push": true}})
+	reply(w, http.StatusOK, map[string]any{
+		"permissions": map[string]bool{"push": true},
+		"description": "a demo",
+		"homepage":    "https://example.test/demo",
+		"license":     map[string]string{"spdx_id": "MIT"},
+	})
 }
 
 // getRelease serves both GET releases/tags/{tag} and GET releases/{id}/assets,
