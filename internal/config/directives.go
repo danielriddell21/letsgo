@@ -59,25 +59,65 @@ var docs = map[string]string{
 	"require": "Turns a feature's missing tool into a failure instead of a skip.",
 }
 
-// Doc returns a directive's usage and documentation, for hover text. ok is
-// false for an unknown keyword.
-func Doc(keyword string) (usage, doc string, ok bool) {
-	usage, ok = known[keyword]
+// directiveSet is a closed vocabulary of directives: each name's usage, for
+// arity errors, and its one-line doc, for hover text. letsgo.mod and the
+// global config each have one, so lookup, listing and the errors a wrong
+// directive produces are written once.
+//
+// It holds no handlers: arity() reads the usage and every handler calls
+// arity(), which would be an initialisation cycle if the two shared a table.
+type directiveSet struct {
+	usage map[string]string
+	doc   map[string]string
+}
+
+// modDirectives is letsgo.mod's vocabulary.
+var modDirectives = directiveSet{usage: known, doc: docs}
+
+func (s directiveSet) has(keyword string) bool {
+	_, ok := s.usage[keyword]
+	return ok
+}
+
+// lookup returns a directive's usage and documentation. ok is false for an
+// unknown keyword.
+func (s directiveSet) lookup(keyword string) (usage, doc string, ok bool) {
+	usage, ok = s.usage[keyword]
 	if !ok {
 		return "", "", false
 	}
-	return usage, docs[keyword], true
+	return usage, s.doc[keyword], true
 }
 
-// Directives lists every known directive name, sorted.
-func Directives() []string {
-	names := make([]string, 0, len(known))
-	for name := range known {
+// names lists every directive name, sorted.
+func (s directiveSet) names() []string {
+	names := make([]string, 0, len(s.usage))
+	for name := range s.usage {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
 }
+
+// unknown is the error for a keyword the set does not contain, with the
+// nearest name as a suggestion.
+func (s directiveSet) unknown(file, keyword string, pos modsyntax.Position) error {
+	return unknownName(file, pos, "directive", keyword, s.names())
+}
+
+// arity is the error for a directive given the wrong arguments.
+func (s directiveSet) arity(file string, line *modsyntax.Line) error {
+	return errAt(file, line.P, "%s takes %s", line.Keyword, s.usage[line.Keyword])
+}
+
+// Doc returns a letsgo.mod directive's usage and documentation, for hover
+// text. ok is false for an unknown keyword.
+func Doc(keyword string) (usage, doc string, ok bool) {
+	return modDirectives.lookup(keyword)
+}
+
+// Directives lists every letsgo.mod directive name, sorted.
+func Directives() []string { return modDirectives.names() }
 
 // handlers folds each directive into the config.
 var handlers = map[string]func(cfg *Config, file string, line *modsyntax.Line) error{

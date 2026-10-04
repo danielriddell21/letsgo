@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/modsyntax"
@@ -92,20 +91,13 @@ func isScalar(keyword string) bool {
 }
 
 func checkKnown(file, keyword string, pos modsyntax.Position) error {
-	if _, ok := known[keyword]; ok {
+	if modDirectives.has(keyword) {
 		return nil
 	}
-	if _, ok := globalKnown[keyword]; ok {
+	if globalDirectives.has(keyword) {
 		return errAt(file, pos, "%s belongs in the global config, not letsgo.mod", keyword)
 	}
-
-	names := make([]string, 0, len(known))
-	for name := range known {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	return unknownName(file, pos, "directive", keyword, names)
+	return modDirectives.unknown(file, keyword, pos)
 }
 
 // nearestKeyword finds the name closest to keyword, for a did-you-mean
@@ -191,7 +183,7 @@ func containsString(list []string, s string) bool {
 }
 
 func arity(file string, line *modsyntax.Line) error {
-	return errAt(file, line.P, "%s takes %s", line.Keyword, known[line.Keyword])
+	return modDirectives.arity(file, line)
 }
 
 // errAt is a syntax error at pos, for a directive the decoder cannot accept.

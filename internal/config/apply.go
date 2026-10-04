@@ -21,7 +21,7 @@ func apply(cfg *Config, file string, line *modsyntax.Line) error {
 		return handle(cfg, file, line)
 	}
 	if blockOnly[line.Keyword] {
-		return errAt(file, line.P, "%s", known[line.Keyword])
+		return errAt(file, line.P, "%s", modDirectives.usage[line.Keyword])
 	}
 	return nil
 }
@@ -65,7 +65,7 @@ var variantDirectives = map[string]bool{"build": true, "tags": true}
 // the code that parses the release's own.
 func applyVariant(cfg *Config, file string, b *modsyntax.Block) error {
 	if len(b.Args) != 1 {
-		return errAt(file, b.P, "%s", known["variant"])
+		return errAt(file, b.P, "%s", modDirectives.usage["variant"])
 	}
 	name := b.Args[0]
 
