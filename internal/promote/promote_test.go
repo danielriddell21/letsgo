@@ -125,7 +125,7 @@ type fakeRelease struct {
 }
 
 // fakeForge is a minimal, in-memory GitHub releases API: just the endpoints
-// internal/promote and internal/publish call, nothing more.
+// internal/promote and internal/forgerelease call, nothing more.
 type fakeForge struct {
 	t    *testing.T
 	repo string // "owner/name"

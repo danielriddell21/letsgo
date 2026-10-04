@@ -1,4 +1,4 @@
-package publish_test
+package forgerelease_test
 
 import (
 	"bytes"
@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
 	"github.com/danielriddell21/letsgo/internal/github"
-	"github.com/danielriddell21/letsgo/internal/publish"
 )
 
 // The value of a rehearsal is that it takes the real path. If it decided
@@ -16,10 +16,10 @@ func TestRecorderRunsTheRealDecisions(t *testing.T) {
 	f := setup(t, true)
 
 	var out bytes.Buffer
-	recorder := publish.NewRecorder(&out)
+	recorder := forgerelease.NewRecorder(&out)
 	f.opts.Client = recorder
 
-	result, err := publish.Run(context.Background(), f.opts)
+	result, err := forgerelease.Run(context.Background(), f.opts)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestRecorderReproducesResumeDecisions(t *testing.T) {
 	present := f.opts.Files[0]
 	truncated := f.opts.Files[1]
 
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{
 		ID: 42, TagName: "v1.0.0",
 		Assets: []github.Asset{
@@ -54,7 +54,7 @@ func TestRecorderReproducesResumeDecisions(t *testing.T) {
 	}
 	f.opts.Client = recorder
 
-	result, err := publish.Run(context.Background(), f.opts)
+	result, err := forgerelease.Run(context.Background(), f.opts)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -78,11 +78,11 @@ func TestRecorderStillReadsEveryFile(t *testing.T) {
 	f.opts.Sums[name] = "unchanged"
 
 	// Claim a size the file does not have, exactly as a race would.
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	f.opts.Client = recorder
 	f.opts.Files = []string{name}
 
-	if _, err := publish.Run(context.Background(), f.opts); err != nil {
+	if _, err := forgerelease.Run(context.Background(), f.opts); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(recorder.Calls) == 0 {
@@ -94,7 +94,7 @@ func TestRecorderStillReadsEveryFile(t *testing.T) {
 // rehearsal reads the same whether latest was forced or left to GitHub.
 func TestRecorderReportsNonDefaultFlags(t *testing.T) {
 	var out bytes.Buffer
-	recorder := publish.NewRecorder(&out)
+	recorder := forgerelease.NewRecorder(&out)
 
 	_, err := recorder.CreateRelease(context.Background(), github.Repo{Owner: "o", Name: "r"}, github.ReleaseInput{
 		TagName: "v1.0.0", Draft: true, Prerelease: true, MakeLatest: "false",
@@ -114,9 +114,9 @@ func TestRecorderReportsNonDefaultFlags(t *testing.T) {
 func TestRecorderReportsSizesReadably(t *testing.T) {
 	f := setup(t, true)
 	var out bytes.Buffer
-	f.opts.Client = publish.NewRecorder(&out)
+	f.opts.Client = forgerelease.NewRecorder(&out)
 
-	if _, err := publish.Run(context.Background(), f.opts); err != nil {
+	if _, err := forgerelease.Run(context.Background(), f.opts); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), " B)") {

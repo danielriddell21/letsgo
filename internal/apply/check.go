@@ -13,9 +13,9 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publication"
-	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/manifest"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -70,7 +70,7 @@ func Fresh(ctx context.Context, file *plandiff.File, t publication.Options, logf
 // Guard holds the forge to the plan and returns the clients an apply
 // publishes through, which refuse anything the plan did not list. A release
 // with no plan publishes through the clients as they are.
-func Guard(ctx context.Context, file *plandiff.File, t publication.Options, logf func(string, ...any)) (publish.Forge, brew.FileAPI, error) {
+func Guard(ctx context.Context, file *plandiff.File, t publication.Options, logf func(string, ...any)) (forgerelease.Forge, brew.FileAPI, error) {
 	if file == nil {
 		return t.Forge, t.Tap, nil
 	}

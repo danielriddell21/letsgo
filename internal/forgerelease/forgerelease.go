@@ -1,4 +1,4 @@
-// Package publish uploads a built release, idempotently.
+// Package forgerelease uploads a built release, idempotently.
 //
 // Every step is keyed by content, so running it twice is safe and the second
 // run does only what the first did not finish. That property is not
@@ -9,7 +9,7 @@
 // There is consequently no state file. A local record of completed uploads
 // would be a cache of an answer the server can give directly, and a cache that
 // disagrees with the server is worse than no cache.
-package publish
+package forgerelease
 
 import (
 	"context"

@@ -13,11 +13,11 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/build"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
 	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publication"
-	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/manifest"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -290,7 +290,7 @@ func (f forge) doRelease(ctx context.Context, a releaseArgs, applied *plandiff.F
 	}
 	if a.snapshot {
 		fmt.Println("\n  rehearsal: the calls below would be made, and are not")
-		recorder := publish.NewRecorder(os.Stdout)
+		recorder := forgerelease.NewRecorder(os.Stdout)
 		forge, tapAPI = recorder, recorder
 	}
 

@@ -15,9 +15,9 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/feature"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
 	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
-	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/release"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
@@ -32,7 +32,7 @@ type Options struct {
 	Repo github.Repo
 
 	// Forge and Tap are where the release and the formula are written.
-	Forge publish.Forge
+	Forge forgerelease.Forge
 	Tap   brew.FileAPI
 
 	// Info is what the repository says about itself, for the formula.
@@ -57,7 +57,7 @@ type Options struct {
 
 // Result is what a publication did.
 type Result struct {
-	Forge *publish.Result
+	Forge *forgerelease.Result
 }
 
 // Tag is the tag the release is published under.
@@ -91,7 +91,7 @@ func Publish(ctx context.Context, o Options) (*Result, error) {
 	if err != nil {
 		return nil, &StepError{Step: StepRelease, Done: done, Err: err}
 	}
-	released, err := publish.Run(ctx, ro)
+	released, err := forgerelease.Run(ctx, ro)
 	if err != nil {
 		return nil, &StepError{Step: StepRelease, Done: done, Err: err}
 	}
@@ -117,7 +117,7 @@ func Observe(ctx context.Context, o Options) ([]plandiff.Action, error) {
 	if err != nil {
 		return nil, fmt.Errorf("observing the release: %w", err)
 	}
-	actions, err := publish.Observe(ctx, ro)
+	actions, err := forgerelease.Observe(ctx, ro)
 	if err != nil {
 		return nil, fmt.Errorf("observing the release: %w", err)
 	}
@@ -148,13 +148,13 @@ func (o Options) out() io.Writer {
 
 // releaseOptions is the publication of the forge release, decided once so that
 // what Publish does and what Observe predicts cannot drift apart.
-func releaseOptions(o Options, logf func(format string, args ...any)) (publish.Options, error) {
+func releaseOptions(o Options, logf func(format string, args ...any)) (forgerelease.Options, error) {
 	p := o.Plan
 	sums, err := sumsFrom(o.Result)
 	if err != nil {
-		return publish.Options{}, err
+		return forgerelease.Options{}, err
 	}
-	return publish.Options{
+	return forgerelease.Options{
 		Client: o.Forge,
 		Repo:   o.Repo,
 		Dir:    o.Dir,
@@ -190,11 +190,11 @@ func releaseTitle(p *plan.Plan) string {
 // notesMode also treats a disabled changelog as append-with-nothing-generated,
 // so resuming a release with `disable changelog` set never blanks an existing
 // description the way replacing it with empty notes would.
-func notesMode(appendNotes, changelogEnabled bool) publish.NotesMode {
+func notesMode(appendNotes, changelogEnabled bool) forgerelease.NotesMode {
 	if appendNotes || !changelogEnabled {
-		return publish.NotesAppend
+		return forgerelease.NotesAppend
 	}
-	return publish.NotesReplace
+	return forgerelease.NotesReplace
 }
 
 // sumsFrom is the digest of every file about to be published, read from disk:
@@ -237,7 +237,7 @@ func isLatest(p *plan.Plan) string {
 }
 
 // reportPublished summarises what reached the forge.
-func reportPublished(out io.Writer, published *publish.Result) {
+func reportPublished(out io.Writer, published *forgerelease.Result) {
 	if published.NotesRefused {
 		fmt.Fprintln(out, "  ! the release description could not be updated with this token")
 	}
