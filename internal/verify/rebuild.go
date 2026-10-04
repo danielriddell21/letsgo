@@ -17,8 +17,8 @@ import (
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/discover"
-	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/github"
+	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/manifest"
 )

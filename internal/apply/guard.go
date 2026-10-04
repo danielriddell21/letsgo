@@ -10,8 +10,8 @@ import (
 	"os"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
-	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/github"
+	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/yank"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )

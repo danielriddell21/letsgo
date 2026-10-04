@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/github"
+	"github.com/danielriddell21/letsgo/internal/publish"
 )
 
 // The value of a rehearsal is that it takes the real path. If it decided

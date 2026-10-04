@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
-	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/github"
+	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
 // moduleRepo bundles what a command needs to act on this module's own

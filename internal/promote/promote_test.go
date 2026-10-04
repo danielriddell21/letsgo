@@ -17,11 +17,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/promote"
 	"github.com/danielriddell21/letsgo/internal/publication"
-	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/manifest"
 )
