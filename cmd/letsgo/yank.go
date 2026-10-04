@@ -4,11 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
-
-	"github.com/danielriddell21/letsgo/modsyntax"
 
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -129,15 +125,7 @@ func envList() string { return strings.Join(plan.TokenEnvVars, " or ") }
 // section. Nothing here is fatal: a repository with no config, or one whose
 // config no longer parses, simply has nothing to say.
 func brewCaveats(moduleDir string) string {
-	data, err := os.ReadFile(filepath.Join(moduleDir, plan.ConfigFile))
-	if err != nil {
-		return ""
-	}
-	file, err := modsyntax.Parse(plan.ConfigFile, data)
-	if err != nil {
-		return ""
-	}
-	cfg, err := config.Decode(file)
+	cfg, _, err := config.Load(moduleDir)
 	if err != nil {
 		return ""
 	}

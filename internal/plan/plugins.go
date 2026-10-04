@@ -65,7 +65,7 @@ func (p *Plan) resolvePlugins() {
 		named = append(named, fmt.Sprintf("%s %s (%s)", configured.Command, configured.Version, hook))
 	}
 
-	p.note("plugins", strings.Join(named, ", "), ConfigFile)
+	p.note("plugins", strings.Join(named, ", "), config.FileName)
 }
 
 // relativePath reports whether a plugin command names a file relative to the

@@ -10,19 +10,16 @@ import (
 	"context"
 	"debug/buildinfo"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/danielriddell21/letsgo/modsyntax"
 
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
-	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
@@ -143,19 +140,15 @@ func Run(ctx context.Context, dir string, global *config.Global) (*Result, error
 	return r, nil
 }
 
-// loadConfig reads letsgo.mod the same way plan.Resolve does
-// (modsyntax.Parse/Decode): a missing file is the primary path, not an error;
-// a parse or decode failure is returned for checkConfig to report (DR-4).
+// loadConfig reads letsgo.mod the way plan.Resolve does (config.Load): a
+// missing file is the primary path, not an error; any other failure, a read
+// error included, is returned for checkConfig to report (DR-4).
 func loadConfig(moduleDir string) (*config.Config, error) {
-	data, err := os.ReadFile(filepath.Join(moduleDir, plan.ConfigFile))
-	if err != nil {
-		return &config.Config{}, nil //nolint:nilerr // absence is not a failure
+	cfg, _, err := config.Load(moduleDir)
+	if errors.Is(err, config.ErrNotFound) {
+		return &config.Config{}, nil
 	}
-	file, err := modsyntax.Parse(plan.ConfigFile, data)
-	if err != nil {
-		return nil, err
-	}
-	return config.Decode(file)
+	return cfg, err
 }
 
 // requiresVulncheck reports whether letsgo.mod's `require` directive names

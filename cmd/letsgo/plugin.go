@@ -11,8 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/danielriddell21/letsgo/modsyntax"
-
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -100,7 +98,7 @@ func runPluginInstall(args []string) error {
 	}
 	if fs.NArg() > 1 {
 		return fmt.Errorf("letsgo plugin install: expected one plugin, as letsgo-multi or letsgo-multi@v0.2.0, " +
-			"or no arguments to install every pin in " + plan.ConfigFile)
+			"or no arguments to install every pin in " + config.FileName)
 	}
 
 	ctx := context.Background()
@@ -139,7 +137,7 @@ func installAllPins(ctx context.Context, w io.Writer, repo, token, linkDir strin
 		return err
 	}
 	if len(cfg.Plugins) == 0 {
-		fmt.Fprintf(w, "%s pins no plugins\n", plan.ConfigFile)
+		fmt.Fprintf(w, "%s pins no plugins\n", config.FileName)
 		return nil
 	}
 
@@ -371,7 +369,7 @@ func listPlugins(w io.Writer, jsonOutput bool) error {
 	}
 
 	if len(cfg.Plugins) == 0 {
-		fmt.Fprintf(w, "%s pins no plugins\n", plan.ConfigFile)
+		fmt.Fprintf(w, "%s pins no plugins\n", config.FileName)
 		return nil
 	}
 
@@ -527,15 +525,11 @@ func pluginStatus(p config.Plugin) (string, bool) {
 }
 
 func loadPluginConfig() (*config.Config, error) {
-	data, err := os.ReadFile(plan.ConfigFile)
+	cfg, _, err := config.Load(".")
 	if err != nil {
-		return nil, fmt.Errorf("letsgo: reading %s: %w", plan.ConfigFile, err)
+		return nil, fmt.Errorf("letsgo: reading %s: %w", config.FileName, err)
 	}
-	file, err := modsyntax.Parse(filepath.Base(plan.ConfigFile), data)
-	if err != nil {
-		return nil, err
-	}
-	return config.Decode(file)
+	return cfg, nil
 }
 
 // splitPluginRef splits "letsgo-multi@v0.2.0" into its name and version. A

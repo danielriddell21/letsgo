@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
@@ -58,7 +59,7 @@ func noAmbientTokens(t *testing.T) {
 func withTap(t *testing.T) *repo {
 	t.Helper()
 	r := releasable(t)
-	r.write(plan.ConfigFile, "brew you/tap\n")
+	r.write(config.FileName, "brew you/tap\n")
 	return r
 }
 
