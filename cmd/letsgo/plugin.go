@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -195,13 +194,13 @@ func installPlugin(ctx context.Context, w io.Writer, name string, options selfup
 	fmt.Fprintf(w, "  archive %s\n  binary  %s\n", short(release.SHA256), short(release.BinarySHA256))
 
 	if link {
-		dest, err := installDir(ctx, linkDir)
+		dest, err := gobuild.InstallDir(ctx, machineConfig(), linkDir)
 		if err != nil {
-			return err
+			return fmt.Errorf("letsgo plugin install: %w", err)
 		}
 		linked := filepath.Join(dest, release.Binary)
-		if err := writeExecutable(linked, binary); err != nil {
-			return err
+		if err := pluginstore.WriteExecutable(linked, binary); err != nil {
+			return fmt.Errorf("letsgo plugin install: %w", err)
 		}
 		fmt.Fprintf(w, "  linked  %s\n", linked)
 	}
@@ -214,24 +213,11 @@ func installPlugin(ctx context.Context, w io.Writer, name string, options selfup
 // it, and writes the executable into the plugin store at its own digest. It is
 // the part of an install that the language server's "update pin" shares.
 func fetchIntoStore(ctx context.Context, options selfupdate.Options) (release *selfupdate.Update, binary []byte, path string, err error) {
-	release, err = selfupdate.Check(ctx, options)
-	if err != nil {
-		return nil, nil, "", err
-	}
-	if release == nil {
-		return nil, nil, "", fmt.Errorf("letsgo plugin install: %s has no releases", options.Repo)
-	}
-
-	binary, err = release.Download(ctx)
-	if err != nil {
-		return nil, nil, "", err
-	}
-
 	store, err := pluginstore.Open("", machineConfig().PluginsDir)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("letsgo plugin install: %w", err)
 	}
-	path, err = store.Put("sha256:"+release.BinarySHA256, release.Binary, binary)
+	release, binary, path, err = store.Fetch(ctx, options)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("letsgo plugin install: %w", err)
 	}
@@ -419,19 +405,8 @@ func reportUnreferencedStoreEntries(w io.Writer, cfg *config.Config) {
 	if err != nil {
 		return
 	}
-	entries, err := store.Entries()
-	if err != nil || len(entries) == 0 {
-		return
-	}
-
-	referenced := pinsByDigestAndName(cfg)
-	var unreferenced []pluginstore.Entry
-	for _, e := range entries {
-		if !referenced[digestAndName{e.Digest, e.Name}] {
-			unreferenced = append(unreferenced, e)
-		}
-	}
-	if len(unreferenced) == 0 {
+	unreferenced, err := store.Unreferenced(pinsOf(cfg))
+	if err != nil || len(unreferenced) == 0 {
 		return
 	}
 
@@ -443,18 +418,13 @@ func reportUnreferencedStoreEntries(w io.Writer, cfg *config.Config) {
 	fmt.Fprintln(w, "  remove them with letsgo plugin prune")
 }
 
-// digestAndName identifies one store entry the same way its pin does: a
-// plugin is only ever the same plugin when both agree.
-type digestAndName struct {
-	Digest, Name string
-}
-
-func pinsByDigestAndName(cfg *config.Config) map[digestAndName]bool {
-	referenced := make(map[digestAndName]bool, len(cfg.Plugins))
+// pinsOf is the store entries this repository's letsgo.mod pins.
+func pinsOf(cfg *config.Config) []pluginstore.Pin {
+	pins := make([]pluginstore.Pin, 0, len(cfg.Plugins))
 	for _, p := range cfg.Plugins {
-		referenced[digestAndName{p.Digest, p.Command}] = true
+		pins = append(pins, pluginstore.Pin{Digest: p.Digest, Name: p.Command})
 	}
-	return referenced
+	return pins
 }
 
 // runPluginDir prints where the plugin store is, so a cache step need not
@@ -488,10 +458,7 @@ func pruneStore(w io.Writer) error {
 		return fmt.Errorf("letsgo plugin prune: %w", err)
 	}
 
-	referenced := pinsByDigestAndName(cfg)
-	removed, err := store.Prune(func(digest, name string) bool {
-		return referenced[digestAndName{digest, name}]
-	})
+	removed, err := store.PruneUnreferenced(pinsOf(cfg))
 	if err != nil {
 		return fmt.Errorf("letsgo plugin prune: %w", err)
 	}
@@ -537,77 +504,4 @@ func loadPluginConfig() (*config.Config, error) {
 func splitPluginRef(ref string) (name, version string) {
 	name, version, _ = strings.Cut(ref, "@")
 	return name, version
-}
-
-// installDir is where a plugin goes: $GOBIN, then $GOPATH/bin.
-//
-// The same place go install puts things, because that is the directory a Go
-// developer already has on PATH — and a plugin letsgo cannot find on PATH is a
-// plugin that was not installed, however carefully it was downloaded.
-func installDir(ctx context.Context, override string) (string, error) {
-	dir := override
-	if dir == "" {
-		dir = goEnv(ctx, "GOBIN")
-	}
-	if dir == "" {
-		if gopath := goEnv(ctx, "GOPATH"); gopath != "" {
-			dir = filepath.Join(gopath, "bin")
-		}
-	}
-	if dir == "" {
-		return "", fmt.Errorf("letsgo plugin install: nowhere to install: set GOBIN or GOPATH, or pass -o")
-	}
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("letsgo plugin install: %w", err)
-	}
-	return dir, nil
-}
-
-// goEnv asks the go command when the environment is silent: both of these have
-// defaults that no environment variable carries, and the answer that matters
-// is the one go itself would give.
-//
-// A silent failure is the right one here. Not knowing GOBIN is not an error;
-// it only means the caller has to be told to pass -o.
-func goEnv(ctx context.Context, name string) string {
-	if value := os.Getenv(name); value != "" {
-		return value
-	}
-	goBin, _, err := gobuild.Toolchain(machineConfig())
-	if err != nil {
-		return ""
-	}
-	out, err := exec.CommandContext(ctx, goBin, "env", name).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// writeExecutable installs the binary through a temporary file beside the
-// target, so that an interrupted install leaves either the old plugin or none,
-// never half of a new one. Beside it rather than in a temporary directory,
-// because a rename across filesystems is a copy and stops being atomic.
-func writeExecutable(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".letsgo-plugin-*")
-	if err != nil {
-		return fmt.Errorf("letsgo plugin install: %w", err)
-	}
-	name := tmp.Name()
-	defer func() { _ = os.Remove(name) }()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("letsgo plugin install: writing %s: %w", name, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("letsgo plugin install: writing %s: %w", name, err)
-	}
-	if err := os.Chmod(name, 0o755); err != nil { //nolint:gosec // a plugin must be executable
-		return fmt.Errorf("letsgo plugin install: %w", err)
-	}
-	if err := os.Rename(name, path); err != nil {
-		return fmt.Errorf("letsgo plugin install: installing %s: %w", path, err)
-	}
-	return nil
 }

@@ -197,37 +197,6 @@ func TestPluginStatusReportsAMissingPlugin(t *testing.T) {
 	}
 }
 
-// An interrupted install must leave the old plugin, never half of a new one,
-// so the write goes through a rename.
-func TestWriteExecutableReplacesAtomically(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "letsgo-multi")
-	write(t, path, "old")
-
-	if err := writeExecutable(path, []byte("new")); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "new" {
-		t.Errorf("content = %q, want new", got)
-	}
-
-	// The temporary file is written beside the target; none may survive.
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".letsgo-plugin-") {
-			t.Errorf("%s was left behind", e.Name())
-		}
-	}
-}
-
 // writeProgram creates a file LookPath will actually find, and returns its
 // path.
 //
@@ -388,59 +357,6 @@ func TestListPluginsReportsAMissingConfig(t *testing.T) {
 	var out bytes.Buffer
 	if err := listPlugins(&out, false); err == nil {
 		t.Fatal("no letsgo.mod should be an error for list, which has nothing to report without one")
-	}
-}
-
-func TestInstallDirPrefersTheOverride(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "bin")
-
-	got, err := installDir(context.Background(), dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != dir {
-		t.Errorf("installDir = %q, want %q", got, dir)
-	}
-	// It has to exist afterwards, or the install that follows cannot write.
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		t.Errorf("installDir did not create %s: %v", dir, err)
-	}
-}
-
-func TestInstallDirFallsBackToGOBIN(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("GOBIN", dir)
-
-	got, err := installDir(context.Background(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != dir {
-		t.Errorf("installDir = %q, want GOBIN %q", got, dir)
-	}
-}
-
-func TestInstallDirFallsBackToGOPATHBin(t *testing.T) {
-	gopath := t.TempDir()
-	t.Setenv("GOBIN", "")
-	t.Setenv("GOPATH", gopath)
-
-	got, err := installDir(context.Background(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(gopath, "bin"); got != want {
-		t.Errorf("installDir = %q, want %q", got, want)
-	}
-}
-
-// The environment wins without shelling out, which is what makes the fallback
-// to `go env` affordable.
-func TestGoEnvPrefersTheEnvironment(t *testing.T) {
-	t.Setenv("GOBIN", "/somewhere/particular")
-
-	if got := goEnv(context.Background(), "GOBIN"); got != "/somewhere/particular" {
-		t.Errorf("goEnv = %q", got)
 	}
 }
 
@@ -661,15 +577,6 @@ func TestRunPluginListPrintsJSONWhenRequested(t *testing.T) {
 
 	if !strings.Contains(out, `"schema": 1`) {
 		t.Errorf("runPluginList --json output = %q, want it to contain a schema field", out)
-	}
-}
-
-// An unwritable destination has to fail before anything is reported installed.
-func TestWriteExecutableReportsAnUnwritableDir(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "no-such-dir", "letsgo-multi")
-
-	if err := writeExecutable(missing, []byte("bytes")); err == nil {
-		t.Fatal("writing into a directory that does not exist should fail")
 	}
 }
 

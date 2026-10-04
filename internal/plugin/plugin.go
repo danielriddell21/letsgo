@@ -16,17 +16,15 @@ package plugin
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/pluginstore"
 	pub "github.com/danielriddell21/letsgo/plugin"
 )
 
@@ -165,19 +163,7 @@ func resolve(p Plugin, dir, pluginsDir string) (string, error) {
 // Exported so that anything reporting on a pin computes the digest the same
 // way resolve does. Two implementations of this would be two answers to the
 // question the pin exists to settle.
-func DigestOf(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("plugin: reading %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	sum := sha256.New()
-	if _, err := io.Copy(sum, f); err != nil {
-		return "", fmt.Errorf("plugin: reading %s: %w", path, err)
-	}
-	return "sha256:" + hex.EncodeToString(sum.Sum(nil)), nil
-}
+func DigestOf(path string) (string, error) { return pluginstore.DigestOf(path) }
 
 func short(digest string) string {
 	if trimmed, ok := strings.CutPrefix(digest, "sha256:"); ok && len(trimmed) >= 12 {

@@ -15,13 +15,17 @@
 package pluginstore
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/selfupdate"
 )
 
 // StoreEnvOverride names a directory to use as the store instead of the
@@ -116,7 +120,7 @@ func (s *Store) Lookup(digest, name string) (path string, ok bool, err error) {
 		return "", false, nil //nolint:nilerr // no entry is a miss, whatever os.Stat's reason
 	}
 
-	got, err := digestOf(p)
+	got, err := DigestOf(p)
 	if err != nil {
 		return "", false, fmt.Errorf("pluginstore: reading %s: %w", p, err)
 	}
@@ -149,7 +153,7 @@ func (s *Store) Put(digest, name string, data []byte) (string, error) {
 		return "", fmt.Errorf("pluginstore: %w", err)
 	}
 	path := filepath.Join(dir, name)
-	if err := writeExecutable(path, data); err != nil {
+	if err := WriteExecutable(path, data); err != nil {
 		return "", fmt.Errorf("pluginstore: %w", err)
 	}
 	return path, nil
@@ -196,6 +200,68 @@ func (s *Store) Entries() ([]Entry, error) {
 	return entries, nil
 }
 
+// Pin names a store entry the way a pin in letsgo.mod does: a plugin is only
+// ever the same plugin when its digest and its name both agree.
+type Pin struct {
+	Digest, Name string
+}
+
+func pinned(pins []Pin) func(digest, name string) bool {
+	set := make(map[Pin]bool, len(pins))
+	for _, p := range pins {
+		set[p] = true
+	}
+	return func(digest, name string) bool { return set[Pin{digest, name}] }
+}
+
+// Unreferenced lists the entries no pin names: what PruneUnreferenced would
+// remove, so pruning is never a surprise.
+func (s *Store) Unreferenced(pins []Pin) ([]Entry, error) {
+	entries, err := s.Entries()
+	if err != nil {
+		return nil, err
+	}
+	keep := pinned(pins)
+	var out []Entry
+	for _, e := range entries {
+		if !keep(e.Digest, e.Name) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+// PruneUnreferenced removes every entry no pin names, and returns what was
+// removed.
+func (s *Store) PruneUnreferenced(pins []Pin) ([]Entry, error) {
+	return s.Prune(pinned(pins))
+}
+
+// Fetch resolves the release options names, downloads and checks it, and
+// installs the executable into the store at its own digest. It returns the
+// release, the binary and where the binary now is. A repository with no
+// releases is an error.
+func (s *Store) Fetch(ctx context.Context, options selfupdate.Options) (release *selfupdate.Update, binary []byte, path string, err error) {
+	release, err = selfupdate.Check(ctx, options)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	if release == nil {
+		return nil, nil, "", fmt.Errorf("pluginstore: %s has no releases", options.Repo)
+	}
+
+	binary, err = release.Download(ctx)
+	if err != nil {
+		return nil, nil, "", err
+	}
+
+	path, err = s.Put("sha256:"+release.BinarySHA256, release.Binary, binary)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	return release, binary, path, nil
+}
+
 // Prune removes every entry keep reports false for, and returns what was
 // removed.
 func (s *Store) Prune(keep func(digest, name string) bool) ([]Entry, error) {
@@ -209,28 +275,43 @@ func (s *Store) Prune(keep func(digest, name string) bool) ([]Entry, error) {
 		if keep(e.Digest, e.Name) {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Dir(e.Path)); err != nil {
+		// Only this name's file: the same digest can hold other names, and one
+		// of those may be pinned.
+		if err := os.Remove(e.Path); err != nil {
 			return removed, fmt.Errorf("pluginstore: removing %s: %w", e.Path, err)
 		}
+		// Tidy the digest's directory once it holds nothing; a failure here
+		// means a sibling is still in it, which is exactly the case to keep.
+		_ = os.Remove(filepath.Dir(e.Path))
 		removed = append(removed, e)
 	}
 	return removed, nil
 }
 
-func digestOf(path string) (string, error) {
-	data, err := os.ReadFile(path)
+// DigestOf is the SHA-256 of the file at path, as "sha256:…".
+//
+// The one place a plugin's digest is computed, so that anything reporting on a
+// pin (plugin.DigestOf) and the store's own check of its entries give the
+// same answer to the question the pin exists to settle.
+func DigestOf(path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return "", fmt.Errorf("pluginstore: %w", err)
+		return "", fmt.Errorf("pluginstore: reading %s: %w", path, err)
 	}
-	sum := sha256.Sum256(data)
-	return "sha256:" + hex.EncodeToString(sum[:]), nil
+	defer func() { _ = f.Close() }()
+
+	sum := sha256.New()
+	if _, err := io.Copy(sum, f); err != nil {
+		return "", fmt.Errorf("pluginstore: reading %s: %w", path, err)
+	}
+	return "sha256:" + hex.EncodeToString(sum.Sum(nil)), nil
 }
 
-// writeExecutable writes data to path through a temporary file beside it, so
+// WriteExecutable writes data to path through a temporary file beside it, so
 // an interrupted write leaves either the old content or none, never half of
 // the new content. Beside it rather than in a system temp directory, because
 // a rename across filesystems is a copy and stops being atomic.
-func writeExecutable(path string, data []byte) error {
+func WriteExecutable(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
 	if err != nil {
 		return fmt.Errorf("pluginstore: %w", err)
