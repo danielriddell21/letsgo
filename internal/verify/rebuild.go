@@ -53,7 +53,7 @@ func rebuild(ctx context.Context, o Options, result *Result, release *releases.P
 		return
 	}
 
-	compareRebuilt(ctx, o, result, m, moduleDir, commands)
+	compareRebuilt(ctx, rebuiltOutput{Options: o, Result: result, Manifest: m, ModuleDir: moduleDir, Commands: commands})
 }
 
 // obtainSource produces a tree to rebuild from.
@@ -160,14 +160,19 @@ func checkToolchain(ctx context.Context, goBin string, result *Result, m *manife
 		local, m.Builder.Go)
 }
 
-func compareRebuilt(
-	ctx context.Context,
-	o Options,
-	result *Result,
-	m *manifest.Manifest,
-	moduleDir string,
-	commands []discover.MainPackage,
-) {
+// rebuiltOutput is what a rebuild is compared against: the release's manifest, the
+// module directory the source was obtained into, and the commands found there.
+// Its findings are recorded on Result.
+type rebuiltOutput struct {
+	Options
+	Result    *Result
+	Manifest  *manifest.Manifest
+	ModuleDir string
+	Commands  []discover.MainPackage
+}
+
+func compareRebuilt(ctx context.Context, r rebuiltOutput) {
+	o, result, m, moduleDir, commands := r.Options, r.Result, r.Manifest, r.ModuleDir, r.Commands
 	groups, err := rebuildGroups(m, commands)
 	if err != nil {
 		result.add("rebuild", Fail, "%v", err)

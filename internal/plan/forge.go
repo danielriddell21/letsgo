@@ -57,7 +57,7 @@ func noWriteAccess(source, repo string) string {
 // publish and permission to do it. One API call now is worth more than a
 // perfect set of artifacts and a 401.
 func (p *Plan) checkForge(ctx context.Context, opts Options) {
-	if !p.HasRepo {
+	if !p.HasRepo() {
 		p.add("forge", Fail, "no 'origin' remote, so there is nowhere to publish")
 		return
 	}
@@ -87,7 +87,7 @@ func (p *Plan) checkForge(ctx context.Context, opts Options) {
 	}
 	p.note("token", source, opts.Credentials.Forge.From())
 
-	if !p.checkRelease(ctx, opts, repo, token, client, access) {
+	if !p.checkRelease(ctx, releaseProbe{Options: opts, Repo: repo, Token: token, Client: client, Access: access}) {
 		return
 	}
 
@@ -124,6 +124,17 @@ func ClientAt(endpoint string) func(token string) *github.Client {
 	}
 }
 
+// releaseProbe is what checkRelease starts from: the plan's options, the
+// repository, and the plain token with the client and access already
+// established for it.
+type releaseProbe struct {
+	Options
+	Repo   github.Repo
+	Token  string
+	Client *github.Client
+	Access github.Access
+}
+
 // checkRelease establishes that the release can be created with whichever
 // credential will actually create it — its own, if one is configured,
 // otherwise the plain token — the same way checkTap establishes it for the
@@ -131,12 +142,11 @@ func ClientAt(endpoint string) func(token string) *github.Client {
 // fails on its last step, which is the one failure this gate exists to
 // prevent.
 //
-// client and access are what checkForge already established for the plain
+// Client and Access are what checkForge already established for the plain
 // token, reused when no release token is configured so the common case costs
 // no second API call.
-func (p *Plan) checkRelease(
-	ctx context.Context, opts Options, repo github.Repo, token string, client *github.Client, access github.Access,
-) bool {
+func (p *Plan) checkRelease(ctx context.Context, probe releaseProbe) bool {
+	opts, repo, token, client, access := probe.Options, probe.Repo, probe.Token, probe.Client, probe.Access
 	releaseCred := opts.Credentials.Release
 	releaseToken, releaseSource := releaseCred.Value, releaseCred.Source
 	releaseClient, releaseAccess := client, access

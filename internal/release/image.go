@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/danielriddell21/letsgo/internal/git"
-
 	"github.com/danielriddell21/letsgo/internal/build"
+	"github.com/danielriddell21/letsgo/internal/git"
 	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/semver"
@@ -85,7 +84,8 @@ func buildImages(ctx context.Context, p *plan.Plan, artifacts []build.Artifact, 
 			Floating:   floating,
 		}
 
-		if err := buildOne(ctx, p, &built, binary, byBinary[binary], annotations, cache, warnf); err != nil {
+		one := oneImage{Plan: p, Built: &built, Binary: binary, Artifacts: byBinary[binary], Annotations: annotations, Cache: cache, Warnf: warnf}
+		if err := one.build(ctx); err != nil {
 			return nil, err
 		}
 		out = append(out, built)
@@ -123,22 +123,36 @@ func groupForImages(p *plan.Plan, artifacts []build.Artifact) ([]string, map[str
 	return binaries, byBinary
 }
 
-// buildOne assembles every platform's image for one binary, and the index that
+// oneImage is one binary's image to assemble: for every platform it is built
+// for, an image, and the index that ties them together.
+type oneImage struct {
+	Plan *plan.Plan
+
+	// Built is filled in: its Base, Images and Index.
+	Built *ImageBuild
+
+	// Binary is the program the image holds, and Artifacts the archives that
+	// carry it, one per platform.
+	Binary    string
+	Artifacts []build.Artifact
+
+	Annotations map[string]string
+
+	// Cache resolves each platform's base once, however many commands there
+	// are. Warnf reports what was resolved; nil discards it.
+	Cache bases
+	Warnf func(string, ...any)
+}
+
+// build assembles every platform's image for the binary, and the index that
 // ties them together.
-func buildOne(
-	ctx context.Context,
-	p *plan.Plan,
-	built *ImageBuild,
-	binary string,
-	artifacts []build.Artifact,
-	annotations map[string]string,
-	cache bases,
-	warnf func(string, ...any),
-) error {
-	for _, a := range artifacts {
+func (o oneImage) build(ctx context.Context) error {
+	p, built, binary, annotations := o.Plan, o.Built, o.Binary, o.Annotations
+
+	for _, a := range o.Artifacts {
 		platform := oci.Platform{OS: a.OS, Architecture: a.Arch}
 
-		base, err := cache.resolve(ctx, p, platform, warnf)
+		base, err := o.Cache.resolve(ctx, p, platform, o.Warnf)
 		if err != nil {
 			return err
 		}
@@ -204,7 +218,7 @@ func (cache bases) resolve(ctx context.Context, p *plan.Plan, platform oci.Platf
 
 // imageTags is what a release targets the index under: tags that are always
 // pushed, and floating tags that move only when this release is newer than
-// what they currently point at (internal/release/push.go decides that; this
+// what they currently point at (internal/publication/imagepush.go decides that; this
 // only computes the candidates, from the version and, for a stable release,
 // this module's own channel history — never the registry, so the same commit
 // always plans the same tags regardless of what has or hasn't shipped yet).

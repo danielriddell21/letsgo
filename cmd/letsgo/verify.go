@@ -33,7 +33,7 @@ func (f forge) runVerify(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	run, err := f.resolveScratchRun(ctx, *repoFlag, *token, *work, "letsgo-verify-")
+	run, err := f.resolveScratchRun(ctx, scratchOptions{Repo: *repoFlag, Token: *token, Work: *work, TmpPrefix: "letsgo-verify-"})
 	if err != nil {
 		return err
 	}

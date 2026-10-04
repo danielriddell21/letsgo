@@ -58,27 +58,48 @@ func (f forge) runTag(args []string) error {
 		proposal.Next = bump.NextPrerelease(tags, scope.Prefix, proposal.Next)
 	}
 
-	if *jsonOutput {
-		return tagJSON(ctx, loc.Runner, scope.Prefix+proposal.Next, proposal, *yes)
+	req := tagRequest{
+		Runner: loc.Runner, Prefix: scope.Prefix, Proposal: proposal, Previous: previous,
+		Warranted: *warranted, Yes: *yes,
 	}
-
-	return createTag(ctx, loc.Runner, scope.Prefix, proposal, previous, *warranted, *yes)
+	if *jsonOutput {
+		return tagJSON(ctx, req)
+	}
+	return createTag(ctx, req)
 }
 
+// tagRequest is a tag to propose and, unless it is a dry run, create.
+type tagRequest struct {
+	Runner   git.Runner
+	Prefix   string
+	Proposal bump.Proposal
+
+	// Previous is the tag the proposal bumps from, for the report.
+	Previous string
+
+	// Warranted tags only when a commit or an API change calls for a release.
+	// Yes creates the tag without asking.
+	Warranted, Yes bool
+}
+
+// ref is the full tag the request names, scope prefix included.
+func (r tagRequest) ref() string { return r.Prefix + r.Proposal.Next }
+
 // tagJSON is `letsgo tag --json`: the proposal, wire-formed, with the full
-// ref it names. A dry run unless create is set, in which case the tag is made
-// first and the output says so, so a caller reads the ref instead of scraping
-// prose for it.
-func tagJSON(ctx context.Context, runner git.Runner, ref string, proposal bump.Proposal, create bool) error {
+// ref it names. A dry run unless the request says Yes, in which case the tag is
+// made first and the output says so, so a caller reads the ref instead of
+// scraping prose for it.
+func tagJSON(ctx context.Context, req tagRequest) error {
+	ref, create := req.ref(), req.Yes
 	if create {
-		if runner.TagExists(ctx, ref) {
+		if req.Runner.TagExists(ctx, ref) {
 			return fmt.Errorf("%s already exists", ref)
 		}
-		if err := runner.CreateTag(ctx, ref, ref); err != nil {
+		if err := req.Runner.CreateTag(ctx, ref, ref); err != nil {
 			return err
 		}
 	}
-	data, err := proposal.JSON(ref, create)
+	data, err := req.Proposal.JSON(ref, create)
 	if err != nil {
 		return err
 	}
@@ -88,30 +109,28 @@ func tagJSON(ctx context.Context, runner git.Runner, ref string, proposal bump.P
 
 // createTag reports the proposal as text, then creates the tag unless
 // --warranted finds nothing to signal a release or the operator declines.
-func createTag(
-	ctx context.Context, runner git.Runner, prefix string, proposal bump.Proposal, previous string, warranted, yes bool,
-) error {
-	tag := prefix + proposal.Next
+func createTag(ctx context.Context, req tagRequest) error {
+	tag := req.ref()
 
-	reportProposal(proposal, previous)
+	reportProposal(req.Proposal, req.Previous)
 
 	// Unattended, the absence of a signal is an answer: nothing here claims to
 	// be a release, so making one would put a version on a commit whose author
 	// did not ask for it.
-	if warranted && !proposal.Signalled() {
+	if req.Warranted && !req.Proposal.Signalled() {
 		fmt.Println("\n  nothing was tagged: no commit or API change calls for a release")
 		return nil
 	}
 
-	if runner.TagExists(ctx, tag) {
+	if req.Runner.TagExists(ctx, tag) {
 		return fmt.Errorf("%s already exists", tag)
 	}
-	if !yes && !confirm(tag) {
+	if !req.Yes && !confirm(tag) {
 		fmt.Println("\n  nothing was tagged")
 		return nil
 	}
 
-	if err := runner.CreateTag(ctx, tag, tag); err != nil {
+	if err := req.Runner.CreateTag(ctx, tag, tag); err != nil {
 		return err
 	}
 	fmt.Printf("\n  tagged %s\n  push it with: git push origin %s\n", tag, tag)

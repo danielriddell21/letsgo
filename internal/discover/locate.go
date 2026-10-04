@@ -23,15 +23,16 @@ type Location struct {
 	// tags in a monorepo.
 	Scope Scope
 
-	// Repo is the forge repository the origin remote names. RepoErr says why
-	// there is none: a repository with no origin is an ordinary state for a
-	// local build, so it is not an error from Locate itself.
+	// Repo is the forge repository the origin remote names, zero when there is
+	// none. RepoErr says why: a repository with no origin is an ordinary state
+	// for a local build, so it is not an error from Locate itself.
 	Repo    Repo
 	RepoErr error
 }
 
-// HasRepo reports whether the origin remote named a forge repository.
-func (l Location) HasRepo() bool { return l.RepoErr == nil }
+// HasRepo reports whether the origin remote named a forge repository. It reads
+// the repository rather than the error, so the zero Location has none.
+func (l Location) HasRepo() bool { return l.Repo != (Repo{}) }
 
 // Locate finds the module containing start, its git checkout, scope and
 // repository. gitBin is the resolved git binary (see git.Binary).

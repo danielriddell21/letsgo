@@ -63,7 +63,7 @@ func (p *Plan) resolveImage(ctx context.Context) {
 
 	reference, source := p.Config.Image.Reference, config.FileName
 	if reference == "" {
-		if !p.HasRepo {
+		if !p.HasRepo() {
 			p.addAt(p.posOf("image"), "image", Fail,
 				"no 'origin' remote, so there is no default image name; write one after `image`")
 			return

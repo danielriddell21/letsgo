@@ -24,10 +24,11 @@ import (
 // share one, and `Formula/alpha.rb` beside `Formula/beta.rb` is what a tap is
 // shaped to hold anyway.
 //
-// info is what the caller already read from the forge for the tap-files hook;
-// passed in rather than read again so the description is asked for once, not
-// once per publisher.
-func publishTap(ctx context.Context, out io.Writer, p *plan.Plan, result *release.Result, api brew.FileAPI, repo github.Repo, info *github.RepoInfo) error {
+// o.Info is what the caller already read from the forge for the tap-files
+// hook; passed in rather than read again so the description is asked for once,
+// not once per publisher. o.Tap is where the formulas are written.
+func publishTap(ctx context.Context, out io.Writer, o Options) error {
+	p, result, api, repo, info := o.Plan, o.Result, o.Tap, o.Repo, o.Info
 	if !p.HasTap() {
 		return nil
 	}

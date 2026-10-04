@@ -403,7 +403,7 @@ func TestInstallPluginWritesTheVerifiedBinary(t *testing.T) {
 	options.Binary = "letsgo-env"
 
 	var out bytes.Buffer
-	if err := unwired.installPlugin(context.Background(), &out, "letsgo-env", options, "", false); err != nil {
+	if err := unwired.installPlugin(context.Background(), "letsgo-env", options, installTarget{Out: &out}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -449,7 +449,7 @@ func TestInstallPluginWithLinkAlsoPlacesACopyOnPATH(t *testing.T) {
 	options.Binary = "letsgo-multi"
 
 	var out bytes.Buffer
-	if err := unwired.installPlugin(context.Background(), &out, "letsgo-multi", options, linkDir, true); err != nil {
+	if err := unwired.installPlugin(context.Background(), "letsgo-multi", options, installTarget{Out: &out, LinkDir: linkDir, Link: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -476,7 +476,7 @@ func TestInstallPluginRefusesATamperedArchive(t *testing.T) {
 	options := f.Options()
 	options.Binary = "letsgo-multi"
 
-	err := unwired.installPlugin(context.Background(), io.Discard, "letsgo-multi", options, "", false)
+	err := unwired.installPlugin(context.Background(), "letsgo-multi", options, installTarget{Out: io.Discard})
 	if err == nil {
 		t.Fatal("a tampered archive should be refused")
 	}
@@ -505,7 +505,7 @@ func TestInstallPluginByTag(t *testing.T) {
 	options.Tag = "v0.1.0"
 
 	var out bytes.Buffer
-	if err := unwired.installPlugin(context.Background(), &out, "letsgo-multi", options, "", false); err != nil {
+	if err := unwired.installPlugin(context.Background(), "letsgo-multi", options, installTarget{Out: &out}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "v0.1.0") {
@@ -528,7 +528,7 @@ func TestInstallAllPinsReportsNoPins(t *testing.T) {
 	write(t, "letsgo.mod", "build linux/amd64\n")
 
 	var out bytes.Buffer
-	if err := unwired.installAllPins(context.Background(), &out, "you/plugins", "", "", false); err != nil {
+	if err := unwired.installAllPins(context.Background(), "you/plugins", "", installTarget{Out: &out}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "pins no plugins") {

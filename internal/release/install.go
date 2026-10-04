@@ -23,7 +23,7 @@ func writeInstaller(p *plan.Plan, artifacts []build.Artifact, dir string) (strin
 	if !p.Features.On(feature.InstallScript) {
 		return "", "", nil
 	}
-	if p.Tag == "" || !p.HasRepo || p.Repo.Host != "github.com" {
+	if p.Tag == "" || !p.HasRepo() || p.Repo.Host != "github.com" {
 		return "", "", nil
 	}
 

@@ -13,7 +13,7 @@ type jsonResult struct {
 	Project   string                `json:"project"`
 	Version   string                `json:"version,omitempty"`
 	Commit    string                `json:"commit"`
-	Resolved  []Source              `json:"resolved,omitempty"`
+	Resolved  []Provenance          `json:"resolved,omitempty"`
 	Checks    []Check               `json:"checks"`
 	Artifacts []string              `json:"artifacts,omitempty"`
 	Features  jsonFeatures          `json:"features"`

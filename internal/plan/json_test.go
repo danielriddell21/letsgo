@@ -19,7 +19,7 @@ func TestPlanJSON(t *testing.T) {
 		Project: "foo",
 		Version: "1.2.3",
 		Git:     git.State{ShortCommit: "abc1234"},
-		Sources: []plan.Source{{Field: "project", Value: "foo", From: "go.mod"}},
+		Sources: []plan.Provenance{{Field: "project", Value: "foo", From: "go.mod"}},
 		Checks:  []plan.Check{{Name: "go.mod", Status: plan.Pass, Detail: "ok"}},
 		Artifacts: []plan.Artifact{
 			{Name: "foo_1.2.3_linux_amd64.tar.gz"},

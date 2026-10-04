@@ -15,8 +15,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/danielriddell21/letsgo/internal/git"
-
 	"github.com/danielriddell21/letsgo/internal/credential"
 
 	"github.com/danielriddell21/letsgo/modsyntax"
@@ -131,8 +129,8 @@ type Pos struct {
 	Col  int    `json:"col"`
 }
 
-// Source records where a resolved value came from, for plan --explain.
-type Source struct {
+// Provenance records where a resolved value came from, for plan --explain.
+type Provenance struct {
 	Field string `json:"field"`
 	Value string `json:"value"`
 	From  string `json:"from"`
@@ -185,43 +183,33 @@ func (g Group) Program() string {
 }
 
 // Plan is a fully resolved, unexecuted release.
+//
+// What it knows is held in four groups, embedded so a field keeps its name:
+// the Toolchain it was resolved with, the Source the release is cut from, the
+// Build it describes, and the Outcome of resolving it. What is left here is
+// the release itself.
 type Plan struct {
+	Toolchain
+	Source
+	Build
+	Outcome
+
 	// Module is the module that gets built, which the `module` directive can
-	// move into a subdirectory. RootDir is the repository itself: where git
-	// runs, where letsgo.mod lives, what the source archive covers, and what
-	// archive files resolve against.
-	//
-	// They are the same directory in every repository that does not say
-	// otherwise, and the distinction only exists because a nested module is a
-	// fact about the layout rather than a different project: a release of
-	// ./web still ships the repository's README, and still has to publish
-	// source that can rebuild it.
-	Module  discover.Module
-	RootDir string
+	// move into a subdirectory. Source.RootDir is the repository itself: where
+	// git runs, where letsgo.mod lives, what the source archive covers, and
+	// what archive files resolve against. They are the same directory unless
+	// the config says otherwise: a nested module is a fact about the layout,
+	// not a different project, so a release of ./web still ships the
+	// repository's README and still publishes source that can rebuild it.
+	Module discover.Module
 
-	// root is the module beside letsgo.mod, kept for the names that describe
-	// the repository rather than the module being built.
-	root discover.Module
-
-	Git   git.State
-	Scope discover.Scope
-
-	// GitBin is the git command resolved from the environment and global
-	// config, handed to everything that reads the repository.
-	GitBin string
-
-	Repo       discover.Repo
-	HasRepo    bool
 	Config     *config.Config
 	ConfigPath string
 
 	// Features are the departures from the defaults this release resolved,
-	// from letsgo.mod's `disable` directive and any one-run flag that means
-	// the same thing.
+	// and Required the features whose Skip it turns into a Fail, both from
+	// letsgo.mod's `disable` and `require` directives.
 	Features feature.Set
-
-	// Required are the features whose Skip this release turns into a Fail,
-	// from letsgo.mod's `require` directive.
 	Required []string
 
 	Project  string
@@ -229,58 +217,65 @@ type Plan struct {
 	Tag      string
 	Snapshot bool
 
-	Targets   []gobuild.Target
 	Commands  []discover.MainPackage
 	LDFlags   []string
+	Tags      []string // build tags passed to the compiler
 	Files     []string
 	Artifacts []Artifact
 
-	// Groups are the archives the release produces, each holding one or more
-	// commands.
-	Groups []Group
-
-	// Plugins are the pinned programs this release runs, by hook.
-	Plugins map[plugin.Hook]plugin.Plugin
-
-	// Tags are build tags passed to the compiler.
-	Tags []string
-
-	// Symbols names the variables the version metadata is injected into,
-	// fully qualified. It defaults to the conventional main.version,
-	// main.commit and main.date.
-	Symbols VersionSymbols
-
 	// Budgets caps each target's binary size. Parsed here so that a malformed
-	// size is reported with every other planning problem, rather than after a
-	// full matrix has been compiled.
+	// size is reported with every other planning problem, not after a full
+	// matrix has been compiled.
 	Budgets map[string]bytesize.Size
 
-	// Tap is the Homebrew repository a formula is published to. Zero when no
-	// tap is configured.
-	Tap github.Repo
-
-	// Image is the container image a release publishes. Nil when none is
-	// configured, which is the default.
+	// Tap is the Homebrew repository a formula is published to, zero when none
+	// is configured. Image is the container image a release publishes, nil
+	// when none is.
+	Tap   github.Repo
 	Image *ImageTarget
 
 	// Global is the machine configuration this plan was resolved under, so
 	// what is done with the plan reads the same settings the plan reported.
 	Global *config.Global
+}
 
-	// GoBin is the go command resolved from the environment and global
-	// config, empty when none was found.
-	GoBin string
+// Toolchain is what the plan was resolved with: the git and go commands
+// resolved from the environment and global config (GoBin is empty when none
+// was found), and the module proxy this release would warm, resolved from
+// GOPROXY, the global config, or the fixed default.
+type Toolchain struct {
+	GitBin string
+	GoBin  string
+	Proxy  string
+}
 
-	// Proxy is the module proxy this release would warm, resolved from
-	// GOPROXY, the global config, or the fixed default.
-	Proxy string
+// Source is where the release is cut from: the module beside letsgo.mod, its
+// git checkout, scope and forge repository (discover.Locate), and RootDir, the
+// repository's directory.
+type Source struct {
+	discover.Location
+	RootDir string
+}
 
-	Checks  []Check
-	Sources []Source
+// Build is what the release produces from its source: the targets it builds
+// for, the archives it makes of them (each holding one or more commands), the
+// plugins it runs by hook, and the variables the version metadata is injected
+// into, fully qualified, defaulting to main.version, main.commit and
+// main.date.
+type Build struct {
+	Targets []gobuild.Target
+	Groups  []Group                       // the archives the release produces
+	Plugins map[plugin.Hook]plugin.Plugin // the pinned programs it runs, by hook
+	Symbols VersionSymbols
+}
 
-	// APIChanges is the exported API delta against the previous release. It
-	// feeds the changelog as well as the gate: the diff describes what the
-	// code did, where a commit message describes what someone meant.
+// Outcome is what resolving the plan found: every check, where each resolved
+// value came from, and the exported API delta against the previous release,
+// which feeds the changelog as well as the gate (the diff describes what the
+// code did, where a commit message describes what someone meant).
+type Outcome struct {
+	Checks     []Check
+	Sources    []Provenance
 	APIChanges []gate.Change
 }
 
@@ -322,7 +317,7 @@ func (p *Plan) configPos(cp modsyntax.Position) *Pos {
 }
 
 func (p *Plan) note(field, value, from string) {
-	p.Sources = append(p.Sources, Source{Field: field, Value: value, From: from})
+	p.Sources = append(p.Sources, Provenance{Field: field, Value: value, From: from})
 }
 
 // Resolve builds a plan. It returns an error only when the repository cannot
@@ -345,7 +340,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	}
 	root, scope := loc.Module, loc.Scope
 
-	p := &Plan{Module: root, RootDir: root.Dir, root: root, Git: loc.Git, Scope: scope, Snapshot: opts.Snapshot}
+	p := &Plan{Module: root, Source: Source{Location: loc, RootDir: root.Dir}, Snapshot: opts.Snapshot}
 	p.note("commit", loc.Git.Commit, "git HEAD")
 	p.note("commit time", loc.Git.CommitTime.Format("2006-01-02T15:04:05Z"), "git committer timestamp")
 	if scope.Prefix != "" {
@@ -353,7 +348,6 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 	}
 
 	if loc.HasRepo() {
-		p.Repo, p.HasRepo = loc.Repo, true
 		p.note("repository", loc.Repo.String(), "git remote origin")
 	}
 
