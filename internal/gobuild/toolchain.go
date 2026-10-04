@@ -50,25 +50,19 @@ func resolveToolchainWith(global *config.Global) (path, source string, err error
 	name := safeexec.Exe("go")
 
 	if override := os.Getenv(ToolchainEnvOverride); override != "" {
-		if !filepath.IsAbs(override) {
-			return "", "", fmt.Errorf("gobuild: %s must be an absolute path, got %q",
-				ToolchainEnvOverride, override)
+		bin, err := safeexec.Override("go", override, ToolchainEnvOverride)
+		if err != nil {
+			return "", "", fmt.Errorf("gobuild: %w", err)
 		}
-		if !safeexec.IsExecutable(override) {
-			return "", "", fmt.Errorf("gobuild: %s=%q is not an executable file",
-				ToolchainEnvOverride, override)
-		}
-		return override, ToolchainEnvOverride, nil
+		return bin, ToolchainEnvOverride, nil
 	}
 
 	if global.Go != "" {
-		if !filepath.IsAbs(global.Go) {
-			return "", "", fmt.Errorf("gobuild: go %q in %s must be an absolute path", global.Go, global.Path)
+		bin, err := safeexec.Override("go", global.Go, global.Path)
+		if err != nil {
+			return "", "", fmt.Errorf("gobuild: %w", err)
 		}
-		if !safeexec.IsExecutable(global.Go) {
-			return "", "", fmt.Errorf("gobuild: go %q in %s is not an executable file", global.Go, global.Path)
-		}
-		return global.Go, global.Path, nil
+		return bin, global.Path, nil
 	}
 
 	if goroot := os.Getenv("GOROOT"); goroot != "" {

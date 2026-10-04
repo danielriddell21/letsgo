@@ -71,13 +71,11 @@ func findWith(tool, install string, global *config.Global) (string, error) {
 	// An explicit override wins outright: it names the tool to run, not
 	// another place to look for it.
 	if override := global.Tools[tool]; override != "" {
-		if !filepath.IsAbs(override) {
-			return "", fmt.Errorf("gate: tool %s %q in %s must be an absolute path", tool, override, global.Path)
+		bin, err := safeexec.Override("tool "+tool, override, global.Path)
+		if err != nil {
+			return "", fmt.Errorf("gate: %w", err)
 		}
-		if !safeexec.IsExecutable(override) {
-			return "", fmt.Errorf("gate: tool %s %q in %s is not an executable file", tool, override, global.Path)
-		}
-		return override, nil
+		return bin, nil
 	}
 
 	var candidates []string
