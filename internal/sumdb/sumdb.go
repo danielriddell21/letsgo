@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielriddell21/letsgo/internal/publish"
+	"github.com/danielriddell21/letsgo/internal/goproxy"
 )
 
 // DefaultURL is the public checksum database, matching Go's own default
@@ -167,7 +167,7 @@ func lookupHashWithRetry(ctx context.Context, sumdbURL, modulePath, version stri
 // non-2xx status or transport failure is a hard error.
 func lookupHashOnce(ctx context.Context, sumdbURL, modulePath, version string) (h1 string, notFound bool, err error) {
 	url := fmt.Sprintf("%s/lookup/%s@%s", strings.TrimSuffix(sumdbURL, "/"),
-		publish.EscapeModulePath(modulePath), publish.EscapeModulePath(version))
+		goproxy.EscapeModulePath(modulePath), goproxy.EscapeModulePath(version))
 
 	body, status, err := get(ctx, url, 1<<20)
 	if err != nil {
@@ -192,7 +192,7 @@ func lookupHashOnce(ctx context.Context, sumdbURL, modulePath, version string) (
 // fetchZip downloads the module proxy's zip for module@version.
 func fetchZip(ctx context.Context, proxyURL, modulePath, version string) ([]byte, error) {
 	url := fmt.Sprintf("%s/%s/@v/%s.zip", strings.TrimSuffix(proxyURL, "/"),
-		publish.EscapeModulePath(modulePath), publish.EscapeModulePath(version))
+		goproxy.EscapeModulePath(modulePath), goproxy.EscapeModulePath(version))
 	data, status, err := get(ctx, url, maxZipSize)
 	if err != nil {
 		return nil, err

@@ -3,10 +3,11 @@ package plan
 import (
 	"os"
 
+	"github.com/danielriddell21/letsgo/internal/goproxy"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
-	"github.com/danielriddell21/letsgo/internal/publish"
 )
 
 // machineSettings is the machine's global config and the programs resolved
@@ -59,7 +60,7 @@ func (p *Plan) recordMachine(m machineSettings) {
 	if m.gitErr == nil {
 		p.note("git", m.gitBin, m.gitSource)
 	}
-	proxy, source := publish.ResolveProxy(os.Getenv("GOPROXY"), p.Global.Proxy, p.Global.Path)
+	proxy, source := goproxy.ResolveProxy(os.Getenv("GOPROXY"), p.Global.Proxy, p.Global.Path)
 	p.Proxy = proxy
 	p.note("proxy", proxy, source)
 }
