@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/discover"
@@ -118,7 +120,7 @@ func checkoutCommit(ctx context.Context, o Options, commit string) (string, erro
 	}
 	// Removed first so a re-run is not blocked by a previous attempt.
 	_ = os.RemoveAll(dir)
-	return dir, discover.AddWorktree(ctx, o.GitBin, o.Dir, dir, commit)
+	return dir, git.New(o.GitBin, o.Dir).AddWorktree(ctx, dir, commit)
 }
 
 func extractSource(ctx context.Context, o Options, release *releases.Published, m *manifest.Manifest, dir string) error {

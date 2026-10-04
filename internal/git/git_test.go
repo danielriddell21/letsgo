@@ -1,4 +1,4 @@
-package discover
+package git
 
 import (
 	"context"
@@ -18,45 +18,45 @@ func TestTagAndWorktreeLifecycle(t *testing.T) {
 	write(t, dir, "README.md", "hi\n")
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-q", "-m", "first")
-	head, err := git(ctx, bin, dir, "rev-parse", "HEAD")
+	head, err := runner(bin, dir).Run(ctx, "rev-parse", "HEAD")
 	if err != nil {
 		t.Fatalf("rev-parse: %v", err)
 	}
 
-	if TagExists(ctx, bin, dir, "v1.0.0") {
+	if runner(bin, dir).TagExists(ctx, "v1.0.0") {
 		t.Fatal("TagExists before the tag was made")
 	}
-	if err := CreateTag(ctx, bin, dir, "v1.0.0", "v1.0.0"); err != nil {
+	if err := runner(bin, dir).CreateTag(ctx, "v1.0.0", "v1.0.0"); err != nil {
 		t.Fatalf("CreateTag: %v", err)
 	}
-	if err := CreateTag(ctx, bin, dir, "v1.0.0", "v1.0.0"); err == nil {
+	if err := runner(bin, dir).CreateTag(ctx, "v1.0.0", "v1.0.0"); err == nil {
 		t.Error("CreateTag accepted a duplicate tag")
 	}
-	if err := CreateTagAt(ctx, bin, dir, "v1.0.1", head, "v1.0.1"); err != nil {
+	if err := runner(bin, dir).CreateTagAt(ctx, "v1.0.1", head, "v1.0.1"); err != nil {
 		t.Fatalf("CreateTagAt: %v", err)
 	}
-	if err := CreateTagAt(ctx, bin, dir, "v1.0.1", head, "v1.0.1"); err == nil {
+	if err := runner(bin, dir).CreateTagAt(ctx, "v1.0.1", head, "v1.0.1"); err == nil {
 		t.Error("CreateTagAt accepted a duplicate tag")
 	}
-	if got, err := TagCommit(ctx, bin, dir, "v1.0.1"); err != nil || got != head {
+	if got, err := runner(bin, dir).TagCommit(ctx, "v1.0.1"); err != nil || got != head {
 		t.Errorf("TagCommit = %q, %v, want %q", got, err, head)
 	}
 
-	if err := PushTag(ctx, bin, dir, "origin", "v1.0.1"); err == nil {
+	if err := runner(bin, dir).PushTag(ctx, "origin", "v1.0.1"); err == nil {
 		t.Error("PushTag succeeded with no remote")
 	}
 
 	work := filepath.Join(t.TempDir(), "wt")
-	if err := AddWorktree(ctx, bin, dir, work, head); err != nil {
+	if err := runner(bin, dir).AddWorktree(ctx, work, head); err != nil {
 		t.Fatalf("AddWorktree: %v", err)
 	}
-	if err := RemoveWorktree(ctx, bin, dir, work); err != nil {
+	if err := runner(bin, dir).RemoveWorktree(ctx, work); err != nil {
 		t.Fatalf("RemoveWorktree: %v", err)
 	}
-	if err := RemoveWorktree(ctx, bin, dir, work); err == nil {
+	if err := runner(bin, dir).RemoveWorktree(ctx, work); err == nil {
 		t.Error("RemoveWorktree succeeded on a worktree already gone")
 	}
-	if err := AddWorktree(ctx, bin, dir, work, "deadbeef"); err == nil {
+	if err := runner(bin, dir).AddWorktree(ctx, work, "deadbeef"); err == nil {
 		t.Error("AddWorktree accepted an unknown commit")
 	}
 }
@@ -77,7 +77,7 @@ func TestCheckoutTagReturnsTheModulesOwnDirectory(t *testing.T) {
 	gitRun(t, dir, "commit", "-q", "-m", "first")
 	gitRun(t, dir, "tag", "services/api/v1.0.0")
 
-	old, cleanup, err := CheckoutTag(context.Background(), testGit(t), dir, "services/api/v1.0.0", "services/api")
+	old, cleanup, err := runner(testGit(t), dir).CheckoutTag(context.Background(), "services/api/v1.0.0", "services/api")
 	if err != nil {
 		t.Fatalf("CheckoutTag: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestCheckoutTagWithNoScopeReturnsTheWorktreeItself(t *testing.T) {
 	gitRun(t, dir, "commit", "-q", "-m", "first")
 	gitRun(t, dir, "tag", "v1.0.0")
 
-	old, cleanup, err := CheckoutTag(context.Background(), testGit(t), dir, "v1.0.0", "")
+	old, cleanup, err := runner(testGit(t), dir).CheckoutTag(context.Background(), "v1.0.0", "")
 	if err != nil {
 		t.Fatalf("CheckoutTag: %v", err)
 	}
@@ -128,7 +128,9 @@ func TestCheckoutTagFailsForAnUnknownTagAndLeavesNothingBehind(t *testing.T) {
 	gitRun(t, dir, "add", ".")
 	gitRun(t, dir, "commit", "-q", "-m", "first")
 
-	if _, _, err := CheckoutTag(context.Background(), testGit(t), dir, "v9.9.9", ""); err == nil {
+	if _, _, err := runner(testGit(t), dir).CheckoutTag(context.Background(), "v9.9.9", ""); err == nil {
 		t.Fatal("checking out a tag that does not exist should fail")
 	}
 }
+
+func runner(bin, dir string) Runner { return Runner{Bin: bin, Dir: dir} }

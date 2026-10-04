@@ -1,4 +1,4 @@
-package discover
+package git
 
 import (
 	"context"
@@ -10,38 +10,39 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/internal/safeexec"
 )
 
 // testGit resolves git the way the composition root does, without a global
 // config.
 func testGit(t *testing.T) string {
 	t.Helper()
-	bin, _, err := GitBinary(nil)
+	bin, _, err := Binary(nil)
 	if err != nil {
-		t.Fatalf("GitBinary: %v", err)
+		t.Fatalf("Binary: %v", err)
 	}
 	return bin
 }
 
-func TestGitBinary(t *testing.T) {
-	bin, source, err := GitBinary(&config.Global{})
+func TestBinary(t *testing.T) {
+	bin, source, err := Binary(&config.Global{})
 	if err != nil {
-		t.Fatalf("GitBinary: %v", err)
+		t.Fatalf("Binary: %v", err)
 	}
 	if source == "" {
-		t.Error("GitBinary reported no source")
+		t.Error("Binary reported no source")
 	}
 	if !filepath.IsAbs(bin) {
 		t.Errorf("git resolved to %q, want an absolute path", bin)
 	}
 
 	dir := filepath.Dir(bin)
-	for _, allowed := range systemDirs() {
+	for _, allowed := range safeexec.SystemDirs() {
 		if dir == allowed {
 			return
 		}
 	}
-	t.Errorf("git resolved to %q, which is outside the permitted directories %v", bin, systemDirs())
+	t.Errorf("git resolved to %q, which is outside the permitted directories %v", bin, safeexec.SystemDirs())
 }
 
 // The directories most likely to be user-owned are the ones most worth
@@ -52,7 +53,7 @@ func TestSystemDirsExcludeUserWritableLocations(t *testing.T) {
 		t.Skip("unix paths")
 	}
 	forbidden := []string{"/usr/local/bin", "/usr/local/sbin", "/opt/homebrew/bin", ".", ""}
-	for _, dir := range systemDirs() {
+	for _, dir := range safeexec.SystemDirs() {
 		for _, bad := range forbidden {
 			if dir == bad {
 				t.Errorf("%q is writable without elevation and must not be searched", dir)
@@ -86,7 +87,7 @@ func TestPoisonedPathIsIgnored(t *testing.T) {
 	ctx := context.Background()
 	initRepo(t, repo)
 
-	g, err := FindGit(ctx, testGit(t), repo)
+	g, err := runner(testGit(t), repo).State(ctx)
 	if err != nil {
 		t.Fatalf("FindGit with a poisoned PATH: %v", err)
 	}
@@ -113,8 +114,8 @@ func TestGitEnvReplacesPath(t *testing.T) {
 	if len(paths) != 1 {
 		t.Fatalf("got %d PATH entries, want exactly 1: %v", len(paths), paths)
 	}
-	if paths[0] != fixedPath() {
-		t.Errorf("PATH = %q, want %q", paths[0], fixedPath())
+	if paths[0] != safeexec.FixedPath() {
+		t.Errorf("PATH = %q, want %q", paths[0], safeexec.FixedPath())
 	}
 	if strings.Contains(paths[0], "attacker-controlled") {
 		t.Error("the inherited PATH survived into the child environment")
@@ -207,7 +208,7 @@ func TestGitGlobalConfigOutranksSystemDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, source, err := resolveGit("", &config.Global{Path: "/etc/letsgo/config.mod", Git: pinned}, systemDirs())
+	got, source, err := resolveGit("", &config.Global{Path: "/etc/letsgo/config.mod", Git: pinned}, safeexec.SystemDirs())
 	if err != nil {
 		t.Fatal(err)
 	}

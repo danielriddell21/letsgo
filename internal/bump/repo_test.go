@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/git"
 )
 
 // scopedModule writes a repository with a nested module, versioned under its
@@ -52,7 +53,7 @@ func TestProposeVersionStripsThePrefixBeforeParsingSemver(t *testing.T) {
 	module := discover.Module{Path: "github.com/you/foo/services/api", Dir: moduleDir}
 	scope := discover.Scope{Dir: "services/api", Prefix: "services/api/"}
 
-	proposal, err := Repo{GitBin: "git", Module: module, Scope: scope}.ProposeFor(context.Background(), "services/api/v1.2.3", None)
+	proposal, err := Repo{Runner: git.New("git", moduleDir), Module: module, Scope: scope}.ProposeFor(context.Background(), "services/api/v1.2.3", None)
 	if err != nil {
 		t.Fatalf("ProposeFor: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestProposeVersionExcludesANestedModulesOwnCommits(t *testing.T) {
 	run("commit", "-q", "-m", "feat!: nested module's own breaking change")
 
 	module := discover.Module{Path: "github.com/you/foo", Dir: dir}
-	proposal, err := Repo{GitBin: "git", Module: module}.ProposeFor(context.Background(), "v1.0.0", None)
+	proposal, err := Repo{Runner: git.New("git", dir), Module: module}.ProposeFor(context.Background(), "v1.0.0", None)
 	if err != nil {
 		t.Fatalf("ProposeFor: %v", err)
 	}
@@ -156,7 +157,7 @@ func TestProposeForAForcedLevelIgnoresTheSignals(t *testing.T) {
 	module := discover.Module{Path: "github.com/you/foo/services/api", Dir: moduleDir}
 	scope := discover.Scope{Dir: "services/api", Prefix: "services/api/"}
 
-	proposal, err := Repo{GitBin: "git", Module: module, Scope: scope}.ProposeFor(context.Background(), "services/api/v1.2.3", Minor)
+	proposal, err := Repo{Runner: git.New("git", moduleDir), Module: module, Scope: scope}.ProposeFor(context.Background(), "services/api/v1.2.3", Minor)
 	if err != nil {
 		t.Fatal(err)
 	}

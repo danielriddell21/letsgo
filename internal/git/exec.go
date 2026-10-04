@@ -1,4 +1,4 @@
-package discover
+package git
 
 import (
 	"fmt"
@@ -27,25 +27,18 @@ import (
 // to avoid.
 const gitEnvOverride = "LETSGO_GIT"
 
-// systemDirs is where git is looked for. See internal/safeexec for why these
-// and not, say, /usr/local/bin.
-func systemDirs() []string { return safeexec.SystemDirs() }
-
-// fixedPath is systemDirs joined for use as a PATH value.
-func fixedPath() string { return safeexec.FixedPath() }
-
-// GitBinary resolves git for this run: the env override, then the global
+// Binary resolves git for this run: the env override, then the global
 // config's git, then a system directory. It reports where the choice came
 // from so plan --explain can say why.
 //
 // Nothing is cached: the caller resolves once at the composition root and
 // passes the path on, so two runs in one process can use different settings.
 // A nil global is the same as no config file.
-func GitBinary(global *config.Global) (path, source string, err error) {
+func Binary(global *config.Global) (path, source string, err error) {
 	if global == nil {
 		global = &config.Global{}
 	}
-	return resolveGit(os.Getenv(gitEnvOverride), global, systemDirs())
+	return resolveGit(os.Getenv(gitEnvOverride), global, safeexec.SystemDirs())
 }
 
 // resolveGit is the lookup itself, kept separate from the environment so that it
@@ -54,7 +47,7 @@ func resolveGit(override string, global *config.Global, dirs []string) (path, so
 	if override != "" {
 		bin, err := safeexec.Override("git", override, gitEnvOverride)
 		if err != nil {
-			return "", "", fmt.Errorf("discover: %w", err)
+			return "", "", fmt.Errorf("git: %w", err)
 		}
 		return bin, gitEnvOverride, nil
 	}
@@ -62,7 +55,7 @@ func resolveGit(override string, global *config.Global, dirs []string) (path, so
 	if global.Git != "" {
 		bin, err := safeexec.Override("git", global.Git, global.Path)
 		if err != nil {
-			return "", "", fmt.Errorf("discover: %w", err)
+			return "", "", fmt.Errorf("git: %w", err)
 		}
 		return bin, global.Path, nil
 	}
@@ -74,7 +67,7 @@ func resolveGit(override string, global *config.Global, dirs []string) (path, so
 	// Deliberately no PATH fallback: git is invoked on every run, and a
 	// writable directory on PATH would decide which program that is.
 	return "", "", fmt.Errorf(
-		"discover: git was not found in any system directory (%s)\n"+
+		"git: git was not found in any system directory (%s)\n"+
 			"  letsgo does not search PATH for git, because a writable directory on PATH\n"+
 			"  would let someone else choose which program runs\n"+
 			"  if git is installed elsewhere, set %s to its absolute path",

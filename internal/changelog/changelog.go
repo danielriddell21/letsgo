@@ -13,7 +13,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/gate"
 )
 
@@ -83,7 +84,7 @@ var sections = []struct {
 }
 
 // Build turns commits into a changelog.
-func Build(from, to string, commits []discover.Commit) *Changelog {
+func Build(from, to string, commits []git.Commit) *Changelog {
 	c := &Changelog{From: from, To: to}
 
 	authors := map[string]bool{}
@@ -109,7 +110,7 @@ func Build(from, to string, commits []discover.Commit) *Changelog {
 	return c
 }
 
-func parse(commit discover.Commit) Entry {
+func parse(commit git.Commit) Entry {
 	entry := Entry{SHA: commit.SHA, Subject: commit.Subject, Author: commit.Author}
 
 	// A merge commit's subject names the pull request; the change itself is

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
@@ -16,7 +18,8 @@ import (
 
 // Repo is the module in a git checkout a version is proposed for.
 type Repo struct {
-	GitBin string
+	// Runner runs git in the module's directory.
+	Runner git.Runner
 	Module discover.Module
 	Scope  discover.Scope
 
@@ -44,7 +47,7 @@ func (r Repo) ProposeFor(ctx context.Context, previous string, force Level) (Pro
 	if err != nil {
 		return Proposal{}, err
 	}
-	commits, err := discover.Commits(ctx, r.GitBin, r.Module.Dir, previous, "HEAD", nested...)
+	commits, err := r.Runner.Commits(ctx, previous, "HEAD", nested...)
 	if err != nil {
 		return Proposal{}, err
 	}
@@ -60,7 +63,7 @@ func (r Repo) ProposeFor(ctx context.Context, previous string, force Level) (Pro
 	)
 	if previous != "" {
 		goBin, _, _ := gobuild.Toolchain(r.Global)
-		old, cleanup, err := discover.CheckoutTag(ctx, r.GitBin, r.Module.Dir, previous, r.Scope.Dir)
+		old, cleanup, err := r.Runner.CheckoutTag(ctx, previous, r.Scope.Dir)
 		if err != nil {
 			apiErr = err
 		} else {

@@ -3,10 +3,11 @@ package plan
 import (
 	"os"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/goproxy"
 
 	"github.com/danielriddell21/letsgo/internal/config"
-	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
 
@@ -36,7 +37,7 @@ func resolveMachine(global *config.Global) machineSettings {
 	if path, source, err := gobuild.Toolchain(m.global); err == nil {
 		m.goBin, m.goSource = path, source
 	}
-	m.gitBin, m.gitSource, m.gitErr = discover.GitBinary(m.global)
+	m.gitBin, m.gitSource, m.gitErr = git.Binary(m.global)
 	return m
 }
 

@@ -48,15 +48,11 @@ func (f forge) runDiff(args []string) error {
 		if err != nil {
 			return err
 		}
-		var dir string
-		if repo, dir, err = targetRepo(ctx, gitBin, *repoFlag); err != nil {
-			return err
-		}
-		prefix, err := scopePrefix(ctx, gitBin, *repoFlag, dir)
+		t, err := resolveTarget(ctx, gitBin, *repoFlag, ".")
 		if err != nil {
 			return err
 		}
-		scope = discover.Scope{Prefix: prefix}
+		repo, scope = t.Repo, discover.Scope{Prefix: t.Prefix}
 		client = f.client(forgeToken(context.Background(), *token))
 	}
 

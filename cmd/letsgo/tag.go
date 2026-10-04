@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/bump"
 	"github.com/danielriddell21/letsgo/internal/discover"
 )
@@ -28,33 +30,26 @@ func runTag(args []string) error {
 
 	ctx := context.Background()
 
-	module, err := discover.FindModule(".")
-	if err != nil {
-		return err
-	}
 	gitBin, err := gitBinary()
 	if err != nil {
 		return err
 	}
-	git, err := discover.FindGit(ctx, gitBin, module.Dir)
+	loc, err := discover.Locate(ctx, gitBin, ".")
 	if err != nil {
 		return err
 	}
-	if (!*jsonOutput || *yes) && !git.Clean {
+	if (!*jsonOutput || *yes) && !loc.Git.Clean {
 		return fmt.Errorf("uncommitted changes; a tag names a commit, so commit first")
 	}
-	scope, err := discover.NewScope(git.TopLevel, module.Dir)
+	scope := loc.Scope
+
+	tags, err := loc.Runner.Tags(ctx, scope.Prefix)
 	if err != nil {
 		return err
 	}
+	previous, _ := scope.LatestStableTag(tags, loc.Git.Tags...)
 
-	tags, err := discover.Tags(ctx, gitBin, module.Dir, scope.Prefix)
-	if err != nil {
-		return err
-	}
-	previous, _ := scope.LatestStableTag(tags, git.Tags...)
-
-	repo := bump.Repo{GitBin: gitBin, Module: module, Scope: scope, Global: machineConfig()}
+	repo := bump.Repo{Runner: loc.Runner, Module: loc.Module, Scope: scope, Global: machineConfig()}
 	proposal, err := repo.ProposeFor(ctx, previous, bump.Forced(*major, *minor, *patch))
 	if err != nil {
 		return err
@@ -64,22 +59,22 @@ func runTag(args []string) error {
 	}
 
 	if *jsonOutput {
-		return tagJSON(ctx, gitBin, module.Dir, scope.Prefix+proposal.Next, proposal, *yes)
+		return tagJSON(ctx, loc.Runner, scope.Prefix+proposal.Next, proposal, *yes)
 	}
 
-	return createTag(ctx, gitBin, module.Dir, scope.Prefix, proposal, previous, *warranted, *yes)
+	return createTag(ctx, loc.Runner, scope.Prefix, proposal, previous, *warranted, *yes)
 }
 
 // tagJSON is `letsgo tag --json`: the proposal, wire-formed, with the full
 // ref it names. A dry run unless create is set, in which case the tag is made
 // first and the output says so, so a caller reads the ref instead of scraping
 // prose for it.
-func tagJSON(ctx context.Context, gitBin, dir, ref string, proposal bump.Proposal, create bool) error {
+func tagJSON(ctx context.Context, runner git.Runner, ref string, proposal bump.Proposal, create bool) error {
 	if create {
-		if discover.TagExists(ctx, gitBin, dir, ref) {
+		if runner.TagExists(ctx, ref) {
 			return fmt.Errorf("%s already exists", ref)
 		}
-		if err := discover.CreateTag(ctx, gitBin, dir, ref, ref); err != nil {
+		if err := runner.CreateTag(ctx, ref, ref); err != nil {
 			return err
 		}
 	}
@@ -94,7 +89,7 @@ func tagJSON(ctx context.Context, gitBin, dir, ref string, proposal bump.Proposa
 // createTag reports the proposal as text, then creates the tag unless
 // --warranted finds nothing to signal a release or the operator declines.
 func createTag(
-	ctx context.Context, gitBin, dir, prefix string, proposal bump.Proposal, previous string, warranted, yes bool,
+	ctx context.Context, runner git.Runner, prefix string, proposal bump.Proposal, previous string, warranted, yes bool,
 ) error {
 	tag := prefix + proposal.Next
 
@@ -108,7 +103,7 @@ func createTag(
 		return nil
 	}
 
-	if discover.TagExists(ctx, gitBin, dir, tag) {
+	if runner.TagExists(ctx, tag) {
 		return fmt.Errorf("%s already exists", tag)
 	}
 	if !yes && !confirm(tag) {
@@ -116,7 +111,7 @@ func createTag(
 		return nil
 	}
 
-	if err := discover.CreateTag(ctx, gitBin, dir, tag, tag); err != nil {
+	if err := runner.CreateTag(ctx, tag, tag); err != nil {
 		return err
 	}
 	fmt.Printf("\n  tagged %s\n  push it with: git push origin %s\n", tag, tag)

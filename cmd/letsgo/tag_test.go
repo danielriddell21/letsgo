@@ -40,6 +40,7 @@ func scopedModuleFixture(t *testing.T) (repoDir, moduleDir string) {
 		{"-C", repoDir, "init", "-q", "-b", "main"},
 		{"-C", repoDir, "config", "user.name", "Test"},
 		{"-C", repoDir, "config", "user.email", "t@example.com"},
+		{"-C", repoDir, "remote", "add", "origin", "https://github.com/you/foo.git"},
 		{"-C", repoDir, "add", "."},
 		{"-C", repoDir, "commit", "-q", "-m", "first"},
 		{"-C", repoDir, "tag", "services/api/v1.2.3"},

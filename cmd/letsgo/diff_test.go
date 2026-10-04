@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,10 +70,7 @@ func TestIsManifestPath(t *testing.T) {
 // With no "to", diff compares against the latest release within the module's
 // own scope, not another module's.
 func TestRunDiffDefaultsToTheModulesOwnLatestRelease(t *testing.T) {
-	repoDir, moduleDir := scopedModuleFixture(t)
-	if out, err := exec.Command("git", "-C", repoDir, "remote", "add", "origin", "https://github.com/you/foo.git").CombinedOutput(); err != nil {
-		t.Fatalf("git remote add: %v\n%s", err, out)
-	}
+	_, moduleDir := scopedModuleFixture(t)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/you/foo/releases/latest", func(w http.ResponseWriter, _ *http.Request) {

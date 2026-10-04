@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/brew"
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/discover"
@@ -50,7 +52,7 @@ type Options struct {
 	ModuleDir string
 	Prefix    string
 
-	// GitBin is the git command, as resolved by discover.GitBinary.
+	// GitBin is the git command, as resolved by git.Binary.
 	GitBin string
 
 	// Shallow says Dir's history is incomplete, so the changelog must ask
@@ -325,8 +327,8 @@ func restoreRC(ctx context.Context, o Options, rc *releases.Published) (*github.
 // tagCommit is step 2: tag the RC's commit, idempotently, and push the tag
 // best effort.
 func tagCommit(ctx context.Context, o Options, tag, commit string, logf func(string, ...any)) error {
-	if discover.TagExists(ctx, o.GitBin, o.Dir, tag) {
-		existing, err := discover.TagCommit(ctx, o.GitBin, o.Dir, tag)
+	if git.New(o.GitBin, o.Dir).TagExists(ctx, tag) {
+		existing, err := git.New(o.GitBin, o.Dir).TagCommit(ctx, tag)
 		if err != nil {
 			return fmt.Errorf("promote: %w", err)
 		}
@@ -334,7 +336,7 @@ func tagCommit(ctx context.Context, o Options, tag, commit string, logf func(str
 			return fmt.Errorf("promote: %s already exists locally and points at %s, not the RC's commit %s",
 				tag, shortCommit(existing), shortCommit(commit))
 		}
-	} else if err := discover.CreateTagAt(ctx, o.GitBin, o.Dir, tag, commit, tag); err != nil {
+	} else if err := git.New(o.GitBin, o.Dir).CreateTagAt(ctx, tag, commit, tag); err != nil {
 		return fmt.Errorf("promote: %w", err)
 	}
 
@@ -342,7 +344,7 @@ func tagCommit(ctx context.Context, o Options, tag, commit string, logf func(str
 	if remote == "" {
 		remote = "origin"
 	}
-	if err := discover.PushTag(ctx, o.GitBin, o.Dir, remote, tag); err != nil {
+	if err := git.New(o.GitBin, o.Dir).PushTag(ctx, remote, tag); err != nil {
 		logf("! could not push %s to %s: %v (the release in step 4 will create it there)", tag, remote, err)
 	}
 	return nil
@@ -360,10 +362,10 @@ func tagCommit(ctx context.Context, o Options, tag, commit string, logf func(str
 func rebuild(ctx context.Context, o Options, stableTag, commit string) (*plan.Plan, *release.Result, error) {
 	checkoutDir := filepath.Join(o.WorkDir, "checkout")
 	_ = os.RemoveAll(checkoutDir)
-	if err := discover.AddWorktree(ctx, o.GitBin, o.Dir, checkoutDir, commit); err != nil {
+	if err := git.New(o.GitBin, o.Dir).AddWorktree(ctx, checkoutDir, commit); err != nil {
 		return nil, nil, fmt.Errorf("promote: %w", err)
 	}
-	defer func() { _ = discover.RemoveWorktree(ctx, o.GitBin, o.Dir, checkoutDir) }()
+	defer func() { _ = git.New(o.GitBin, o.Dir).RemoveWorktree(ctx, checkoutDir) }()
 
 	rel, err := filepath.Rel(o.Dir, o.ModuleDir)
 	if err != nil {

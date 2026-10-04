@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/internal/git"
 )
 
 // Repo identifies the forge repository a release is published to.
@@ -21,8 +23,8 @@ type Repo struct {
 func (r Repo) String() string { return r.Host + "/" + r.Owner + "/" + r.Name }
 
 // FindRepo derives the repository from the "origin" remote.
-func FindRepo(ctx context.Context, gitBin string, dir string) (Repo, error) {
-	url, err := git(ctx, gitBin, dir, "remote", "get-url", "origin")
+func FindRepo(ctx context.Context, r git.Runner) (Repo, error) {
+	url, err := r.Remote(ctx, "origin")
 	if err != nil {
 		return Repo{}, fmt.Errorf("discover: no 'origin' remote: %w", err)
 	}

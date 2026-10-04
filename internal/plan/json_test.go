@@ -4,7 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
@@ -17,7 +18,7 @@ func TestPlanJSON(t *testing.T) {
 	p := &plan.Plan{
 		Project: "foo",
 		Version: "1.2.3",
-		Git:     discover.Git{ShortCommit: "abc1234"},
+		Git:     git.State{ShortCommit: "abc1234"},
 		Sources: []plan.Source{{Field: "project", Value: "foo", From: "go.mod"}},
 		Checks:  []plan.Check{{Name: "go.mod", Status: plan.Pass, Detail: "ok"}},
 		Artifacts: []plan.Artifact{
