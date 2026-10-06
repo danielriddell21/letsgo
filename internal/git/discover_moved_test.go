@@ -122,7 +122,8 @@ func TestStateReportsATopLevelThatAgreesWithTheDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if g.TopLevel != want {
+	// git writes forward slashes even on Windows; the directory is native.
+	if got := filepath.FromSlash(g.TopLevel); got != want {
 		t.Errorf("TopLevel = %q, want the repository's own directory %q", g.TopLevel, want)
 	}
 }
