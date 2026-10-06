@@ -1,4 +1,4 @@
-package release
+package publication
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+
+	"github.com/danielriddell21/letsgo/internal/release"
 
 	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/semver"
@@ -25,13 +27,19 @@ var registryEnv = [][2]string{
 // Each tag is a separate write of the same index, which costs one request and
 // means `latest` names exactly the bytes the version tag names rather than a
 // second build that happens to be equal.
-func PushImages(ctx context.Context, builds []ImageBuild, token string, logf func(string, ...any)) error {
+func PushImages(ctx context.Context, builds []release.ImageBuild, token string, logf func(string, ...any)) error {
+	return pushImages(ctx, builds, func(host string) *oci.Registry { return registryFor(host, token) }, logf)
+}
+
+// pushImages is PushImages with the registry client for a host supplied, so
+// it can be driven against an in-process registry.
+func pushImages(ctx context.Context, builds []release.ImageBuild, registryAt func(host string) *oci.Registry, logf func(string, ...any)) error {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
 
 	for _, built := range builds {
-		registry := registryFor(built.APIHost, token)
+		registry := registryAt(built.APIHost)
 
 		tags, err := resolveFloatingTags(ctx, registry, built, logf)
 		if err != nil {
@@ -61,7 +69,7 @@ func PushImages(ctx context.Context, builds []ImageBuild, token string, logf fun
 // each floating tag that's newer than what it currently points at, or that
 // has never been pushed. Floating tags only move forward: a backport moves
 // its major.minor, but never a major or latest that's already ahead of it.
-func resolveFloatingTags(ctx context.Context, registry *oci.Registry, built ImageBuild, logf func(string, ...any)) ([]string, error) {
+func resolveFloatingTags(ctx context.Context, registry *oci.Registry, built release.ImageBuild, logf func(string, ...any)) ([]string, error) {
 	tags := append([]string{}, built.Tags...)
 	if len(built.Floating) == 0 {
 		return tags, nil
@@ -144,7 +152,7 @@ func registryFor(host, token string) *oci.Registry {
 
 // baseSource says where a base image's layers can be fetched from, which is
 // needed only when there is a base.
-func baseSource(built ImageBuild, target *oci.Registry) *oci.Source {
+func baseSource(built release.ImageBuild, target *oci.Registry) *oci.Source {
 	if built.Base == nil {
 		return nil
 	}
@@ -159,16 +167,4 @@ func baseSource(built ImageBuild, target *oci.Registry) *oci.Source {
 	}
 	source.Registry = oci.NewRegistry(ref.APIHost())
 	return source
-}
-
-// Describe renders what was assembled, for a build that is not publishing.
-func Describe(builds []ImageBuild) string {
-	if len(builds) == 0 {
-		return ""
-	}
-	out := ""
-	for _, b := range builds {
-		out += fmt.Sprintf("  %s  %s\n", b.Reference(), b.Index.Digest)
-	}
-	return out
 }

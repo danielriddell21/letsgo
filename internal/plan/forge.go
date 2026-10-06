@@ -208,7 +208,7 @@ func (p *Plan) resolveTap() {
 // built. A release that succeeds and then cannot update the tap has left the
 // two out of step, which is worse than not starting.
 func (p *Plan) checkTap(ctx context.Context, client *github.Client, source string) {
-	if p.Tap == (github.Repo{}) {
+	if !p.HasTap() {
 		return
 	}
 

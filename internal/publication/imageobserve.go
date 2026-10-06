@@ -1,10 +1,12 @@
-package release
+package publication
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/danielriddell21/letsgo/internal/release"
 
 	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/semver"
@@ -16,11 +18,17 @@ import (
 //
 // It only reads. A floating tag that would not move, because what it points
 // at is already newer, is left out: nothing is going to happen to it.
-func ObserveImages(ctx context.Context, builds []ImageBuild, token string) ([]plan.Action, error) {
+func ObserveImages(ctx context.Context, builds []release.ImageBuild, token string) ([]plan.Action, error) {
+	return observeImages(ctx, builds, func(host string) *oci.Registry { return registryFor(host, token) })
+}
+
+// observeImages is ObserveImages with the registry client for a host
+// supplied, so it can be driven against an in-process registry.
+func observeImages(ctx context.Context, builds []release.ImageBuild, registryAt func(host string) *oci.Registry) ([]plan.Action, error) {
 	var actions []plan.Action
 
 	for _, built := range builds {
-		registry := registryFor(built.APIHost, token)
+		registry := registryAt(built.APIHost)
 		planned := string(built.Index.Digest)
 
 		var releasing semver.Version
@@ -56,7 +64,7 @@ func ObserveImages(ctx context.Context, builds []ImageBuild, token string) ([]pl
 // A non-nil releasing marks a floating tag, which only moves forward: where
 // it would not, the returned action is empty.
 func observeTag(
-	ctx context.Context, registry *oci.Registry, built ImageBuild, tag, planned string, releasing *semver.Version,
+	ctx context.Context, registry *oci.Registry, built release.ImageBuild, tag, planned string, releasing *semver.Version,
 ) (plan.Action, error) {
 	action := plan.Action{
 		Kind:    plan.KindImage,

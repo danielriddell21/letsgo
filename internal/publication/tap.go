@@ -28,7 +28,7 @@ import (
 // passed in rather than read again so the description is asked for once, not
 // once per publisher.
 func publishTap(ctx context.Context, out io.Writer, p *plan.Plan, result *release.Result, api brew.FileAPI, repo github.Repo, info *github.RepoInfo) error {
-	if p.Tap == (github.Repo{}) {
+	if !p.HasTap() {
 		return nil
 	}
 

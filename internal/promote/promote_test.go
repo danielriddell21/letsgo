@@ -99,7 +99,7 @@ func buildRC(t *testing.T, dir string) *release.Result {
 		t.Fatalf("plan: %v %+v", err, p.Checks)
 	}
 	dist := t.TempDir()
-	result, err := release.Build(context.Background(), p, dist, "test", nil, nil)
+	result, err := release.Build(context.Background(), release.BuildOptions{Plan: p, Dir: dist, ToolVersion: "test"})
 	if err != nil {
 		t.Fatalf("release.Build: %v", err)
 	}

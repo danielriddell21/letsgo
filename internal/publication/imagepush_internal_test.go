@@ -1,4 +1,4 @@
-package release
+package publication
 
 import (
 	"fmt"
@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/danielriddell21/letsgo/internal/release"
 
 	"github.com/danielriddell21/letsgo/internal/oci"
 )
@@ -52,7 +54,7 @@ func (f *fakeManifests) registry() *oci.Registry {
 // yet for the release to be older than.
 func TestResolveFloatingTagsAdvancesATagThatHasNeverBeenPushed(t *testing.T) {
 	f := newFakeManifests(t, nil)
-	built := ImageBuild{
+	built := release.ImageBuild{
 		Repository: "you/tool", Version: "1.0.0",
 		Tags: []string{"1.0.0"}, Floating: []string{"1", "latest"},
 	}
@@ -70,7 +72,7 @@ func TestResolveFloatingTagsAdvancesATagThatHasNeverBeenPushed(t *testing.T) {
 // A floating tag currently older than the release advances.
 func TestResolveFloatingTagsAdvancesATagOlderThanTheRelease(t *testing.T) {
 	f := newFakeManifests(t, map[string]string{"1": "1.1.0"})
-	built := ImageBuild{
+	built := release.ImageBuild{
 		Repository: "you/tool", Version: "1.2.0",
 		Tags: []string{"1.2.0"}, Floating: []string{"1"},
 	}
@@ -88,7 +90,7 @@ func TestResolveFloatingTagsAdvancesATagOlderThanTheRelease(t *testing.T) {
 // A floating tag already newer than or equal to the release is left alone.
 func TestResolveFloatingTagsKeepsATagNewerThanTheRelease(t *testing.T) {
 	f := newFakeManifests(t, map[string]string{"1": "1.3.0", "latest": "1.2.0"})
-	built := ImageBuild{
+	built := release.ImageBuild{
 		Repository: "you/tool", Version: "1.2.0",
 		Tags: []string{"1.2.0"}, Floating: []string{"1", "latest"},
 	}
@@ -110,7 +112,7 @@ func TestResolveFloatingTagsBackportMovesOnlyItsOwnMinor(t *testing.T) {
 	f := newFakeManifests(t, map[string]string{
 		"1.2": "1.2.8", "1": "1.3.0", "latest": "1.3.0",
 	})
-	built := ImageBuild{
+	built := release.ImageBuild{
 		Repository: "you/tool", Version: "1.2.9",
 		Tags: []string{"1.2.9"}, Floating: []string{"1.2", "1", "latest"},
 	}

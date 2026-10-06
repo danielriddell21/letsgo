@@ -383,10 +383,13 @@ func rebuild(ctx context.Context, o Options, stableTag, commit string) (*plan.Pl
 	}
 
 	buildDir := filepath.Join(o.WorkDir, "build")
-	result, err := release.Build(ctx, p, buildDir, o.ToolVersion, o.RepoInfo, func(format string, args ...any) {
-		if o.Logf != nil {
-			o.Logf("! "+format, args...)
-		}
+	result, err := release.Build(ctx, release.BuildOptions{
+		Plan: p, Dir: buildDir, ToolVersion: o.ToolVersion, Repo: publication.ReleaseRepoInfo(o.RepoInfo),
+		Warnf: func(format string, args ...any) {
+			if o.Logf != nil {
+				o.Logf("! "+format, args...)
+			}
+		},
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("promote: %w", err)

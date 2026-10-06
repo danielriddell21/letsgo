@@ -30,6 +30,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/forgerelease"
 	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/publication"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/manifest"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -199,8 +200,9 @@ func build(ctx context.Context, o Options, started time.Time, failureNote string
 		info = RepoInfo(ctx, o.Clients.Read, p, o.Log)
 	}
 
-	result, err := release.Build(ctx, p, dir, o.ToolVersion, info, func(format string, args ...any) {
-		o.log("    ! "+format, args...)
+	result, err := release.Build(ctx, release.BuildOptions{
+		Plan: p, Dir: dir, ToolVersion: o.ToolVersion, Repo: publication.ReleaseRepoInfo(info),
+		Warnf: func(format string, args ...any) { o.log("    ! "+format, args...) },
 	})
 	if err != nil {
 		return nil, fmt.Errorf("letsgo: %w", err)
@@ -213,7 +215,7 @@ func build(ctx context.Context, o Options, started time.Time, failureNote string
 // formula (or a tap-files plugin's cask) into, so a release with none never
 // touches the endpoint.
 func WantsRepoInfo(p *plan.Plan) bool {
-	return p.Tap != (github.Repo{}) && p.HasRepo
+	return p.HasTap() && p.HasRepo
 }
 
 // RepoInfo reads the repository's description, licence and homepage for a

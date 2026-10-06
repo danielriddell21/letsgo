@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 )
 
@@ -29,7 +30,17 @@ func publishImages(ctx context.Context, out io.Writer, o Options) error {
 		return nil
 	}
 
-	return release.PushImages(ctx, o.Result.Images, o.Token, func(format string, args ...any) {
+	return PushImages(ctx, o.Result.Images, o.Token, func(format string, args ...any) {
 		fmt.Fprintf(out, "  "+format+"\n", args...)
 	})
+}
+
+// ReleaseRepoInfo is what the forge said about the repository, in the
+// forge-neutral form the build takes. nil, as when nothing was read, is the
+// zero RepoInfo.
+func ReleaseRepoInfo(info *github.RepoInfo) release.RepoInfo {
+	if info == nil {
+		return release.RepoInfo{}
+	}
+	return release.RepoInfo{Description: info.Description, License: info.License, Homepage: info.Homepage}
 }

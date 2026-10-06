@@ -19,7 +19,6 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/build"
-	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
@@ -46,15 +45,40 @@ type Result struct {
 	Files []string
 }
 
+// RepoInfo is what the forge says about the repository, for a tap-files
+// plugin to write into a cask. It is forge-neutral: the caller reads it from
+// wherever it lives, so the build never imports a forge client. The zero value
+// is what a caller with no forge to read from passes, as `letsgo build` does.
+type RepoInfo struct {
+	Description string
+	License     string
+	Homepage    string
+}
+
+// BuildOptions is what Build needs besides the context.
+type BuildOptions struct {
+	// Plan is the plan to build; it must have passed its gates.
+	Plan *plan.Plan
+
+	// Dir is where the artifacts and the metadata files are written.
+	Dir string
+
+	// ToolVersion is recorded in the manifest as the version of the tool that
+	// built it.
+	ToolVersion string
+
+	// Repo is the repository's description, licence and homepage.
+	Repo RepoInfo
+
+	// Warnf reports what the build tolerated. Nil discards it.
+	Warnf func(string, ...any)
+}
+
 // Build produces every artifact described by the plan, plus the source
 // archive, the manifest and the checksum file.
-//
-// info is the repository's description, licence and homepage, for a
-// tap-files plugin to write into a cask; nil when the caller has no forge to
-// read it from, as `letsgo build` never does.
-func Build(
-	ctx context.Context, p *plan.Plan, dir string, toolVersion string, info *github.RepoInfo, warnf func(string, ...any),
-) (*Result, error) {
+func Build(ctx context.Context, o BuildOptions) (*Result, error) {
+	p, dir, toolVersion, info, warnf := o.Plan, o.Dir, o.ToolVersion, o.Repo, o.Warnf
+
 	if !p.OK() {
 		return nil, fmt.Errorf("release: refusing to build a plan that did not pass its gates")
 	}

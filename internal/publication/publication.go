@@ -132,7 +132,7 @@ func Observe(ctx context.Context, o Options) ([]plandiff.Action, error) {
 	}
 	actions = append(actions, tap.Actions()...)
 
-	images, err := release.ObserveImages(ctx, o.Result.Images, o.Token)
+	images, err := ObserveImages(ctx, o.Result.Images, o.Token)
 	if err != nil {
 		return nil, fmt.Errorf("observing the images: %w", err)
 	}

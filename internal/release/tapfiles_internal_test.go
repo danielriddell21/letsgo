@@ -74,7 +74,7 @@ func TestApplyTapFilesPluginNoOpWhenUnpinned(t *testing.T) {
 	p := basePlan(t)
 	p.Plugins = map[plugin.Hook]plugin.Plugin{}
 
-	files, err := applyTapFilesPlugin(context.Background(), p, nil, nil)
+	files, err := applyTapFilesPlugin(context.Background(), p, nil, RepoInfo{})
 	if err != nil || files != nil {
 		t.Errorf("applyTapFilesPlugin = %v, %v, want nil, nil", files, err)
 	}
@@ -124,7 +124,7 @@ func TestApplyTapFilesPluginFails(t *testing.T) {
 				p.Tap = github.Repo{}
 			}
 
-			if _, err := applyTapFilesPlugin(context.Background(), p, nil, nil); err == nil ||
+			if _, err := applyTapFilesPlugin(context.Background(), p, nil, RepoInfo{}); err == nil ||
 				!strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v", err)
 			}
@@ -146,7 +146,7 @@ echo '{"files":[{"path":"Casks/gambit-gui.rb","content":"cask \"gambit-gui\""}]}
 		},
 	}
 
-	files, err := applyTapFilesPlugin(context.Background(), p, artifacts, &github.RepoInfo{
+	files, err := applyTapFilesPlugin(context.Background(), p, artifacts, RepoInfo{
 		Description: "a gambit", License: "MIT", Homepage: "https://gambit.example",
 	})
 	if err != nil {
@@ -194,10 +194,10 @@ func TestTapFileRecordsDigestTheContent(t *testing.T) {
 func TestTapFilesInputDefaultsTheHomepageToTheRepositoryPage(t *testing.T) {
 	p := pinnedPlan(t, "letsgo-cask", "")
 
-	if got := tapFilesInput(p, nil, nil).Homepage; got != "https://github.com/you/gambit" {
+	if got := tapFilesInput(p, nil, RepoInfo{}).Homepage; got != "https://github.com/you/gambit" {
 		t.Errorf("Homepage = %q, want the repository's page on the forge", got)
 	}
-	if got := tapFilesInput(p, nil, &github.RepoInfo{Homepage: "https://gambit.example"}).Homepage; got != "https://gambit.example" {
+	if got := tapFilesInput(p, nil, RepoInfo{Homepage: "https://gambit.example"}).Homepage; got != "https://gambit.example" {
 		t.Errorf("Homepage = %q, want the one the repository names", got)
 	}
 }

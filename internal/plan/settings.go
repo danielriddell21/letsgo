@@ -1,6 +1,9 @@
 package plan
 
-import "github.com/danielriddell21/letsgo/internal/config"
+import (
+	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/internal/github"
+)
 
 // Choice is a setting that is either decided or left to letsgo: the typed
 // reading of a config value that is "auto", "true" or "false" on disk, so a
@@ -38,6 +41,9 @@ func (p *Plan) settings() *config.Config {
 // Draft reports whether the release is published as a draft, whether the
 // config or `release --draft` asked for it.
 func (p *Plan) Draft() bool { return p.settings().Draft }
+
+// HasTap reports whether the release publishes to a Homebrew tap.
+func (p *Plan) HasTap() bool { return p.Tap != (github.Repo{}) }
 
 // MarkDraft makes the release a draft, as `release --draft` does.
 func (p *Plan) MarkDraft() { p.ensureConfig().Draft = true }
