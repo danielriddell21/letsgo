@@ -1,7 +1,6 @@
 package forgetest
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,7 +72,7 @@ func ModuleWith(tb testing.TB, config string, extra map[string]string) string {
 		append(append([]string{"-C", dir}, identity...), "commit", "-q", "-m", "feat: first release"),
 		{"-C", dir, "tag", "v1.2.3"},
 	} {
-		if out, err := exec.CommandContext(context.Background(), "git", args...).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(tb.Context(), "git", args...).CombinedOutput(); err != nil { // NOSONAR: a test fixture runs the developer's own git
 			tb.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
