@@ -40,6 +40,7 @@ func scopedModuleFixture(t *testing.T) (repoDir, moduleDir string) {
 		{"-C", repoDir, "init", "-q", "-b", "main"},
 		{"-C", repoDir, "config", "user.name", "Test"},
 		{"-C", repoDir, "config", "user.email", "t@example.com"},
+		{"-C", repoDir, "remote", "add", "origin", "https://github.com/you/foo.git"},
 		{"-C", repoDir, "add", "."},
 		{"-C", repoDir, "commit", "-q", "-m", "first"},
 		{"-C", repoDir, "tag", "services/api/v1.2.3"},
@@ -58,7 +59,7 @@ func TestRunTagCreatesAScopedTag(t *testing.T) {
 	repoDir, moduleDir := scopedModuleFixture(t)
 	t.Chdir(moduleDir)
 
-	if err := runTag([]string{"--yes"}); err != nil {
+	if err := unwired.runTag([]string{"--yes"}); err != nil {
 		t.Fatalf("runTag: %v", err)
 	}
 
@@ -81,7 +82,7 @@ func TestRunTagCreatesAPrereleaseTag(t *testing.T) {
 	repoDir, moduleDir := scopedModuleFixture(t)
 	t.Chdir(moduleDir)
 
-	if err := runTag([]string{"--yes", "--pre"}); err != nil {
+	if err := unwired.runTag([]string{"--yes", "--pre"}); err != nil {
 		t.Fatalf("runTag: %v", err)
 	}
 
@@ -109,7 +110,7 @@ func TestRunTagJSONReportsTheRef(t *testing.T) {
 	}
 
 	dry := captureStdout(t, func() {
-		if err := runTag([]string{"--json"}); err != nil {
+		if err := unwired.runTag([]string{"--json"}); err != nil {
 			t.Fatalf("runTag --json: %v", err)
 		}
 	})
@@ -121,7 +122,7 @@ func TestRunTagJSONReportsTheRef(t *testing.T) {
 	}
 
 	made := captureStdout(t, func() {
-		if err := runTag([]string{"--json", "--yes"}); err != nil {
+		if err := unwired.runTag([]string{"--json", "--yes"}); err != nil {
 			t.Fatalf("runTag --json --yes: %v", err)
 		}
 	})
@@ -171,7 +172,7 @@ func TestRunTagIncrementsAnExistingPrerelease(t *testing.T) {
 	commitAndTag(t, repoDir, "services/api/b.txt", "")
 
 	t.Chdir(moduleDir)
-	if err := runTag([]string{"--yes", "--patch", "--pre"}); err != nil {
+	if err := unwired.runTag([]string{"--yes", "--patch", "--pre"}); err != nil {
 		t.Fatalf("runTag: %v", err)
 	}
 
@@ -197,7 +198,7 @@ func TestRunTagSkipsAnInterveningPrereleaseTag(t *testing.T) {
 	commitAndTag(t, repoDir, "services/api/b.txt", "")
 
 	t.Chdir(moduleDir)
-	if err := runTag([]string{"--yes", "--patch"}); err != nil {
+	if err := unwired.runTag([]string{"--yes", "--patch"}); err != nil {
 		t.Fatalf("runTag: %v", err)
 	}
 
@@ -217,7 +218,7 @@ func TestRunTagPrintsJSONWhenRequestedAndCreatesNoTag(t *testing.T) {
 	t.Chdir(moduleDir)
 
 	out := captureStdout(t, func() {
-		if err := runTag([]string{"--json"}); err != nil {
+		if err := unwired.runTag([]string{"--json"}); err != nil {
 			t.Fatalf("runTag: %v", err)
 		}
 	})
@@ -246,7 +247,7 @@ func TestRunTagJSONWorksWithUncommittedChanges(t *testing.T) {
 	t.Chdir(moduleDir)
 
 	out := captureStdout(t, func() {
-		if err := runTag([]string{"--json"}); err != nil {
+		if err := unwired.runTag([]string{"--json"}); err != nil {
 			t.Fatalf("runTag: %v", err)
 		}
 	})

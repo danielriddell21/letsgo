@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/build"
-	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/semver"
@@ -243,7 +244,7 @@ func imageTags(ctx context.Context, p *plan.Plan) (tags, floating []string, err 
 // consider advancing (a channel that has ever existed keeps being tracked,
 // so a channel's followers move to stable once it's newer).
 func channelHistory(ctx context.Context, p *plan.Plan) ([]string, error) {
-	tags, err := discover.Tags(ctx, p.GitBin, p.RootDir, p.Scope.Prefix)
+	tags, err := git.New(p.GitBin, p.RootDir).Tags(ctx, p.Scope.Prefix)
 	if err != nil {
 		return nil, err
 	}

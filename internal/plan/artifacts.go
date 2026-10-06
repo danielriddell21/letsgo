@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/archive"
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
@@ -77,7 +79,7 @@ func (p *Plan) expandArchiveFiles(ctx context.Context, entries []string) ([]stri
 
 		// Read once, and only when a directory is actually named.
 		if tracked == nil {
-			if tracked, err = discover.TrackedFiles(ctx, p.GitBin, p.RootDir); err != nil {
+			if tracked, err = git.New(p.GitBin, p.RootDir).TrackedFiles(ctx); err != nil {
 				return nil, fmt.Errorf("archive %s: %w", entry, err)
 			}
 		}

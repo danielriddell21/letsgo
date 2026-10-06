@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -13,11 +12,7 @@ import (
 // exercises discover.FindGit/discover.NewScope, and fails for the token
 // reason, not because the module or its remote could not be found.
 func TestRunYankResolvesModuleScopeBeforeRequiringAToken(t *testing.T) {
-	repoDir, moduleDir := scopedModuleFixture(t)
-	if out, err := exec.Command("git", "-C", repoDir, "remote", "add", "origin",
-		"https://github.com/you/foo.git").CombinedOutput(); err != nil {
-		t.Fatalf("git remote add: %v\n%s", err, out)
-	}
+	_, moduleDir := scopedModuleFixture(t)
 	t.Chdir(moduleDir)
 
 	for _, name := range credential.EnvVars {

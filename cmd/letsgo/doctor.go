@@ -11,7 +11,7 @@ import (
 
 // runDoctor diagnoses the tools and repository state a release needs,
 // read-only and offline: see docs/hld/doctor.md.
-func runDoctor(args []string) error {
+func (f forge) runDoctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	jsonOutput := fs.Bool("json", false, "print the report as JSON")
 	if err := parseFlags(fs, args); err != nil {
@@ -21,7 +21,7 @@ func runDoctor(args []string) error {
 		return errUsage("letsgo doctor")
 	}
 
-	result, err := doctor.Run(context.Background(), ".", machineConfig())
+	result, err := doctor.Run(context.Background(), ".", f.machine())
 	if err != nil {
 		return err
 	}

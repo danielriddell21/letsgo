@@ -49,7 +49,7 @@ func (f forge) runPlan(args []string) error {
 	defer run.toMarkdown(markdown)()
 
 	if *yankTag != "" {
-		return f.planYankCommand(*yankTag, yankFlags, *jsonOutput, credentials(context.Background(), credential.Flags{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken}), run)
+		return f.planYankCommand(*yankTag, yankFlags, *jsonOutput, f.credentials(context.Background(), credential.Flags{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken}), run)
 	}
 
 	saving := *planOut != ""
@@ -67,14 +67,14 @@ func (f forge) runPlan(args []string) error {
 	// contacts nothing never runs the token-command.
 	var set credential.Set
 	if *publishGates || diffing {
-		set = credentials(ctx, credential.Flags{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken})
+		set = f.credentials(ctx, credential.Flags{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken})
 	}
-	options := plan.Options{
+	options := f.planOptions(plan.Options{
 		Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty,
 		Publish: *publishGates, Credentials: set,
 		// A diff predicts a release, whose manifest records the gates it ran.
 		Analyse: *analyse || diffing, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
-	}
+	})
 
 	if *jsonOutput {
 		p, err := plan.Resolve(ctx, options)

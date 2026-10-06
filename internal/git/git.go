@@ -1,4 +1,10 @@
-package discover
+// Package git runs git: every read of a repository letsgo needs, and every
+// write it makes (tags, pushes, worktrees), through one Runner that carries the
+// binary and the directory so a call states only what it asks.
+//
+// git is run by absolute path from Binary, never a name looked up through the
+// inherited PATH, and with a fixed PATH handed to the child: see Binary for why.
+package git
 
 import (
 	"context"
@@ -10,8 +16,8 @@ import (
 	"time"
 )
 
-// Git describes the state of the repository at HEAD.
-type Git struct {
+// State describes the state of the repository at HEAD.
+type State struct {
 	// Commit is the full HEAD SHA.
 	Commit string
 
@@ -45,50 +51,50 @@ type Git struct {
 	TopLevel string
 }
 
-// FindGit inspects the repository containing dir.
-func FindGit(ctx context.Context, gitBin string, dir string) (Git, error) {
-	commit, err := git(ctx, gitBin, dir, "rev-parse", "HEAD")
+// State inspects the repository containing r.Dir.
+func (r Runner) State(ctx context.Context) (State, error) {
+	commit, err := r.Run(ctx, "rev-parse", "HEAD")
 	if err != nil {
-		return Git{}, fmt.Errorf("discover: %s is not a git repository with any commits: %w", dir, err)
+		return State{}, fmt.Errorf("git: %s is not a git repository with any commits: %w", r.Dir, err)
 	}
 
-	short, err := git(ctx, gitBin, dir, "rev-parse", "--short", "HEAD")
+	short, err := r.Run(ctx, "rev-parse", "--short", "HEAD")
 	if err != nil {
-		return Git{}, err
+		return State{}, err
 	}
 
-	stamp, err := git(ctx, gitBin, dir, "show", "-s", "--format=%cI", "HEAD")
+	stamp, err := r.Run(ctx, "show", "-s", "--format=%cI", "HEAD")
 	if err != nil {
-		return Git{}, err
+		return State{}, err
 	}
 	commitTime, err := time.Parse(time.RFC3339, stamp)
 	if err != nil {
-		return Git{}, fmt.Errorf("discover: parsing commit time %q: %w", stamp, err)
+		return State{}, fmt.Errorf("git: parsing commit time %q: %w", stamp, err)
 	}
 
-	status, err := git(ctx, gitBin, dir, "status", "--porcelain")
+	status, err := r.Run(ctx, "status", "--porcelain")
 	if err != nil {
-		return Git{}, err
+		return State{}, err
 	}
 
-	topLevel, err := git(ctx, gitBin, dir, "rev-parse", "--show-toplevel")
+	topLevel, err := r.Run(ctx, "rev-parse", "--show-toplevel")
 	if err != nil {
-		return Git{}, err
+		return State{}, err
 	}
 
 	var tags []string
-	if out, err := git(ctx, gitBin, dir, "tag", "--points-at", "HEAD"); err == nil && out != "" {
+	if out, err := r.Run(ctx, "tag", "--points-at", "HEAD"); err == nil && out != "" {
 		tags = strings.Split(out, "\n")
 	}
 
 	// A missing shallow marker is the normal case, so an error here means "not
 	// shallow" rather than a failure worth reporting.
 	shallow := false
-	if out, err := git(ctx, gitBin, dir, "rev-parse", "--is-shallow-repository"); err == nil {
+	if out, err := r.Run(ctx, "rev-parse", "--is-shallow-repository"); err == nil {
 		shallow = out == "true"
 	}
 
-	return Git{
+	return State{
 		Commit:      commit,
 		ShortCommit: short,
 		CommitTime:  commitTime.UTC(),
@@ -108,10 +114,10 @@ func FindGit(ctx context.Context, gitBin string, dir string) (Git, error) {
 // different module's tag as its previous one — another scope's entirely for
 // a non-empty prefix, or a nested module's root-less tag when prefix is empty
 // — and build its changelog, API gate and bump against the wrong release.
-func PreviousTag(ctx context.Context, gitBin string, dir, prefix string) (string, error) {
+func (r Runner) PreviousTag(ctx context.Context, prefix string) (string, error) {
 	args := []string{"describe", "--tags", "--abbrev=0", "--match", prefix + "v[0-9]*"}
 
-	if current, err := git(ctx, gitBin, dir, "tag", "--points-at", "HEAD"); err == nil {
+	if current, err := r.Run(ctx, "tag", "--points-at", "HEAD"); err == nil {
 		for _, tag := range strings.Split(current, "\n") {
 			if tag != "" {
 				args = append(args, "--exclude", tag)
@@ -119,7 +125,7 @@ func PreviousTag(ctx context.Context, gitBin string, dir, prefix string) (string
 		}
 	}
 
-	out, err := git(ctx, gitBin, dir, args...)
+	out, err := r.Run(ctx, args...)
 	if err != nil {
 		// git describe exits non-zero when no tag exists. That is an ordinary
 		// state, not a failure.
@@ -133,8 +139,8 @@ func PreviousTag(ctx context.Context, gitBin string, dir, prefix string) (string
 // single answer, this returns every candidate so the caller can apply its own
 // version-order rule (see semver.Previous and Scope.PreviousTag). An empty
 // result is not an error, which is the normal state for a first release.
-func Tags(ctx context.Context, gitBin string, dir, prefix string) ([]string, error) {
-	out, err := git(ctx, gitBin, dir, "tag", "--list", "--merged", "HEAD", prefix+"v[0-9]*")
+func (r Runner) Tags(ctx context.Context, prefix string) ([]string, error) {
+	out, err := r.Run(ctx, "tag", "--list", "--merged", "HEAD", prefix+"v[0-9]*")
 	if err != nil {
 		return nil, err
 	}
@@ -144,11 +150,26 @@ func Tags(ctx context.Context, gitBin string, dir, prefix string) ([]string, err
 	return strings.Split(out, "\n"), nil
 }
 
-// git runs the git at gitBin, an absolute path from GitBinary, never a name
-// looked up through the inherited PATH. See exec.go for why.
-func git(ctx context.Context, gitBin, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, gitBin, args...)
-	cmd.Dir = dir
+// Runner runs git in a directory with a resolved binary.
+type Runner struct {
+	// Bin is the absolute path of the git binary, from Binary.
+	Bin string
+
+	// Dir is the directory git runs in.
+	Dir string
+}
+
+// In is the same Runner in another directory.
+func (r Runner) In(dir string) Runner {
+	r.Dir = dir
+	return r
+}
+
+// Run runs git with args and returns its trimmed standard output. A failure
+// carries what git said on standard error.
+func (r Runner) Run(ctx context.Context, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, r.Bin, args...)
+	cmd.Dir = r.Dir
 	cmd.Env = gitEnv()
 
 	var stderr strings.Builder
@@ -158,9 +179,9 @@ func git(ctx context.Context, gitBin, dir string, args ...string) (string, error
 	if err != nil {
 		detail := strings.TrimSpace(stderr.String())
 		if detail == "" {
-			return "", fmt.Errorf("discover: git %s: %w", strings.Join(args, " "), err)
+			return "", fmt.Errorf("git: %s: %w", strings.Join(args, " "), err)
 		}
-		return "", fmt.Errorf("discover: git %s: %w: %s", strings.Join(args, " "), err, detail)
+		return "", fmt.Errorf("git: %s: %w: %s", strings.Join(args, " "), err, detail)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -171,10 +192,10 @@ func git(ctx context.Context, gitBin, dir string, args ...string) (string, error
 // Tracked files are the right definition of "the source" for a release: it is
 // exactly what a clone at this commit contains, with build output, local
 // scratch files and anything else .gitignore covers already excluded.
-func TrackedFiles(ctx context.Context, gitBin string, dir string) ([]string, error) {
+func (r Runner) TrackedFiles(ctx context.Context) ([]string, error) {
 	// -z because filenames may contain newlines, and git would otherwise quote
 	// them into an encoding we would have to undo.
-	out, err := git(ctx, gitBin, dir, "ls-files", "-z")
+	out, err := r.Run(ctx, "ls-files", "-z")
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +229,7 @@ type Commit struct {
 // so a commit that only touched one of them is not evidence for dir's bump
 // or changelog. Given relative to dir, slash-separated — discover.
 // NestedModuleDirs returns them in exactly that shape.
-func Commits(ctx context.Context, gitBin string, dir, from, to string, exclude ...string) ([]Commit, error) {
+func (r Runner) Commits(ctx context.Context, from, to string, exclude ...string) ([]Commit, error) {
 	if to == "" {
 		to = "HEAD"
 	}
@@ -229,7 +250,7 @@ func Commits(ctx context.Context, gitBin string, dir, from, to string, exclude .
 		}
 	}
 
-	out, err := git(ctx, gitBin, dir, args...)
+	out, err := r.Run(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -259,16 +280,16 @@ func Commits(ctx context.Context, gitBin string, dir, from, to string, exclude .
 // A worktree rather than a checkout because verification must not disturb the
 // caller's working copy: someone verifying a release should not find their
 // branch moved when it finishes.
-func AddWorktree(ctx context.Context, gitBin string, repoDir, dir, commit string) error {
-	if _, err := git(ctx, gitBin, repoDir, "cat-file", "-e", commit+"^{commit}"); err != nil {
-		return fmt.Errorf("discover: %s does not contain commit %s", repoDir, commit)
+func (r Runner) AddWorktree(ctx context.Context, dir, commit string) error {
+	if _, err := r.Run(ctx, "cat-file", "-e", commit+"^{commit}"); err != nil {
+		return fmt.Errorf("git: %s does not contain commit %s", r.Dir, commit)
 	}
 	// Checked out with content filters disabled so the files land exactly as
 	// the index holds them. Git's default on Windows rewrites line endings on
 	// checkout, which would hand a rebuild different source bytes from the
 	// ones the release was compiled from — a verification failure with no
 	// defect behind it.
-	_, err := git(ctx, gitBin, repoDir,
+	_, err := r.Run(ctx,
 		"-c", "core.autocrlf=false",
 		"-c", "core.eol=lf",
 		"worktree", "add", "--quiet", "--detach", dir, commit)
@@ -276,8 +297,8 @@ func AddWorktree(ctx context.Context, gitBin string, repoDir, dir, commit string
 }
 
 // RemoveWorktree discards a worktree created by AddWorktree.
-func RemoveWorktree(ctx context.Context, gitBin string, repoDir, dir string) error {
-	_, err := git(ctx, gitBin, repoDir, "worktree", "remove", "--force", dir)
+func (r Runner) RemoveWorktree(ctx context.Context, dir string) error {
+	_, err := r.Run(ctx, "worktree", "remove", "--force", dir)
 	return err
 }
 
@@ -286,16 +307,16 @@ func RemoveWorktree(ctx context.Context, gitBin string, repoDir, dir string) err
 // Annotated rather than lightweight: a release tag carries an author and a
 // date, and `git describe` prefers them, so the tag that names a release
 // should be an object in its own right rather than a bare pointer.
-func CreateTag(ctx context.Context, gitBin string, dir, tag, message string) error {
-	if _, err := git(ctx, gitBin, dir, "tag", "-a", tag, "-m", message); err != nil {
+func (r Runner) CreateTag(ctx context.Context, tag, message string) error {
+	if _, err := r.Run(ctx, "tag", "-a", tag, "-m", message); err != nil {
 		return err
 	}
 	return nil
 }
 
 // TagExists reports whether a tag is already present.
-func TagExists(ctx context.Context, gitBin string, dir, tag string) bool {
-	_, err := git(ctx, gitBin, dir, "rev-parse", "--verify", "--quiet", "refs/tags/"+tag)
+func (r Runner) TagExists(ctx context.Context, tag string) bool {
+	_, err := r.Run(ctx, "rev-parse", "--verify", "--quiet", "refs/tags/"+tag)
 	return err == nil
 }
 
@@ -304,16 +325,16 @@ func TagExists(ctx context.Context, gitBin string, dir, tag string) bool {
 // `promote` needs this and CreateTag does not: a stable release is tagged on
 // the RC's own commit, which by the time promote runs is almost always an
 // ancestor of HEAD rather than HEAD itself.
-func CreateTagAt(ctx context.Context, gitBin string, dir, tag, commit, message string) error {
-	if _, err := git(ctx, gitBin, dir, "tag", "-a", tag, commit, "-m", message); err != nil {
+func (r Runner) CreateTagAt(ctx context.Context, tag, commit, message string) error {
+	if _, err := r.Run(ctx, "tag", "-a", tag, commit, "-m", message); err != nil {
 		return err
 	}
 	return nil
 }
 
 // TagCommit resolves the commit a tag points at.
-func TagCommit(ctx context.Context, gitBin string, dir, tag string) (string, error) {
-	return git(ctx, gitBin, dir, "rev-list", "-n", "1", tag)
+func (r Runner) TagCommit(ctx context.Context, tag string) (string, error) {
+	return r.Run(ctx, "rev-list", "-n", "1", tag)
 }
 
 // PushTag pushes a single tag to remote.
@@ -323,8 +344,8 @@ func TagCommit(ctx context.Context, gitBin string, dir, tag string) (string, err
 // creating that release with a target commit makes GitHub create the same
 // tag on its own. Pushing here keeps a local clone in sync with what GitHub
 // will have; it is not what makes the release valid.
-func PushTag(ctx context.Context, gitBin string, dir, remote, tag string) error {
-	_, err := git(ctx, gitBin, dir, "push", remote, "refs/tags/"+tag)
+func (r Runner) PushTag(ctx context.Context, remote, tag string) error {
+	_, err := r.Run(ctx, "push", remote, "refs/tags/"+tag)
 	return err
 }
 
@@ -335,20 +356,28 @@ func PushTag(ctx context.Context, gitBin string, dir, remote, tag string) error 
 // module nested in it is compared at <worktree>/relDir, never at the
 // worktree's own root, which for a scoped module holds sibling directories the
 // release has nothing to do with. An empty relDir is the worktree's root.
-func CheckoutTag(ctx context.Context, gitBin, repoDir, tag, relDir string) (dir string, cleanup func(), err error) {
+func (r Runner) CheckoutTag(ctx context.Context, tag, relDir string) (dir string, cleanup func(), err error) {
 	base, err := os.MkdirTemp("", "letsgo-checkout-")
 	if err != nil {
-		return "", nil, fmt.Errorf("discover: scratch directory: %w", err)
+		return "", nil, fmt.Errorf("git: scratch directory: %w", err)
 	}
 
 	worktree := filepath.Join(base, "tag")
-	if err := AddWorktree(ctx, gitBin, repoDir, worktree, tag); err != nil {
+	if err := r.AddWorktree(ctx, worktree, tag); err != nil {
 		_ = os.RemoveAll(base)
 		return "", nil, err
 	}
 
 	return filepath.Join(worktree, filepath.FromSlash(relDir)), func() {
-		_ = RemoveWorktree(ctx, gitBin, repoDir, worktree)
+		_ = r.RemoveWorktree(ctx, worktree)
 		_ = os.RemoveAll(base)
 	}, nil
 }
+
+// Remote is the URL of a remote.
+func (r Runner) Remote(ctx context.Context, name string) (string, error) {
+	return r.Run(ctx, "remote", "get-url", name)
+}
+
+// New is a Runner for bin in dir.
+func New(bin, dir string) Runner { return Runner{Bin: bin, Dir: dir} }

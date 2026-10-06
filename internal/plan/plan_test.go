@@ -2,6 +2,7 @@ package plan_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -924,5 +925,31 @@ func TestResolveUsesTheGlobalConfigItIsGiven(t *testing.T) {
 	}
 	if p.Proxy != "https://proxy.example" {
 		t.Errorf("Proxy = %q, want the configured one", p.Proxy)
+	}
+}
+
+// A caller that could not read the machine's config says why, and the plan
+// reports it once as a failed check rather than reading the file again.
+func TestResolveReportsWhyTheGlobalConfigCouldNotBeRead(t *testing.T) {
+	t.Setenv("GOPROXY", "")
+	r := minimalRepo(t, "")
+	global := &config.Global{}
+
+	p := r.resolve(plan.Options{Global: global, GlobalErr: errors.New("config.mod:3: unknown directive")})
+
+	var found bool
+	for _, c := range p.Checks {
+		if c.Name == "global config" {
+			found = true
+			if c.Status != plan.Fail || !strings.Contains(c.Detail, "unknown directive") {
+				t.Errorf("check = %+v, want a failure carrying the reason", c)
+			}
+		}
+	}
+	if !found {
+		t.Error("the plan did not report the unreadable global config")
+	}
+	if p.OK() {
+		t.Error("a plan with an unreadable global config should not be OK")
 	}
 }

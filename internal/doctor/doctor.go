@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
@@ -105,22 +107,15 @@ func (r *Result) add(group, name string, status Status, hint, format string, arg
 // rather than a problem with what was found there, which becomes a check
 // instead so one run reports every issue.
 func Run(ctx context.Context, dir string, global *config.Global) (*Result, error) {
-	root, err := discover.FindModule(dir)
+	gitBin, _, err := git.Binary(global)
 	if err != nil {
 		return nil, err
 	}
-	gitBin, _, err := discover.GitBinary(global)
+	loc, err := discover.Locate(ctx, gitBin, dir)
 	if err != nil {
 		return nil, err
 	}
-	git, err := discover.FindGit(ctx, gitBin, root.Dir)
-	if err != nil {
-		return nil, err
-	}
-	scope, err := discover.NewScope(git.TopLevel, root.Dir)
-	if err != nil {
-		return nil, err
-	}
+	root := loc.Module
 
 	cfg, cfgErr := loadConfig(root.Dir)
 
@@ -134,9 +129,9 @@ func Run(ctx context.Context, dir string, global *config.Global) (*Result, error
 	if cfgErr == nil {
 		r.checkPlugins(cfg, root.Dir, global.PluginsDir)
 	}
-	r.checkHistory(ctx, gitBin, root.Dir, git, scope)
-	r.checkRemote(ctx, gitBin, root.Dir)
-	r.checkWorktree(git)
+	r.checkHistory(ctx, loc)
+	r.checkRemote(loc)
+	r.checkWorktree(loc.Git)
 	return r, nil
 }
 

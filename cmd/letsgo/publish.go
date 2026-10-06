@@ -19,14 +19,14 @@ const releaseTokenUsage = "token the GitHub release is published with (default: 
 // credentials resolves the credentials a command was given, once, from its
 // flags, the environment and the global config's token-command. Everything
 // below the command takes the result rather than looking tokens up itself.
-func credentials(ctx context.Context, flags credential.Flags) credential.Set {
-	return credential.Resolve(ctx, machineConfig(), flags)
+func (f forge) credentials(ctx context.Context, flags credential.Flags) credential.Set {
+	return credential.Resolve(ctx, f.machine(), flags)
 }
 
 // forgeToken is the token of a command that reaches a forge but writes only
 // with that one credential.
-func forgeToken(ctx context.Context, flag string) string {
-	return credentials(ctx, credential.Flags{Token: flag}).Forge.Value
+func (f forge) forgeToken(ctx context.Context, flag string) string {
+	return f.credentials(ctx, credential.Flags{Token: flag}).Forge.Value
 }
 
 // splitClient returns the client c is written with: client itself when c names

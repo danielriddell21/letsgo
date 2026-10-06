@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/credential"
 
 	"github.com/danielriddell21/letsgo/internal/discover"
@@ -17,7 +19,7 @@ import (
 // forge client.
 type moduleRepo struct {
 	Module discover.Module
-	Git    discover.Git
+	Git    git.State
 	GitBin string
 	Repo   github.Repo
 	Scope  discover.Scope
@@ -31,27 +33,16 @@ type moduleRepo struct {
 // its scope, and a forge client authenticated with the forge credential the
 // caller resolved.
 func (f forge) resolveModuleRepo(ctx context.Context, cred credential.Credential) (moduleRepo, error) {
-	module, err := discover.FindModule(".")
+	gitBin, err := f.gitBinary()
 	if err != nil {
 		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
 	}
-	gitBin, err := gitBinary()
+	loc, err := discover.Locate(ctx, gitBin, ".")
 	if err != nil {
 		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
 	}
-	found, err := discover.FindRepo(ctx, gitBin, module.Dir)
-	if err != nil {
-		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
-	}
-	repo := github.Repo{Owner: found.Owner, Name: found.Name}
-
-	git, err := discover.FindGit(ctx, gitBin, module.Dir)
-	if err != nil {
-		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
-	}
-	scope, err := discover.NewScope(git.TopLevel, module.Dir)
-	if err != nil {
-		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
+	if !loc.HasRepo() {
+		return moduleRepo{}, fmt.Errorf("letsgo: %w", loc.RepoErr)
 	}
 
 	tokenValue := cred.Value
@@ -60,7 +51,11 @@ func (f forge) resolveModuleRepo(ctx context.Context, cred credential.Credential
 	}
 	client := f.client(tokenValue)
 
-	return moduleRepo{Module: module, Git: git, GitBin: gitBin, Repo: repo, Scope: scope, Token: tokenValue, Client: client}, nil
+	return moduleRepo{
+		Module: loc.Module, Git: loc.Git, GitBin: gitBin,
+		Repo:  github.Repo{Owner: loc.Repo.Owner, Name: loc.Repo.Name},
+		Scope: loc.Scope, Token: tokenValue, Client: client,
+	}, nil
 }
 
 // scratchRun bundles what a command needs to act on a release with an
@@ -85,15 +80,11 @@ type scratchRun struct {
 // is empty; cleanup removes it, and is a no-op when work was given
 // explicitly.
 func (f forge) resolveScratchRun(ctx context.Context, repoFlag, token, work, tmpPrefix string) (scratchRun, error) {
-	gitBin, err := gitBinary()
+	gitBin, err := f.gitBinary()
 	if err != nil {
 		return scratchRun{}, err
 	}
-	repo, dir, err := targetRepo(ctx, gitBin, repoFlag)
-	if err != nil {
-		return scratchRun{}, err
-	}
-	prefix, err := scopePrefix(ctx, gitBin, repoFlag, dir)
+	t, err := resolveTarget(ctx, gitBin, repoFlag, ".")
 	if err != nil {
 		return scratchRun{}, err
 	}
@@ -108,61 +99,57 @@ func (f forge) resolveScratchRun(ctx context.Context, repoFlag, token, work, tmp
 		cleanup = func() { _ = os.RemoveAll(workDir) }
 	}
 
-	client := f.client(forgeToken(ctx, token))
+	client := f.client(f.forgeToken(ctx, token))
 
-	return scratchRun{Repo: repo, Dir: dir, Prefix: prefix, WorkDir: workDir, Client: client, GitBin: gitBin, cleanup: cleanup}, nil
+	return scratchRun{Repo: t.Repo, Dir: t.Dir, Prefix: t.Prefix, WorkDir: workDir, Client: client, GitBin: gitBin, cleanup: cleanup}, nil
 }
 
-// targetRepo resolves which repository a command is asking about and, where
-// possible, a local checkout of it.
+// target is the repository a command is asking about and, where there is one,
+// the local module it is about.
+type target struct {
+	Repo github.Repo
+
+	// Dir is the module's directory, empty when --repo named a repository
+	// outside this checkout.
+	Dir string
+
+	// Prefix is the module's scope prefix (see discover.Scope), so "no tag
+	// given" can find the latest release within this module's own scope rather
+	// than the repository's overall latest, the same distinction runYank draws
+	// before picking a previous release. It is empty for a repository named by
+	// --repo: inspecting a release elsewhere always means the whole repository.
+	Prefix string
+}
+
+// resolveTarget resolves which repository a command is asking about and, where
+// possible, a local checkout of it, found from start.
 //
 // Inspecting someone else's release is the point, so a repository outside the
 // current directory is allowed; it simply has no local checkout, and the
 // callers that need one say so.
-func targetRepo(ctx context.Context, gitBin, explicit string) (github.Repo, string, error) {
+func resolveTarget(ctx context.Context, gitBin, explicit, start string) (target, error) {
 	if explicit != "" {
 		owner, name, ok := strings.Cut(explicit, "/")
 		if !ok || owner == "" || name == "" {
-			return github.Repo{}, "", fmt.Errorf("--repo must be owner/name, got %q", explicit)
+			return target{}, fmt.Errorf("--repo must be owner/name, got %q", explicit)
 		}
-		return github.Repo{Owner: owner, Name: name}, "", nil
+		return target{Repo: github.Repo{Owner: owner, Name: name}}, nil
 	}
 
-	module, err := discover.FindModule(".")
+	loc, err := discover.Locate(ctx, gitBin, start)
 	if err != nil {
-		return github.Repo{}, "", fmt.Errorf("%w (use --repo to verify a release elsewhere)", err)
+		return target{}, fmt.Errorf("%w (use --repo to verify a release elsewhere)", err)
 	}
-	found, err := discover.FindRepo(ctx, gitBin, module.Dir)
-	if err != nil {
-		return github.Repo{}, "", err
+	if !loc.HasRepo() {
+		return target{}, loc.RepoErr
 	}
-	return github.Repo{Owner: found.Owner, Name: found.Name}, module.Dir, nil
-}
-
-// scopePrefix resolves the module's scope prefix (see discover.Scope), so
-// "no tag given" can find the latest release within this module's own
-// scope rather than the repository's overall latest — the same distinction
-// runYank draws before picking a previous release.
-//
-// A repository named explicitly by --repo has no local module to scope by:
-// inspecting a release elsewhere always means the whole repository.
-func scopePrefix(ctx context.Context, gitBin, explicit, dir string) (string, error) {
-	if explicit != "" || dir == "" {
-		return "", nil
-	}
-	git, err := discover.FindGit(ctx, gitBin, dir)
-	if err != nil {
-		return "", fmt.Errorf("letsgo: %w", err)
-	}
-	scope, err := discover.NewScope(git.TopLevel, dir)
-	if err != nil {
-		return "", fmt.Errorf("letsgo: %w", err)
-	}
-	return scope.Prefix, nil
+	return target{
+		Repo: github.Repo{Owner: loc.Repo.Owner, Name: loc.Repo.Name}, Dir: loc.Module.Dir, Prefix: loc.Scope.Prefix,
+	}, nil
 }
 
 // gitBinary resolves the git command from the machine's global config.
-func gitBinary() (string, error) {
-	path, _, err := discover.GitBinary(machineConfig())
+func (f forge) gitBinary() (string, error) {
+	path, _, err := git.Binary(f.machine())
 	return path, err
 }

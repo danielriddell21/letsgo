@@ -76,7 +76,7 @@ type Options struct {
 	// GoBin is the go command a rebuild runs, as gobuild.Toolchain resolved it.
 	GoBin string
 
-	// GitBin is the git command, as resolved by discover.GitBinary. Needed
+	// GitBin is the git command, as resolved by git.Binary. Needed
 	// only to check out the commit a rebuild builds from.
 	GitBin string
 

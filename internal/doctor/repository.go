@@ -3,6 +3,8 @@ package doctor
 import (
 	"context"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/plugin"
@@ -48,15 +50,15 @@ func (r *Result) checkPlugin(p config.Plugin, dir, pluginsDir string) {
 // checkHistory reports a shallow clone or a scope with no tags yet (DR-6) —
 // either one means the changelog and version-bump logic have less history to
 // work with than they would on a full clone.
-func (r *Result) checkHistory(ctx context.Context, gitBin, dir string, git discover.Git, scope discover.Scope) {
+func (r *Result) checkHistory(ctx context.Context, loc discover.Location) {
 	const hint = "use fetch-depth: 0"
 
-	if git.Shallow {
+	if loc.Git.Shallow {
 		r.add(repositoryGroup, "history", Warn, hint, "shallow clone")
 		return
 	}
 
-	tags, err := discover.Tags(ctx, gitBin, dir, scope.Prefix)
+	tags, err := loc.Runner.Tags(ctx, loc.Scope.Prefix)
 	if err != nil {
 		r.add(repositoryGroup, "history", Fail, "", "%v", err)
 		return
@@ -72,11 +74,11 @@ func (r *Result) checkHistory(ctx context.Context, gitBin, dir string, git disco
 // publish steps only know how to talk to GitHub, so a release from this
 // clone would skip them. A missing or unparseable origin is not a problem
 // doctor reports — plan.Resolve treats it the same way, best-effort.
-func (r *Result) checkRemote(ctx context.Context, gitBin, dir string) {
-	repo, err := discover.FindRepo(ctx, gitBin, dir)
-	if err != nil {
+func (r *Result) checkRemote(loc discover.Location) {
+	if !loc.HasRepo() {
 		return
 	}
+	repo := loc.Repo
 	if repo.Host != "github.com" {
 		r.add(repositoryGroup, "remote", Warn, "", "%s is not github.com; changelog and publish steps will be skipped", repo.Host)
 		return
@@ -86,8 +88,8 @@ func (r *Result) checkRemote(ctx context.Context, gitBin, dir string) {
 
 // checkWorktree reports uncommitted changes (DR-8): a release must be
 // reproducible from its commit alone.
-func (r *Result) checkWorktree(git discover.Git) {
-	if !git.Clean {
+func (r *Result) checkWorktree(state git.State) {
+	if !state.Clean {
 		r.add(repositoryGroup, "worktree", Warn, "", "uncommitted changes")
 		return
 	}

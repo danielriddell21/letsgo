@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/credential"
 
 	"github.com/danielriddell21/letsgo/modsyntax"
@@ -44,6 +46,11 @@ type Options struct {
 	// Global is the machine's configuration, read once by the caller and
 	// handed down. Nil reads it from the file, which is what a command does.
 	Global *config.Global
+
+	// GlobalErr is why the caller could not read the machine's configuration.
+	// With a nil Global, the plan reports it as a failed check instead of
+	// reading the file a second time to find out.
+	GlobalErr error
 
 	// Snapshot builds an untagged working version.
 	Snapshot bool
@@ -196,7 +203,7 @@ type Plan struct {
 	// the repository rather than the module being built.
 	root discover.Module
 
-	Git   discover.Git
+	Git   git.State
 	Scope discover.Scope
 
 	// GitBin is the git command resolved from the environment and global
@@ -327,36 +334,27 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 		dir = "."
 	}
 
-	root, err := discover.FindModule(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	machine := resolveMachine(opts.Global)
+	machine := resolveMachine(opts.Global, opts.GlobalErr)
 	if machine.gitErr != nil {
 		return nil, machine.gitErr
 	}
 
-	git, err := discover.FindGit(ctx, machine.gitBin, root.Dir)
+	loc, err := discover.Locate(ctx, machine.gitBin, dir)
 	if err != nil {
 		return nil, err
 	}
+	root, scope := loc.Module, loc.Scope
 
-	scope, err := discover.NewScope(git.TopLevel, root.Dir)
-	if err != nil {
-		return nil, err
-	}
-
-	p := &Plan{Module: root, RootDir: root.Dir, root: root, Git: git, Scope: scope, Snapshot: opts.Snapshot}
-	p.note("commit", git.Commit, "git HEAD")
-	p.note("commit time", git.CommitTime.Format("2006-01-02T15:04:05Z"), "git committer timestamp")
+	p := &Plan{Module: root, RootDir: root.Dir, root: root, Git: loc.Git, Scope: scope, Snapshot: opts.Snapshot}
+	p.note("commit", loc.Git.Commit, "git HEAD")
+	p.note("commit time", loc.Git.CommitTime.Format("2006-01-02T15:04:05Z"), "git committer timestamp")
 	if scope.Prefix != "" {
 		p.note("scope", scope.Dir, "the module's own directory")
 	}
 
-	if repo, err := discover.FindRepo(ctx, machine.gitBin, root.Dir); err == nil {
-		p.Repo, p.HasRepo = repo, true
-		p.note("repository", repo.String(), "git remote origin")
+	if loc.HasRepo() {
+		p.Repo, p.HasRepo = loc.Repo, true
+		p.note("repository", loc.Repo.String(), "git remote origin")
 	}
 
 	p.recordMachine(machine)

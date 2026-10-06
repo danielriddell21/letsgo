@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/github"
 )
@@ -15,7 +17,7 @@ type Source struct {
 	// Dir is the repository.
 	Dir string
 
-	// GitBin is the git command, as resolved by discover.GitBinary.
+	// GitBin is the git command, as resolved by git.Binary.
 	GitBin string
 
 	// Tag is the release being described. It is expected to point at HEAD:
@@ -47,8 +49,8 @@ type Source struct {
 // answer is not on disk, and that is a normal CI checkout rather than a
 // mistake to be corrected with fetch-depth: 0.
 // convert adapts forge commits to the shape the rest of the package uses.
-func convert(infos []github.CommitInfo) []discover.Commit {
-	commits := make([]discover.Commit, 0, len(infos))
+func convert(infos []github.CommitInfo) []git.Commit {
+	commits := make([]git.Commit, 0, len(infos))
 	for _, info := range infos {
 		subject, body, _ := strings.Cut(info.Commit.Message, "\n")
 
@@ -59,7 +61,7 @@ func convert(infos []github.CommitInfo) []discover.Commit {
 			author = info.Author.Login
 		}
 
-		commits = append(commits, discover.Commit{
+		commits = append(commits, git.Commit{
 			SHA:     info.SHA,
 			Subject: strings.TrimSpace(subject),
 			Body:    strings.TrimSpace(body),
@@ -69,11 +71,11 @@ func convert(infos []github.CommitInfo) []discover.Commit {
 	return commits
 }
 
-func Collect(ctx context.Context, s Source) (previous string, commits []discover.Commit, err error) {
+func Collect(ctx context.Context, s Source) (previous string, commits []git.Commit, err error) {
 	scope := discover.Scope{Prefix: s.Prefix}
 
 	if !s.Shallow {
-		tags, err := discover.Tags(ctx, s.GitBin, s.Dir, s.Prefix)
+		tags, err := git.New(s.GitBin, s.Dir).Tags(ctx, s.Prefix)
 		if err != nil {
 			return "", nil, err
 		}
@@ -82,7 +84,7 @@ func Collect(ctx context.Context, s Source) (previous string, commits []discover
 		if err != nil {
 			return "", nil, err
 		}
-		commits, err = discover.Commits(ctx, s.GitBin, s.Dir, previous, s.Tag, nested...)
+		commits, err = git.New(s.GitBin, s.Dir).Commits(ctx, previous, s.Tag, nested...)
 		return previous, commits, err
 	}
 
@@ -93,7 +95,7 @@ func Collect(ctx context.Context, s Source) (previous string, commits []discover
 		if err != nil {
 			return "", nil, err
 		}
-		commits, err = discover.Commits(ctx, s.GitBin, s.Dir, "", s.Tag, nested...)
+		commits, err = git.New(s.GitBin, s.Dir).Commits(ctx, "", s.Tag, nested...)
 		return "", commits, err
 	}
 

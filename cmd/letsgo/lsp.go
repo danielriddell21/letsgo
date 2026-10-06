@@ -5,7 +5,6 @@ import (
 	"flag"
 	"os"
 
-	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/lsp"
 	"github.com/danielriddell21/letsgo/selfupdate"
@@ -15,7 +14,7 @@ import (
 // stdio JSON-RPC: see docs/hld/vscode.md's "letsgo lsp" section. It never
 // prints to stdout itself — every byte there is a framed protocol message —
 // so a plain terminal invocation just waits for a client that speaks LSP.
-func runLSP(args []string) error {
+func (f forge) runLSP(args []string) error {
 	fs := flag.NewFlagSet("lsp", flag.ExitOnError)
 	restricted := fs.Bool("restricted", false, "parse, decode, format and complete only — no plan, no plugin lookup, no subprocess")
 	if err := parseFlags(fs, args); err != nil {
@@ -25,7 +24,7 @@ func runLSP(args []string) error {
 		return errUsage("letsgo lsp [--restricted]")
 	}
 
-	server := lsp.NewServer(os.Stdin, os.Stdout, lspOptions(*restricted, machineConfig()))
+	server := lsp.NewServer(os.Stdin, os.Stdout, f.lspOptions(*restricted))
 	code, err := server.Run(context.Background())
 	if err != nil {
 		return err
@@ -39,12 +38,13 @@ func runLSP(args []string) error {
 // lspOptions is what the server is wired with: nothing that reaches outside
 // the document in restricted mode, and the machine's go command and plugin
 // store otherwise.
-func lspOptions(restricted bool, global *config.Global) lsp.Options {
+func (f forge) lspOptions(restricted bool) lsp.Options {
+	global := f.machine()
 	opts := lsp.Options{Restricted: restricted, PluginsDir: global.PluginsDir}
 	if restricted {
 		return opts
 	}
-	opts.ResolvePin, opts.InstallPin = latestPin, installPinned
+	opts.ResolvePin, opts.InstallPin = f.latestPin, f.installPinned
 	// A go binary that can't be resolved is not fatal: build-target
 	// completion just comes back empty, the same as it does in restricted
 	// mode.
@@ -55,10 +55,10 @@ func lspOptions(restricted bool, global *config.Global) lsp.Options {
 // latestPin backs the editor's "update pin" action: it installs the newest
 // release of a plugin into the store, exactly as `letsgo plugin install` would,
 // and reports the pin that names it.
-func latestPin(ctx context.Context, command string) (lsp.Pin, error) {
-	token := forgeToken(ctx, "")
-	release, _, _, err := fetchIntoStore(ctx, selfupdate.Options{
-		Repo:      defaultPluginRepo(),
+func (f forge) latestPin(ctx context.Context, command string) (lsp.Pin, error) {
+	token := f.forgeToken(ctx, "")
+	release, _, _, err := f.fetchIntoStore(ctx, selfupdate.Options{
+		Repo:      f.defaultPluginRepo(),
 		Token:     token,
 		UserAgent: "letsgo/" + version,
 		Binary:    command,
@@ -74,10 +74,10 @@ func latestPin(ctx context.Context, command string) (lsp.Pin, error) {
 // does for each pin. Whether what it fetched is the digest the pin names is
 // for the caller to check — the store is content-addressed, so a release that
 // differs simply lands under a different digest.
-func installPinned(ctx context.Context, command, tag string) error {
-	token := forgeToken(ctx, "")
-	_, _, _, err := fetchIntoStore(ctx, selfupdate.Options{
-		Repo:      defaultPluginRepo(),
+func (f forge) installPinned(ctx context.Context, command, tag string) error {
+	token := f.forgeToken(ctx, "")
+	_, _, _, err := f.fetchIntoStore(ctx, selfupdate.Options{
+		Repo:      f.defaultPluginRepo(),
 		Token:     token,
 		UserAgent: "letsgo/" + version,
 		Binary:    command,

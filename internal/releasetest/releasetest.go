@@ -11,7 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/release"
@@ -59,7 +60,7 @@ func NewRepo(t *testing.T) *Repo {
 // identity so commits are reproducible across machines and CI runners.
 func (r *Repo) Git(args ...string) {
 	r.t.Helper()
-	gitBin, _, err := discover.GitBinary(nil)
+	gitBin, _, err := git.Binary(nil)
 	if err != nil {
 		r.t.Fatal(err)
 	}

@@ -135,7 +135,7 @@ func TestMaybeNoticeUpdateReadsTheGlobalConfig(t *testing.T) {
 	newNoticeRig(t)
 	t.Setenv("LETSGO_CONFIG", t.TempDir()+"/absent.mod")
 
-	maybeNoticeUpdate("plan", nil) // unset update-check: nothing to print, nothing to fail
+	maybeNoticeUpdate(&config.Global{}, "plan", nil) // unset update-check: nothing to print, nothing to fail
 }
 
 func TestLatestVersionAsksTheForge(t *testing.T) {

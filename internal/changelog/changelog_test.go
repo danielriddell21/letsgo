@@ -4,12 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/gate"
 )
 
-func commit(sha, subject, body, author string) discover.Commit {
-	return discover.Commit{SHA: sha, Subject: subject, Body: body, Author: author}
+func commit(sha, subject, body, author string) git.Commit {
+	return git.Commit{SHA: sha, Subject: subject, Body: body, Author: author}
 }
 
 func TestParsesConventionalCommits(t *testing.T) {
@@ -75,7 +76,7 @@ func TestPullRequestNumbers(t *testing.T) {
 }
 
 func TestMaintenanceCommitsAreCountedNotListed(t *testing.T) {
-	c := Build("v1.0.0", "v1.1.0", []discover.Commit{
+	c := Build("v1.0.0", "v1.1.0", []git.Commit{
 		commit("a1111111", "feat: something useful", "", "Dan"),
 		commit("b2222222", "chore: bump deps", "", "Dan"),
 		commit("c3333333", "ci: fix workflow", "", "Dan"),
@@ -101,7 +102,7 @@ func TestMaintenanceCommitsAreCountedNotListed(t *testing.T) {
 
 // A breaking maintenance commit is still breaking.
 func TestBreakingMaintenanceIsNotHidden(t *testing.T) {
-	c := Build("", "v2.0.0", []discover.Commit{
+	c := Build("", "v2.0.0", []git.Commit{
 		commit("a1111111", "build!: require Go 1.24", "", "Dan"),
 	})
 	if c.Hidden != 0 || len(c.Entries) != 1 {
@@ -110,7 +111,7 @@ func TestBreakingMaintenanceIsNotHidden(t *testing.T) {
 }
 
 func TestMarkdownOrdersSections(t *testing.T) {
-	c := Build("v1.0.0", "v2.0.0", []discover.Commit{
+	c := Build("v1.0.0", "v2.0.0", []git.Commit{
 		commit("a1111111", "docs: tidy readme", "", "Dan"),
 		commit("b2222222", "fix: handle nil", "", "Ada"),
 		commit("c3333333", "feat: add retries", "", "Dan"),
@@ -144,14 +145,14 @@ func TestMarkdownOrdersSections(t *testing.T) {
 
 // A single-author release does not need to be told who wrote it.
 func TestSingleContributorIsNotListed(t *testing.T) {
-	c := Build("", "v1.0.0", []discover.Commit{commit("a1111111", "feat: first", "", "Dan")})
+	c := Build("", "v1.0.0", []git.Commit{commit("a1111111", "feat: first", "", "Dan")})
 	if strings.Contains(c.Markdown(), "Contributors") {
 		t.Errorf("contributors listed for a single author:\n%s", c.Markdown())
 	}
 }
 
 func TestEntryReferences(t *testing.T) {
-	c := Build("", "v1.0.0", []discover.Commit{
+	c := Build("", "v1.0.0", []git.Commit{
 		commit("abc1234def5678", "feat: with a pr (#7)", "", "Dan"),
 		commit("fed4321cba8765", "feat: without one", "", "Dan"),
 	})
@@ -167,7 +168,7 @@ func TestEntryReferences(t *testing.T) {
 }
 
 func TestScopeIsHighlighted(t *testing.T) {
-	c := Build("", "v1.0.0", []discover.Commit{commit("a1111111", "fix(archive): zero the gzip mtime", "", "Dan")})
+	c := Build("", "v1.0.0", []git.Commit{commit("a1111111", "fix(archive): zero the gzip mtime", "", "Dan")})
 	if !strings.Contains(c.Markdown(), "**archive:** zero the gzip mtime") {
 		t.Errorf("scope not rendered:\n%s", c.Markdown())
 	}
@@ -182,7 +183,7 @@ func TestEmptyRange(t *testing.T) {
 // The API diff describes what the code did; the commit messages describe what
 // someone meant. For a library the first is what a reader is deciding on.
 func TestAPIChangesSection(t *testing.T) {
-	c := Build("v1.0.0", "v2.0.0", []discover.Commit{
+	c := Build("v1.0.0", "v2.0.0", []git.Commit{
 		commit("a1111111", "feat: rework the client", "", "Dan"),
 	}).WithAPIChanges([]gate.Change{
 		{Package: "example.com/foo", Kind: gate.Compatible, Text: "WithTimeout: added"},
@@ -206,7 +207,7 @@ func TestAPIChangesSection(t *testing.T) {
 }
 
 func TestNoAPISectionWithoutChanges(t *testing.T) {
-	md := Build("", "v1.0.0", []discover.Commit{commit("a1111111", "feat: first", "", "Dan")}).Markdown()
+	md := Build("", "v1.0.0", []git.Commit{commit("a1111111", "feat: first", "", "Dan")}).Markdown()
 	if strings.Contains(md, "API changes") {
 		t.Errorf("an empty API section was rendered:\n%s", md)
 	}

@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 )
@@ -94,7 +96,7 @@ func (p *Plan) resolveProject() {
 func (p *Plan) resolveVersion(ctx context.Context, opts Options) {
 	if p.Snapshot {
 		base := "0.0.0"
-		if prev, err := discover.PreviousTag(ctx, p.GitBin, p.RootDir, p.Scope.Prefix); err == nil && prev != "" {
+		if prev, err := git.New(p.GitBin, p.RootDir).PreviousTag(ctx, p.Scope.Prefix); err == nil && prev != "" {
 			base = strings.TrimPrefix(strings.TrimPrefix(prev, p.Scope.Prefix), "v")
 		}
 		p.Version = fmt.Sprintf("%s-next+%s", base, p.Git.ShortCommit)

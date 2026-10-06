@@ -7,15 +7,16 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/archive"
-	"github.com/danielriddell21/letsgo/internal/discover"
 )
 
 // SourceOptions describes a source archive to produce.
 type SourceOptions struct {
 	ModuleDir string
 
-	// GitBin is the git command, as resolved by discover.GitBinary.
+	// GitBin is the git command, as resolved by git.Binary.
 	GitBin string
 
 	Name    string
@@ -47,7 +48,7 @@ func WriteSource(ctx context.Context, o SourceOptions) (Source, error) {
 		return Source{}, fmt.Errorf("build: WorkDir, ModuleDir and GitBin are required")
 	}
 
-	files, err := discover.TrackedFiles(ctx, o.GitBin, o.ModuleDir)
+	files, err := git.New(o.GitBin, o.ModuleDir).TrackedFiles(ctx)
 	if err != nil {
 		return Source{}, err
 	}

@@ -35,11 +35,11 @@ func (f forge) runAudit(args []string) error {
 	}
 	defer run.cleanup()
 
-	opts := audit.Options{Global: machineConfig(), Client: run.Client, Repo: run.Repo, Prefix: run.Prefix, WorkDir: run.WorkDir}
+	opts := audit.Options{Global: f.machine(), Client: run.Client, Repo: run.Repo, Prefix: run.Prefix, WorkDir: run.WorkDir}
 
 	if fs.NArg() == 1 {
 		result, err := audit.Run(ctx, audit.Options{
-			Global: machineConfig(), Client: run.Client, Repo: run.Repo, Tag: fs.Arg(0), WorkDir: run.WorkDir,
+			Global: f.machine(), Client: run.Client, Repo: run.Repo, Tag: fs.Arg(0), WorkDir: run.WorkDir,
 		})
 		if err != nil {
 			return err

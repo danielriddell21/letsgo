@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/git"
+
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/semver"
@@ -29,7 +31,7 @@ func prereleaseHistory(ctx context.Context, o Options, stableTag string) (string
 		return "", nil
 	}
 
-	tags, err := discover.Tags(ctx, o.GitBin, o.Dir, o.Prefix)
+	tags, err := git.New(o.GitBin, o.Dir).Tags(ctx, o.Prefix)
 	if err != nil {
 		return "", err
 	}
@@ -53,7 +55,7 @@ func prereleaseHistory(ctx context.Context, o Options, stableTag string) (string
 	var b strings.Builder
 	for _, tag := range rcTags {
 		previous, _ := scope.PreviousTag(tags, tag)
-		commits, err := discover.Commits(ctx, o.GitBin, o.Dir, previous, tag, nested...)
+		commits, err := git.New(o.GitBin, o.Dir).Commits(ctx, previous, tag, nested...)
 		if err != nil {
 			return "", err
 		}
