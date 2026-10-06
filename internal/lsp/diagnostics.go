@@ -5,6 +5,8 @@ import (
 	"errors"
 	"path/filepath"
 
+	"github.com/danielriddell21/letsgo/modsyntax"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
@@ -37,7 +39,7 @@ func kindOf(path string) fileKind {
 // most one: the parser stops at the first error, the same way `letsgo fmt`
 // and `letsgo plan` already report it.
 func parseDiagnostics(path, text string) []Diagnostic {
-	f, err := config.Parse(path, []byte(text))
+	f, err := modsyntax.Parse(path, []byte(text))
 	if err != nil {
 		return []Diagnostic{diagnosticFromSyntaxError(err)}
 	}
@@ -56,7 +58,7 @@ func parseDiagnostics(path, text string) []Diagnostic {
 }
 
 func diagnosticFromSyntaxError(err error) Diagnostic {
-	var se *config.SyntaxError
+	var se *modsyntax.SyntaxError
 	if !errors.As(err, &se) {
 		return Diagnostic{Message: err.Error(), Severity: SeverityError}
 	}

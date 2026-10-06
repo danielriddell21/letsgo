@@ -6,11 +6,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/danielriddell21/letsgo/modsyntax"
 )
 
 func decodeGlobalString(t *testing.T, body string) (*Global, error) {
 	t.Helper()
-	f, err := Parse("config.mod", []byte(body))
+	f, err := modsyntax.Parse("config.mod", []byte(body))
 	if err != nil {
 		return nil, err
 	}

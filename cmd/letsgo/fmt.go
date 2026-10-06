@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/danielriddell21/letsgo/modsyntax"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
@@ -65,7 +67,7 @@ func fmtStdin() error {
 // file that cannot be decoded doesn't tidy something meaningless into
 // something meaningless and well-indented.
 func formatConfig(name string, data []byte) ([]byte, error) {
-	file, err := config.Parse(name, data)
+	file, err := modsyntax.Parse(name, data)
 	if err != nil {
 		return nil, err
 	}

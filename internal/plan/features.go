@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/modsyntax"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/feature"
 )
@@ -21,7 +23,7 @@ func (p *Plan) loadConfig(moduleDir string) {
 		return
 	}
 
-	file, err := config.Parse(ConfigFile, data)
+	file, err := modsyntax.Parse(ConfigFile, data)
 	if err != nil {
 		p.Config = &config.Config{Budgets: map[string]string{}}
 		p.add("config", Fail, "%v", err)

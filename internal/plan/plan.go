@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/modsyntax"
+
 	"github.com/danielriddell21/letsgo/internal/archive"
 	"github.com/danielriddell21/letsgo/internal/bytesize"
 	"github.com/danielriddell21/letsgo/internal/config"
@@ -315,7 +317,7 @@ func (p *Plan) posOf(key string) *Pos {
 	return p.configPos(p.Config.Pos[key])
 }
 
-func (p *Plan) configPos(cp config.Position) *Pos {
+func (p *Plan) configPos(cp modsyntax.Position) *Pos {
 	if cp.Line == 0 || p.ConfigPath == "" {
 		return nil
 	}

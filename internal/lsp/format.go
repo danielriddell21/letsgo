@@ -3,7 +3,7 @@ package lsp
 import (
 	"strings"
 
-	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/modsyntax"
 )
 
 // formatEdits is letsgo fmt's own File.Format, wrapped as a whole-document
@@ -15,7 +15,7 @@ import (
 // would mean guessing what the author meant, which is diagnostics' job, not
 // formatting's.
 func formatEdits(path, text string) []TextEdit {
-	f, err := config.Parse(path, []byte(text))
+	f, err := modsyntax.Parse(path, []byte(text))
 	if err != nil {
 		return nil
 	}

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/modsyntax"
+
 	"github.com/danielriddell21/letsgo/internal/feature"
 )
 
@@ -65,13 +67,13 @@ type Config struct {
 	// BudgetPos is where each entry in Budgets was written, so a check raised
 	// against a bad budget can point at the line that caused it rather than
 	// merely naming the target.
-	BudgetPos map[string]Position
+	BudgetPos map[string]modsyntax.Position
 
 	// Pos is where each directive was first written, keyed by its name, so a
 	// check raised against what a directive asked for can point at its line.
 	// A directive that repeats per subject has a key per subject — "plugin
 	// <hook>", "disable <feature>", "require <feature>".
-	Pos map[string]Position
+	Pos map[string]modsyntax.Position
 
 	// Image describes the container image to publish. Nil means none: a
 	// release that creates a package in a registry should be something the
@@ -236,7 +238,7 @@ func Directives() []string {
 }
 
 // handlers folds each directive into the config.
-var handlers = map[string]func(cfg *Config, file string, line *Line) error{
+var handlers = map[string]func(cfg *Config, file string, line *modsyntax.Line) error{
 	"project": applyProject,
 	"module":  applyModule,
 	"build":   applyBuild,
@@ -256,9 +258,9 @@ var handlers = map[string]func(cfg *Config, file string, line *Line) error{
 // mark records where a directive was written. The first occurrence wins: a
 // repeated list directive is still one thing to point at, and the first line
 // is where a reader starts looking.
-func (c *Config) mark(key string, pos Position) {
+func (c *Config) mark(key string, pos modsyntax.Position) {
 	if c.Pos == nil {
-		c.Pos = map[string]Position{}
+		c.Pos = map[string]modsyntax.Position{}
 	}
 	if _, ok := c.Pos[key]; !ok {
 		c.Pos[key] = pos
@@ -266,19 +268,19 @@ func (c *Config) mark(key string, pos Position) {
 }
 
 // Decode interprets a parsed file.
-func Decode(f *File) (*Config, error) {
-	cfg := &Config{Budgets: map[string]string{}, BudgetPos: map[string]Position{}}
-	seen := map[string]Position{}
+func Decode(f *modsyntax.File) (*Config, error) {
+	cfg := &Config{Budgets: map[string]string{}, BudgetPos: map[string]modsyntax.Position{}}
+	seen := map[string]modsyntax.Position{}
 
 	for _, stmt := range f.Stmts {
 		switch s := stmt.(type) {
-		case *Comment:
+		case *modsyntax.Comment:
 			continue
-		case *Block:
+		case *modsyntax.Block:
 			if err := decodeBlock(cfg, f.Name, seen, s); err != nil {
 				return nil, err
 			}
-		case *Line:
+		case *modsyntax.Line:
 			if err := decodeLine(cfg, f.Name, seen, s); err != nil {
 				return nil, err
 			}
@@ -288,7 +290,7 @@ func Decode(f *File) (*Config, error) {
 	return cfg, nil
 }
 
-func decodeBlock(cfg *Config, file string, seen map[string]Position, b *Block) error {
+func decodeBlock(cfg *Config, file string, seen map[string]modsyntax.Position, b *modsyntax.Block) error {
 	if err := checkKnown(file, b.Keyword, b.P); err != nil {
 		return err
 	}
@@ -313,7 +315,7 @@ func decodeBlock(cfg *Config, file string, seen map[string]Position, b *Block) e
 	return nil
 }
 
-func decodeLine(cfg *Config, file string, seen map[string]Position, line *Line) error {
+func decodeLine(cfg *Config, file string, seen map[string]modsyntax.Position, line *modsyntax.Line) error {
 	if err := checkKnown(file, line.Keyword, line.P); err != nil {
 		return err
 	}
@@ -336,7 +338,7 @@ func isScalar(keyword string) bool {
 	return false
 }
 
-func checkKnown(file, keyword string, pos Position) error {
+func checkKnown(file, keyword string, pos modsyntax.Position) error {
 	if _, ok := known[keyword]; ok {
 		return nil
 	}
@@ -405,7 +407,7 @@ func levenshtein(a, b string) int {
 	return prev[len(rb)]
 }
 
-func checkOnce(file string, seen map[string]Position, keyword string, pos Position) error {
+func checkOnce(file string, seen map[string]modsyntax.Position, keyword string, pos modsyntax.Position) error {
 	if first, ok := seen[keyword]; ok {
 		return errAt(file, pos, "%s is already set at line %d", keyword, first.Line)
 	}
@@ -416,7 +418,7 @@ func checkOnce(file string, seen map[string]Position, keyword string, pos Positi
 // apply folds one directive into the config. Each directive gets its own
 // function: the shapes have nothing in common beyond the keyword, and a single
 // switch grew into something nobody could read at a glance.
-func apply(cfg *Config, file string, line *Line) error {
+func apply(cfg *Config, file string, line *modsyntax.Line) error {
 	if handle, ok := handlers[line.Keyword]; ok {
 		return handle(cfg, file, line)
 	}
@@ -426,7 +428,7 @@ func apply(cfg *Config, file string, line *Line) error {
 	return nil
 }
 
-func applyProject(cfg *Config, file string, line *Line) error {
+func applyProject(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 1 {
 		return arity(file, line)
 	}
@@ -434,7 +436,7 @@ func applyProject(cfg *Config, file string, line *Line) error {
 	return nil
 }
 
-func applyBuild(cfg *Config, file string, line *Line) error {
+func applyBuild(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) == 0 {
 		return arity(file, line)
 	}
@@ -442,7 +444,7 @@ func applyBuild(cfg *Config, file string, line *Line) error {
 	return nil
 }
 
-func applyTags(cfg *Config, file string, line *Line) error {
+func applyTags(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) == 0 {
 		return arity(file, line)
 	}
@@ -463,7 +465,7 @@ var variantDirectives = map[string]bool{"build": true, "tags": true}
 // The inner lines are applied to a throwaway config and the results lifted
 // out, so a variant's `build` and `tags` are parsed and validated by exactly
 // the code that parses the release's own.
-func applyVariant(cfg *Config, file string, b *Block) error {
+func applyVariant(cfg *Config, file string, b *modsyntax.Block) error {
 	if len(b.Args) != 1 {
 		return errAt(file, b.P, "%s", known["variant"])
 	}
@@ -482,7 +484,7 @@ func applyVariant(cfg *Config, file string, b *Block) error {
 	// A block's lines arrive as arguments to the block's own keyword, so the
 	// directive each one means is its first word — the same shape as
 	// `image ( base ... )`.
-	inner := &Config{Budgets: map[string]string{}, BudgetPos: map[string]Position{}}
+	inner := &Config{Budgets: map[string]string{}, BudgetPos: map[string]modsyntax.Position{}}
 	for _, line := range b.Lines {
 		if len(line.Args) == 0 {
 			continue
@@ -492,7 +494,7 @@ func applyVariant(cfg *Config, file string, b *Block) error {
 			return errAt(file, line.P,
 				"a variant sets build and tags; %q belongs outside it", keyword)
 		}
-		if err := apply(inner, file, &Line{Keyword: keyword, Args: args, P: line.P}); err != nil {
+		if err := apply(inner, file, &modsyntax.Line{Keyword: keyword, Args: args, P: line.P}); err != nil {
 			return err
 		}
 	}
@@ -515,7 +517,7 @@ func applyVariant(cfg *Config, file string, b *Block) error {
 // on disk. Nothing here is optional, because a plugin that ran unpinned would
 // be an unrecorded build input — the thing the whole contract exists to
 // prevent.
-func applyPlugin(cfg *Config, file string, line *Line) error {
+func applyPlugin(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 4 {
 		return arity(file, line)
 	}
@@ -538,7 +540,7 @@ func applyPlugin(cfg *Config, file string, line *Line) error {
 	return nil
 }
 
-func applyLDFlags(cfg *Config, file string, line *Line) error {
+func applyLDFlags(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) == 0 {
 		return arity(file, line)
 	}
@@ -546,7 +548,7 @@ func applyLDFlags(cfg *Config, file string, line *Line) error {
 	return nil
 }
 
-func applyArchive(cfg *Config, file string, line *Line) error {
+func applyArchive(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) == 0 {
 		return arity(file, line)
 	}
@@ -559,7 +561,7 @@ func applyArchive(cfg *Config, file string, line *Line) error {
 // It must stay inside the repository: the path ends up joined to the root and
 // then handed to the toolchain, so an absolute path or one climbing out with
 // ".." would silently build something the commit does not contain.
-func applyModule(cfg *Config, file string, line *Line) error {
+func applyModule(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 1 {
 		return arity(file, line)
 	}
@@ -585,7 +587,7 @@ func applyModule(cfg *Config, file string, line *Line) error {
 // The bare form names the version's variable, which is the case worth being
 // short; commit and date are keyed, and follow the same shape as the image
 // directive's settings.
-func applyVersion(cfg *Config, file string, line *Line) error {
+func applyVersion(cfg *Config, file string, line *modsyntax.Line) error {
 	if cfg.Version == nil {
 		cfg.Version = &VersionSymbols{}
 	}
@@ -628,7 +630,7 @@ func cutSymbol(symbol string) (pkg, name string, ok bool) {
 	return symbol[:i], symbol[i+1:], true
 }
 
-func applyBudget(cfg *Config, file string, line *Line) error {
+func applyBudget(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 2 {
 		return arity(file, line)
 	}
@@ -646,13 +648,13 @@ func applyBudget(cfg *Config, file string, line *Line) error {
 // switching: image carries more shapes than any other directive — a bare form,
 // a bare reference, and a setting per key — and a single switch over all of
 // them is past the point where anyone can read it at a glance.
-var imageSettings = map[string]func(*Image, string, *Line) error{
+var imageSettings = map[string]func(*Image, string, *modsyntax.Line) error{
 	"base":   applyImageBase,
 	"cmd":    applyImageCmd,
 	"expose": applyImageExpose,
 }
 
-func applyImage(cfg *Config, file string, line *Line) error {
+func applyImage(cfg *Config, file string, line *modsyntax.Line) error {
 	if cfg.Image == nil {
 		cfg.Image = &Image{}
 	}
@@ -676,7 +678,7 @@ func applyImage(cfg *Config, file string, line *Line) error {
 	return nil
 }
 
-func applyImageBase(img *Image, file string, line *Line) error {
+func applyImageBase(img *Image, file string, line *modsyntax.Line) error {
 	if len(line.Args) != 2 {
 		return arity(file, line)
 	}
@@ -687,7 +689,7 @@ func applyImageBase(img *Image, file string, line *Line) error {
 	return nil
 }
 
-func applyImageCmd(img *Image, file string, line *Line) error {
+func applyImageCmd(img *Image, file string, line *modsyntax.Line) error {
 	if len(line.Args) < 2 {
 		return arity(file, line)
 	}
@@ -698,7 +700,7 @@ func applyImageCmd(img *Image, file string, line *Line) error {
 	return nil
 }
 
-func applyImageExpose(img *Image, file string, line *Line) error {
+func applyImageExpose(img *Image, file string, line *modsyntax.Line) error {
 	if len(line.Args) < 2 {
 		return arity(file, line)
 	}
@@ -738,7 +740,7 @@ func exposedPort(s string) (string, error) {
 // are keyed, following the same shape as the version and image directives.
 // Repeating either is rejected here rather than by the scalar check, because
 // the two forms are separate settings sharing one keyword.
-func applyBrew(cfg *Config, file string, line *Line) error {
+func applyBrew(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) == 2 && line.Args[0] == "caveats" {
 		if cfg.BrewCaveats != "" {
 			return errAt(file, line.P, "brew caveats is already set")
@@ -760,7 +762,7 @@ func applyBrew(cfg *Config, file string, line *Line) error {
 	return nil
 }
 
-func applyRelease(cfg *Config, file string, line *Line) error {
+func applyRelease(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) == 0 {
 		return arity(file, line)
 	}
@@ -815,7 +817,7 @@ func applyRelease(cfg *Config, file string, line *Line) error {
 // at its own directive are both mistakes worth catching here, at the line
 // that made them, rather than as a release that silently kept the feature
 // on.
-func applyDisable(cfg *Config, file string, line *Line) error {
+func applyDisable(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) == 0 {
 		return arity(file, line)
 	}
@@ -845,7 +847,7 @@ func applyDisable(cfg *Config, file string, line *Line) error {
 // applyRequire makes a feature's Skip a Fail: a gate that only ran when its
 // tool happened to be on PATH becomes one this release cannot pass without
 // it.
-func applyRequire(cfg *Config, file string, line *Line) error {
+func applyRequire(cfg *Config, file string, line *modsyntax.Line) error {
 	if len(line.Args) == 0 {
 		return arity(file, line)
 	}
@@ -871,7 +873,7 @@ func applyRequire(cfg *Config, file string, line *Line) error {
 
 // unknownFeature reports a name that is not in the catalogue, with the same
 // did-you-mean treatment an unknown directive gets.
-func unknownFeature(file string, pos Position, name string) error {
+func unknownFeature(file string, pos modsyntax.Position, name string) error {
 	names := make([]string, len(feature.All))
 	for i, f := range feature.All {
 		names[i] = string(f.Name)
@@ -883,9 +885,9 @@ func unknownFeature(file string, pos Position, name string) error {
 // unknownName reports a word that is not one of names, suggesting the nearest
 // when there is one. The suggestion rides on the error as data, so an editor
 // need not read it back out of the message.
-func unknownName(file string, pos Position, what, word string, names []string) error {
+func unknownName(file string, pos modsyntax.Position, what, word string, names []string) error {
 	if near := nearestKeyword(word, names); near != "" {
-		return &SyntaxError{
+		return &modsyntax.SyntaxError{
 			File: file, Pos: pos, Wrong: word, Suggest: near,
 			Msg: fmt.Sprintf("unknown %s %q; did you mean %q?", what, word, near),
 		}
@@ -902,6 +904,11 @@ func containsString(list []string, s string) bool {
 	return false
 }
 
-func arity(file string, line *Line) error {
+func arity(file string, line *modsyntax.Line) error {
 	return errAt(file, line.P, "%s takes %s", line.Keyword, known[line.Keyword])
+}
+
+// errAt is a syntax error at pos, for a directive the decoder cannot accept.
+func errAt(file string, pos modsyntax.Position, format string, args ...any) error {
+	return &modsyntax.SyntaxError{File: file, Pos: pos, Msg: fmt.Sprintf(format, args...)}
 }
