@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 )
 
@@ -102,7 +103,7 @@ func (p *Plan) resolveVersionSymbols() {
 		return
 	}
 	p.add(versionInjection, Pass, "%d symbol(s) verified before injection", checked)
-	p.note("version symbols", strings.Join(p.injectedSymbols(), ", "), ConfigFile)
+	p.note("version symbols", strings.Join(p.injectedSymbols(), ", "), config.FileName)
 }
 
 func (p *Plan) injectedSymbols() []string {

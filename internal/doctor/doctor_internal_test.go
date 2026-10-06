@@ -152,3 +152,20 @@ func TestRequiresVulncheck(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadConfigTreatsAMissingFileAsAbsentButReportsOtherReadErrors(t *testing.T) {
+	cfg, err := loadConfig(t.TempDir())
+	if err != nil || cfg == nil {
+		t.Fatalf("missing file: cfg = %v, err = %v, want an empty config and no error", cfg, err)
+	}
+
+	// A directory where letsgo.mod should be is a read error for every user,
+	// root included; it must not be passed off as "no letsgo.mod".
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, config.FileName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadConfig(dir); err == nil {
+		t.Fatal("a read error was swallowed as a missing file")
+	}
+}

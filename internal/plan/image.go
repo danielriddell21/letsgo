@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/oci"
 )
@@ -60,7 +61,7 @@ func (p *Plan) resolveImage(ctx context.Context) {
 		return
 	}
 
-	reference, source := p.Config.Image.Reference, ConfigFile
+	reference, source := p.Config.Image.Reference, config.FileName
 	if reference == "" {
 		if !p.HasRepo {
 			p.addAt(p.posOf("image"), "image", Fail,

@@ -10,7 +10,6 @@ import (
 	"github.com/danielriddell21/letsgo/modsyntax"
 
 	"github.com/danielriddell21/letsgo/internal/config"
-	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
 func runFmt(args []string) error {
@@ -19,7 +18,7 @@ func runFmt(args []string) error {
 		return err
 	}
 
-	path := plan.ConfigFile
+	path := config.FileName
 	if fs.NArg() > 0 {
 		path = fs.Arg(0)
 	}
@@ -53,7 +52,7 @@ func fmtStdin() error {
 	if err != nil {
 		return fmt.Errorf("letsgo: reading stdin: %w", err)
 	}
-	formatted, err := formatConfig(plan.ConfigFile, data)
+	formatted, err := formatConfig(config.FileName, data)
 	if err != nil {
 		return err
 	}

@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/modsyntax"
@@ -63,7 +62,7 @@ type Global struct {
 }
 
 // globalKnown lists every global directive, with its arity described for
-// error messages. See known, in decode.go, for why this is kept separate
+// error messages. See directiveSet for why this is kept separate
 // from globalHandlers.
 var globalKnown = map[string]string{
 	"go":            "go <path>",
@@ -93,7 +92,7 @@ var globalHandlers = map[string]func(g *Global, file string, line *modsyntax.Lin
 }
 
 // globalDocs is a one-line explanation per global directive, for an editor's
-// hover text. See docs, in decode.go, for why this is kept separate from
+// hover text. See directiveSet for why this is kept separate from
 // globalHandlers.
 var globalDocs = map[string]string{ //nolint:gosec // hover text, not a credential
 	"go":            "Overrides the resolved go toolchain binary.",
@@ -108,25 +107,17 @@ var globalDocs = map[string]string{ //nolint:gosec // hover text, not a credenti
 	"update-check":  "Opt-in: how often letsgo checks for a newer release of itself and mentions it on stderr. Off by default; nothing is ever installed.",
 }
 
+// globalDirectives is the global config's vocabulary.
+var globalDirectives = directiveSet{usage: globalKnown, doc: globalDocs}
+
 // GlobalDoc returns a global directive's usage and documentation, for hover
 // text. ok is false for an unknown keyword.
 func GlobalDoc(keyword string) (usage, doc string, ok bool) {
-	usage, ok = globalKnown[keyword]
-	if !ok {
-		return "", "", false
-	}
-	return usage, globalDocs[keyword], true
+	return globalDirectives.lookup(keyword)
 }
 
 // GlobalDirectives lists every known global directive name, sorted.
-func GlobalDirectives() []string {
-	names := make([]string, 0, len(globalKnown))
-	for name := range globalKnown {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
+func GlobalDirectives() []string { return globalDirectives.names() }
 
 // DecodeGlobal interprets a parsed global config file.
 //
@@ -154,11 +145,11 @@ func DecodeGlobal(f *modsyntax.File) (*Global, error) {
 }
 
 func decodeGlobalLine(g *Global, file string, seen map[string]modsyntax.Position, line *modsyntax.Line) error {
-	if _, ok := known[line.Keyword]; ok {
+	if modDirectives.has(line.Keyword) {
 		return errAt(file, line.P, "%s belongs in letsgo.mod, not the global config", line.Keyword)
 	}
-	if err := checkGlobalKnown(file, line.Keyword, line.P); err != nil {
-		return err
+	if !globalDirectives.has(line.Keyword) {
+		return globalDirectives.unknown(file, line.Keyword, line.P)
 	}
 	// tool is repeatable, one name at a time; every other directive is a
 	// single machine-wide setting, so repeating it is ambiguous.
@@ -168,20 +159,6 @@ func decodeGlobalLine(g *Global, file string, seen map[string]modsyntax.Position
 		}
 	}
 	return globalHandlers[line.Keyword](g, file, line)
-}
-
-func checkGlobalKnown(file, keyword string, pos modsyntax.Position) error {
-	if _, ok := globalKnown[keyword]; ok {
-		return nil
-	}
-
-	names := make([]string, 0, len(globalKnown))
-	for name := range globalKnown {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	return unknownName(file, pos, "directive", keyword, names)
 }
 
 func applyGlobalGo(g *Global, file string, line *modsyntax.Line) error {
@@ -289,7 +266,7 @@ func applyGlobalUpdateCheck(g *Global, file string, line *modsyntax.Line) error 
 }
 
 func globalArity(file string, line *modsyntax.Line) error {
-	return errAt(file, line.P, "%s takes %s", line.Keyword, globalKnown[line.Keyword])
+	return globalDirectives.arity(file, line)
 }
 
 // GlobalPath is where LoadGlobal reads from: GlobalConfigEnvOverride if set,

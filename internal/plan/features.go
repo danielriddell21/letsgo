@@ -1,43 +1,30 @@
 package plan
 
 import (
-	"os"
-	"path/filepath"
+	"errors"
 	"sort"
 	"strings"
-
-	"github.com/danielriddell21/letsgo/modsyntax"
 
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/feature"
 )
 
 func (p *Plan) loadConfig(moduleDir string) {
-	path := filepath.Join(moduleDir, ConfigFile)
-
-	data, err := os.ReadFile(path)
-	if err != nil {
+	cfg, path, err := config.Load(moduleDir)
+	switch {
+	case errors.Is(err, config.ErrNotFound):
 		// Absence is the primary path, not a problem.
 		p.Config = &config.Config{Budgets: map[string]string{}}
 		p.note("config", "none", "zero-config defaults")
 		return
-	}
-
-	file, err := modsyntax.Parse(ConfigFile, data)
-	if err != nil {
-		p.Config = &config.Config{Budgets: map[string]string{}}
-		p.add("config", Fail, "%v", err)
-		return
-	}
-	cfg, err := config.Decode(file)
-	if err != nil {
+	case err != nil:
 		p.Config = &config.Config{Budgets: map[string]string{}}
 		p.add("config", Fail, "%v", err)
 		return
 	}
 
 	p.Config, p.ConfigPath = cfg, path
-	p.note("config", ConfigFile, "repository root")
+	p.note("config", config.FileName, "repository root")
 }
 
 // resolveFeatures folds letsgo.mod's `disable` directive together with any
@@ -46,7 +33,7 @@ func (p *Plan) loadConfig(moduleDir string) {
 func (p *Plan) resolveFeatures(opts Options) {
 	disabled := append([]string(nil), p.Config.Disabled...)
 
-	from := ConfigFile
+	from := config.FileName
 	if opts.DisableProxyWarm {
 		if len(disabled) == 0 {
 			from = "--no-proxy-warm"

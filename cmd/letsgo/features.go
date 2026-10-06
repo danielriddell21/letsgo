@@ -2,18 +2,15 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
-
-	"github.com/danielriddell21/letsgo/modsyntax"
 
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/feature"
-	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
 func runFeatures(args []string) error {
@@ -67,7 +64,7 @@ func resolveFeatureEntries(cfg *config.Config) []featureEntry {
 
 		from := "default"
 		if on != f.Default || required[string(f.Name)] {
-			from = plan.ConfigFile
+			from = config.FileName
 		}
 		entries = append(entries, featureEntry{
 			Name: string(f.Name), Kind: f.Kind.String(), On: on, Required: required[string(f.Name)],
@@ -110,19 +107,11 @@ func listFeatures(w io.Writer, jsonOutput bool) error {
 // or a zero Config when there is none: zero-config is the primary path, not
 // a problem.
 func loadFeaturesConfig() (*config.Config, error) {
-	data, err := os.ReadFile(plan.ConfigFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &config.Config{}, nil
-		}
-		return nil, fmt.Errorf("letsgo: reading %s: %w", plan.ConfigFile, err)
+	cfg, _, err := config.Load(".")
+	if errors.Is(err, config.ErrNotFound) {
+		return &config.Config{}, nil
 	}
-
-	file, err := modsyntax.Parse(filepath.Base(plan.ConfigFile), data)
-	if err != nil {
-		return nil, err
-	}
-	return config.Decode(file)
+	return cfg, err
 }
 
 // enabledByDirective reports whether a feature that is off by default has

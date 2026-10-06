@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 )
 
@@ -39,7 +40,7 @@ func (p *Plan) resolveModule() {
 	}
 
 	p.Module = module
-	p.note("module", module.Path, ConfigFile)
+	p.note("module", module.Path, config.FileName)
 	p.add("module", Pass, "%s in %s", module.Path, p.Config.ModuleDir)
 
 	// The tag names the repository's release, not a version of this nested
@@ -74,7 +75,7 @@ func (p *Plan) checkReplace() {
 func (p *Plan) resolveProject() {
 	if p.Config.Project != "" {
 		p.Project = p.Config.Project
-		p.note("project", p.Project, ConfigFile)
+		p.note("project", p.Project, config.FileName)
 		return
 	}
 	// With a nested module the project is still the repository's: releasing

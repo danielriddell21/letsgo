@@ -11,6 +11,7 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/archive"
 	"github.com/danielriddell21/letsgo/internal/build"
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/gate"
@@ -30,7 +31,7 @@ func (p *Plan) resolveFiles(ctx context.Context) {
 			return
 		}
 		p.Files = files
-		p.note(archiveFiles, strings.Join(p.Files, ", "), ConfigFile)
+		p.note(archiveFiles, strings.Join(p.Files, ", "), config.FileName)
 		return
 	}
 
@@ -250,7 +251,7 @@ func (p *Plan) addVariantGroups(ctx context.Context) {
 		names = append(names, variant.Name)
 	}
 
-	p.note("variants", strings.Join(names, ", "), ConfigFile)
+	p.note("variants", strings.Join(names, ", "), config.FileName)
 	p.add("variants", Pass, "%d variant(s): %s", len(names), strings.Join(names, ", "))
 }
 

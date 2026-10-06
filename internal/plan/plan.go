@@ -28,10 +28,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
-// ConfigFile is the optional configuration file letsgo reads.
-const ConfigFile = "letsgo.mod"
-
-// pluginConfigDir is where a plugin's own config lives, beside ConfigFile.
+// pluginConfigDir is where a plugin's own config lives, beside config.FileName.
 const pluginConfigDir = ".letsgo"
 
 // disabledByConfig is the detail of a check its feature switched off.

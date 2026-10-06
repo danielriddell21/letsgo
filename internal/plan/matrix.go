@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/bytesize"
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
@@ -18,7 +19,7 @@ func (p *Plan) resolveTargets(ctx context.Context) {
 			return
 		}
 		p.Targets = targets
-		p.note("targets", summarise(targets), ConfigFile)
+		p.note("targets", summarise(targets), config.FileName)
 	} else {
 		p.Targets = gobuild.ReleaseTargets
 		p.note("targets", summarise(p.Targets), "default matrix")
@@ -49,7 +50,7 @@ func (p *Plan) resolveTags() {
 		}
 	}
 	p.Tags = p.Config.Tags
-	p.note("tags", strings.Join(p.Tags, ", "), ConfigFile)
+	p.note("tags", strings.Join(p.Tags, ", "), config.FileName)
 }
 
 // validTag reports whether a build tag is one the toolchain will accept.
@@ -113,7 +114,7 @@ func (p *Plan) resolveBudgets() {
 	for _, target := range sortedKeys(budgets) {
 		described = append(described, target+" "+budgets[target].String())
 	}
-	p.note("budgets", strings.Join(described, ", "), ConfigFile)
+	p.note("budgets", strings.Join(described, ", "), config.FileName)
 	p.add("budgets", Pass, "%d target(s) capped; checked once the binaries exist", len(budgets))
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
@@ -196,7 +197,7 @@ func (p *Plan) resolveTap() {
 		return
 	}
 	p.Tap = tap
-	p.note(brewTap, tap.String(), ConfigFile)
+	p.note(brewTap, tap.String(), config.FileName)
 }
 
 // checkTap establishes that the formula has somewhere to go before anything is
