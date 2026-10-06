@@ -40,8 +40,14 @@ func TestDistance(t *testing.T) {
 		a, b string
 		want int
 	}{
-		{"", "", 0}, {"a", "", 1}, {"", "abc", 3}, {"kitten", "sitting", 3},
-		{"same", "same", 0}, {"ab", "ba", 1}, {"abcd", "badc", 2}, {"héllo", "hello", 1},
+		{"", "", 0},
+		{"a", "", 1},
+		{"", "abc", 3},
+		{"kitten", "sitting", 3},
+		{"same", "same", 0},
+		{"ab", "ba", 1},
+		{"abcd", "badc", 2},
+		{"héllo", "hello", 1},
 	} {
 		if got := distance(tt.a, tt.b); got != tt.want {
 			t.Errorf("distance(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)

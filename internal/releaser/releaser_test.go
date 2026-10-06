@@ -337,7 +337,7 @@ func TestReleaseDraftHoldsBackTheTap(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRig(t)
-			r.module = forgetest.ModuleWith(t, "brew you/homebrew-tap\n", nil)
+			r.module = forgetest.ModuleWith(t, tapConfig, nil)
 			o := r.options(t)
 			o.Snapshot, o.Draft = true, tc.draft
 			o.Plan.Snapshot, o.Plan.Publish = true, false
@@ -362,9 +362,9 @@ func TestBuildReadsTheRepositoryOnlyForATap(t *testing.T) {
 		read   bool
 		want   bool
 	}{
-		{"a tap and a forge", "brew you/homebrew-tap\n", true, true},
+		{"a tap and a forge", tapConfig, true, true},
 		{"no tap", "", true, false},
-		{"a tap but no forge to read", "brew you/homebrew-tap\n", false, false},
+		{"a tap but no forge to read", tapConfig, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRig(t)
@@ -437,3 +437,9 @@ func TestPlanReportsAndOptionallyDiffs(t *testing.T) {
 		}
 	})
 }
+
+// tapConfig asks for a tap, and for a Linux build alongside the host's: a
+// formula needs a macOS or Linux build to install, which a Windows host does
+// not otherwise produce. linux/arm64 is not any CI host, so it never repeats
+// the host's own target.
+const tapConfig = "build linux/arm64\nbrew you/homebrew-tap\n"

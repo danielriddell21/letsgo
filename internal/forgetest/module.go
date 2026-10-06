@@ -35,16 +35,16 @@ func main() {
 // Module writes a minimal buildable module of example.com/demo, tagged v1.2.3
 // with origin at github.com/you/demo, and commits it, so plan.Resolve has a
 // real repository to work from. It returns the directory.
-func Module(t testing.TB) string {
-	t.Helper()
-	return ModuleWith(t, "", nil)
+func Module(tb testing.TB) string {
+	tb.Helper()
+	return ModuleWith(tb, "", nil)
 }
 
 // ModuleWith is Module with directives appended to its letsgo.mod and extra
 // files committed beside it.
-func ModuleWith(t testing.TB, config string, extra map[string]string) string {
-	t.Helper()
-	dir := t.TempDir()
+func ModuleWith(tb testing.TB, config string, extra map[string]string) string {
+	tb.Helper()
+	dir := tb.TempDir()
 
 	files := map[string]string{
 		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
@@ -56,11 +56,11 @@ func ModuleWith(t testing.TB, config string, extra map[string]string) string {
 	}
 	for name, content := range files {
 		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			tb.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			tb.Fatal(err)
 		}
 	}
 
@@ -72,8 +72,8 @@ func ModuleWith(t testing.TB, config string, extra map[string]string) string {
 		append(append([]string{"-C", dir}, identity...), "commit", "-q", "-m", "feat: first release"),
 		{"-C", dir, "tag", "v1.2.3"},
 	} {
-		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
+		if out, err := exec.CommandContext(tb.Context(), "git", args...).CombinedOutput(); err != nil { // NOSONAR: a test fixture runs the developer's own git
+			tb.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
 	return dir

@@ -74,7 +74,7 @@ func (f *Registry) handle(w http.ResponseWriter, r *http.Request) {
 		f.Mu.Lock()
 		f.TokenIssued++
 		f.Mu.Unlock()
-		json.NewEncoder(w).Encode(map[string]string{"token": "issued"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"token": "issued"})
 		return
 	}
 
@@ -169,7 +169,7 @@ func (f *Registry) blob(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	w.Write(content)
+	_, _ = w.Write(content)
 }
 
 func (f *Registry) manifest(w http.ResponseWriter, r *http.Request) {
@@ -195,9 +195,9 @@ func (f *Registry) manifest(w http.ResponseWriter, r *http.Request) {
 	var probe struct {
 		MediaType string `json:"mediaType"`
 	}
-	json.Unmarshal(content, &probe)
+	_ = json.Unmarshal(content, &probe) // an unreadable manifest keeps an empty media type
 	w.Header().Set("Content-Type", probe.MediaType)
-	w.Write(content)
+	_, _ = w.Write(content)
 }
 
 // Has reports whether the repository holds a blob.

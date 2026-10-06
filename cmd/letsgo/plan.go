@@ -18,6 +18,18 @@ import (
 // so main does not print a second, vaguer version of the same thing.
 var errPlanFailed = releaser.ErrPlanFailed
 
+// planDiffing reports whether the plan also diffs against the forge, and
+// rejects flag combinations that have no meaning.
+func planDiffing(diffing, jsonOutput, exitCode bool) (bool, error) {
+	if diffing && jsonOutput {
+		return false, errors.New("letsgo: --diff and -out have no JSON form yet")
+	}
+	if exitCode && !diffing {
+		return false, errors.New("letsgo: --exit-code needs --diff")
+	}
+	return diffing, nil
+}
+
 func (f forge) runPlan(args []string) error {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)
 	explain := fs.Bool("explain", false, "show where each resolved value came from")
@@ -52,13 +64,9 @@ func (f forge) runPlan(args []string) error {
 		return f.planYankCommand(*yankTag, yankFlags, *jsonOutput, f.credentials(context.Background(), credential.Flags{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken}), run)
 	}
 
-	saving := *planOut != ""
-	diffing := *diff || saving || markdown
-	if diffing && *jsonOutput {
-		return errors.New("letsgo: --diff and -out have no JSON form yet")
-	}
-	if *exitCode && !diffing {
-		return errors.New("letsgo: --exit-code needs --diff")
+	diffing, err := planDiffing(*diff || *planOut != "" || markdown, *jsonOutput, *exitCode)
+	if err != nil {
+		return err
 	}
 
 	ctx := context.Background()

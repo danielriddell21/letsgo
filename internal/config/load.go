@@ -32,7 +32,7 @@ func Load(moduleDir string) (*Config, string, error) {
 		return nil, path, fmt.Errorf("%w: %w", ErrNotFound, err)
 	}
 	if err != nil {
-		return nil, path, err
+		return nil, path, fmt.Errorf("read %s: %w", path, err)
 	}
 
 	file, err := modsyntax.Parse(FileName, data)
