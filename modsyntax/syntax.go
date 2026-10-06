@@ -52,6 +52,7 @@ type Line struct {
 	ArgSpans    []Span
 }
 
+// Pos reports where the line starts.
 func (l *Line) Pos() Position { return l.P }
 
 // Block is a parenthesised group of argument lines sharing one keyword.
@@ -74,6 +75,7 @@ type Block struct {
 	Close Position
 }
 
+// Pos reports where the block starts.
 func (b *Block) Pos() Position { return b.P }
 
 // Comment is a standalone comment line, or a blank line when Text is empty.
@@ -84,6 +86,7 @@ type Comment struct {
 	P     Position
 }
 
+// Pos reports where the comment starts.
 func (c *Comment) Pos() Position { return c.P }
 
 // File is a parsed configuration file.
