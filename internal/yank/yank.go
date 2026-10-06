@@ -14,6 +14,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/internal/semver"
 	"github.com/danielriddell21/letsgo/manifest"
+	pub "github.com/danielriddell21/letsgo/plugin"
 )
 
 // Forge is the part of a release API that retracting needs.
@@ -265,7 +266,7 @@ func (o Options) revertTap(ctx context.Context, result *Result, logf func(string
 	if o.TapFilesPlugin.Command == "" {
 		return nil
 	}
-	in := release.TapFilesInputFromManifest(m, o.Repo, o.Tap, o.Caveats)
+	in := pub.TapFilesInputFromManifest(m, o.Repo.String(), o.Tap.String(), o.Caveats)
 	files, err := release.RunTapFiles(ctx, o.TapFilesPlugin, o.PluginRoot, o.PluginsDir, in)
 	if err != nil {
 		return err

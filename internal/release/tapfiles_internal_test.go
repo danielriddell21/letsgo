@@ -16,7 +16,6 @@ import (
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/publish/github"
-	"github.com/danielriddell21/letsgo/manifest"
 )
 
 // fakePlugin writes a shell script that answers whatever body prints, and
@@ -179,50 +178,6 @@ echo '{"files":[{"path":"Casks/gambit-gui.rb","content":"cask \"gambit-gui\""}]}
 	}
 }
 
-// Yank rebuilds the same input a release built, but from the previous
-// release's manifest rather than fresh artifacts.
-func TestTapFilesInputFromManifestRebuildsFromThePreviousRelease(t *testing.T) {
-	m := &manifest.Manifest{
-		Project: "gambit", Version: "1.2.0", Tag: "v1.2.0",
-		Artifacts: []manifest.Artifact{
-			{
-				Name: "gambit-gui_1.2.0_darwin_arm64.tar.gz", Variant: "gui",
-				OS: "darwin", Arch: "arm64", SHA256: strings.Repeat("a", 64), Binary: "gambit-gui",
-			},
-		},
-	}
-	repo := github.Repo{Owner: "you", Name: "gambit"}
-	tap := github.Repo{Owner: "you", Name: "homebrew-tap"}
-
-	in := TapFilesInputFromManifest(m, repo, tap, "a caveat")
-
-	if in.Project != "gambit" || in.Version != "1.2.0" || in.Tag != "v1.2.0" ||
-		in.Repo != "you/gambit" || in.Tap != "you/homebrew-tap" || in.Caveats != "a caveat" {
-		t.Errorf("in = %+v", in)
-	}
-	if len(in.Artifacts) != 1 {
-		t.Fatalf("artifacts = %+v", in.Artifacts)
-	}
-
-	a := in.Artifacts[0]
-	if a.Archive != m.Artifacts[0].Name || a.Variant != "gui" || a.SHA256 != strings.Repeat("a", 64) ||
-		a.URL != "https://github.com/you/gambit/releases/download/v1.2.0/"+m.Artifacts[0].Name ||
-		len(a.Binaries) != 1 || a.Binaries[0] != "gambit-gui" {
-		t.Errorf("artifact = %+v", a)
-	}
-}
-
-// A release published before the manifest recorded a tag has none to read,
-// so the same v-prefixed default a fresh release would use applies here too.
-func TestTapFilesInputFromManifestDefaultsTheTagFromTheVersion(t *testing.T) {
-	m := &manifest.Manifest{Project: "gambit", Version: "1.2.0"}
-
-	in := TapFilesInputFromManifest(m, github.Repo{Owner: "you", Name: "gambit"}, github.Repo{}, "")
-	if in.Tag != "v1.2.0" {
-		t.Errorf("Tag = %q, want v1.2.0", in.Tag)
-	}
-}
-
 func TestTapFileRecordsDigestTheContent(t *testing.T) {
 	sum := sha256.Sum256([]byte("cask\n"))
 	got := tapFileRecords([]plugin.TapFile{{Path: "Casks/x.rb", Content: "cask\n"}})
@@ -231,5 +186,18 @@ func TestTapFileRecordsDigestTheContent(t *testing.T) {
 	}
 	if got := tapFileRecords(nil); got != nil {
 		t.Errorf("tapFileRecords(nil) = %+v, want nil", got)
+	}
+}
+
+// A repository that names no homepage of its own is still at its forge page,
+// the same default a formula is written with.
+func TestTapFilesInputDefaultsTheHomepageToTheRepositoryPage(t *testing.T) {
+	p := pinnedPlan(t, "letsgo-cask", "")
+
+	if got := tapFilesInput(p, nil, nil).Homepage; got != "https://github.com/you/gambit" {
+		t.Errorf("Homepage = %q, want the repository's page on the forge", got)
+	}
+	if got := tapFilesInput(p, nil, &github.RepoInfo{Homepage: "https://gambit.example"}).Homepage; got != "https://gambit.example" {
+		t.Errorf("Homepage = %q, want the one the repository names", got)
 	}
 }

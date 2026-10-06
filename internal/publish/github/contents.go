@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/plugin"
 )
 
 // DownloadURL is the public address of a release asset. Release assets are
@@ -20,8 +22,7 @@ import (
 // that as directory segments, the same way it treats the repository path
 // itself. Encoding it to %2F would ask for a tag that does not exist.
 func DownloadURL(repo Repo, tag, name string) string {
-	return fmt.Sprintf("https://github.com/%s/%s/releases/download/%s/%s",
-		repo.Owner, repo.Name, escapePath(tag), url.PathEscape(name))
+	return plugin.DownloadURL(repo.String(), tag, name)
 }
 
 // RepoInfo is what a repository says about itself. A generated Homebrew
