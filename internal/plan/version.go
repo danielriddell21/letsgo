@@ -7,8 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/danielriddell21/letsgo/internal/git"
-
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 )
@@ -83,8 +81,8 @@ func (p *Plan) resolveProject() {
 	// With a nested module the project is still the repository's: releasing
 	// ./web does not make the project "web", and the archives, the formula and
 	// the image would all be named after a directory.
-	if p.Config.ModuleDir != "" && p.root.Name != "" {
-		p.Project = p.root.Name
+	if p.Config.ModuleDir != "" && p.Location.Module.Name != "" {
+		p.Project = p.Location.Module.Name
 		p.note("project", p.Project, "last element of the repository's module path")
 		return
 	}
@@ -96,7 +94,7 @@ func (p *Plan) resolveProject() {
 func (p *Plan) resolveVersion(ctx context.Context, opts Options) {
 	if p.Snapshot {
 		base := "0.0.0"
-		if prev, err := git.New(p.GitBin, p.RootDir).PreviousTag(ctx, p.Scope.Prefix); err == nil && prev != "" {
+		if prev, err := p.Runner.PreviousTag(ctx, p.Scope.Prefix); err == nil && prev != "" {
 			base = strings.TrimPrefix(strings.TrimPrefix(prev, p.Scope.Prefix), "v")
 		}
 		p.Version = fmt.Sprintf("%s-next+%s", base, p.Git.ShortCommit)

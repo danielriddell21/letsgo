@@ -72,14 +72,21 @@ type scratchRun struct {
 	cleanup func()
 }
 
+// scratchOptions are the flags a scratch run is made from: --repo, --token and
+// --work, and the prefix of the temporary directory it works in.
+type scratchOptions struct {
+	Repo, Token, Work, TmpPrefix string
+}
+
 // resolveScratchRun is the bootstrapping runVerify and runAudit share: both
 // accept an optional --repo (unlike resolveModuleRepo, which always acts on
 // this checkout's own release) and tolerate an anonymous client for a
 // public repository (unlike resolveModuleRepo, which requires a token).
-// workDir is created under a temporary directory named tmpPrefix when work
-// is empty; cleanup removes it, and is a no-op when work was given
+// The work directory is created under a temporary directory named TmpPrefix
+// when Work is empty; cleanup removes it, and is a no-op when Work was given
 // explicitly.
-func (f forge) resolveScratchRun(ctx context.Context, repoFlag, token, work, tmpPrefix string) (scratchRun, error) {
+func (f forge) resolveScratchRun(ctx context.Context, o scratchOptions) (scratchRun, error) {
+	repoFlag, token, work, tmpPrefix := o.Repo, o.Token, o.Work, o.TmpPrefix
 	gitBin, err := f.gitBinary()
 	if err != nil {
 		return scratchRun{}, err

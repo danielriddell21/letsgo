@@ -39,7 +39,7 @@ func applyTapFilesPlugin(ctx context.Context, p *plan.Plan, artifacts []build.Ar
 		return nil, fmt.Errorf("release: %s answers tap-files, but no Homebrew tap is configured (`brew` directive)",
 			configured.Command)
 	}
-	if !p.HasRepo || p.Repo.Host != "github.com" || p.Tag == "" {
+	if !p.HasRepo() || p.Repo.Host != "github.com" || p.Tag == "" {
 		return nil, fmt.Errorf("release: %s needs a GitHub repository and a tag to build tap URLs", configured.Command)
 	}
 

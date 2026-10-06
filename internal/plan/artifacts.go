@@ -9,8 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/danielriddell21/letsgo/internal/git"
-
 	"github.com/danielriddell21/letsgo/internal/archive"
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
@@ -79,7 +77,7 @@ func (p *Plan) expandArchiveFiles(ctx context.Context, entries []string) ([]stri
 
 		// Read once, and only when a directory is actually named.
 		if tracked == nil {
-			if tracked, err = git.New(p.GitBin, p.RootDir).TrackedFiles(ctx); err != nil {
+			if tracked, err = p.Runner.TrackedFiles(ctx); err != nil {
 				return nil, fmt.Errorf("archive %s: %w", entry, err)
 			}
 		}
@@ -148,7 +146,7 @@ func (p *Plan) checkInstallScriptRequired() {
 	switch {
 	case p.Tag == "":
 		p.addAt(p.posOf(requireInstallScript), installScript, Fail, "required, but there is no tag to build one for")
-	case !p.HasRepo || p.Repo.Host != "github.com":
+	case !p.HasRepo() || p.Repo.Host != "github.com":
 		p.addAt(p.posOf(requireInstallScript), installScript, Fail, "required, but the repository is not on GitHub")
 	case len(installablePlatforms(p.Targets)) == 0:
 		p.addAt(p.posOf(requireInstallScript), installScript, Fail, "required, but no built target is one install.sh supports")

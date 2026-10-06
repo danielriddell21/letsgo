@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/discover"
+
 	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
@@ -19,15 +21,16 @@ import (
 // tap to write into: a formula's, or a tap-files plugin's cask.
 func TestWantsRepoInfo(t *testing.T) {
 	tap := github.Repo{Owner: "you", Name: "homebrew-tap"}
+	withRepo := plan.Source{Location: discover.Location{Repo: discover.Repo{Host: "github.com", Owner: "you", Name: "demo"}}}
 
 	for _, tc := range []struct {
 		name string
 		p    *plan.Plan
 		want bool
 	}{
-		{"no tap", &plan.Plan{HasRepo: true}, false},
+		{"no tap", &plan.Plan{Source: withRepo}, false},
 		{"tap but no repository", &plan.Plan{Tap: tap}, false},
-		{"tap and repository", &plan.Plan{Tap: tap, HasRepo: true}, true},
+		{"tap and repository", &plan.Plan{Tap: tap, Source: withRepo}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := WantsRepoInfo(tc.p); got != tc.want {

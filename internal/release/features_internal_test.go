@@ -27,8 +27,7 @@ func TestWriteInstallerSkippedWhenDisabled(t *testing.T) {
 	p := &plan.Plan{
 		Features: feature.Resolve([]string{"install-script"}),
 		Tag:      "v1.0.0",
-		HasRepo:  true,
-		Repo:     discover.Repo{Host: "github.com", Owner: "you", Name: "tool"},
+		Source:   plan.Source{Location: discover.Location{Repo: discover.Repo{Host: "github.com", Owner: "you", Name: "tool"}}},
 	}
 	artifacts := []build.Artifact{
 		{OS: "linux", Arch: "amd64", Archive: "tool_1.0.0_linux_amd64.tar.gz", ArchiveSHA256: "deadbeef"},

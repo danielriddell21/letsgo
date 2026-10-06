@@ -127,8 +127,7 @@ func diffFixture(t *testing.T) publication.Options {
 	p := &plan.Plan{
 		Version: "1.2.3",
 		Tag:     "v1.2.3",
-		Repo:    discover.Repo{Host: "github.com", Owner: "you", Name: "foo"},
-		HasRepo: true,
+		Source:  plan.Source{Location: discover.Location{Repo: discover.Repo{Host: "github.com", Owner: "you", Name: "foo"}}},
 		Config:  &config.Config{},
 		Tap:     github.Repo{Owner: "you", Name: "homebrew-tap"},
 	}

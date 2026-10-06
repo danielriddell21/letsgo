@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/discover"
+
 	"github.com/danielriddell21/letsgo/internal/credential"
 
 	"github.com/danielriddell21/letsgo/internal/release"
@@ -205,7 +207,7 @@ func TestReleaseAndDiffNeedAllTheirClients(t *testing.T) {
 	if _, err := releaser.Release(context.Background(), o); err == nil || !strings.Contains(err.Error(), "required") {
 		t.Errorf("Release err = %v, want a missing-client error", err)
 	}
-	if _, err := releaser.Diff(context.Background(), &plan.Plan{HasRepo: true}, o); err == nil || !strings.Contains(err.Error(), "required") {
+	if _, err := releaser.Diff(context.Background(), &plan.Plan{Source: plan.Source{Location: discover.Location{Repo: discover.Repo{Owner: "you", Name: "demo"}}}}, o); err == nil || !strings.Contains(err.Error(), "required") {
 		t.Errorf("Diff err = %v, want a missing-client error", err)
 	}
 }

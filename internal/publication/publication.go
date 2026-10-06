@@ -98,7 +98,7 @@ func Publish(ctx context.Context, o Options) (*Result, error) {
 	done = append(done, StepRelease)
 	reportPublished(out, released)
 
-	if err := publishTap(ctx, out, o.Plan, o.Result, o.Tap, o.Repo, o.Info); err != nil {
+	if err := publishTap(ctx, out, o); err != nil {
 		return nil, &StepError{Step: StepTap, Done: done, Err: err}
 	}
 	done = append(done, StepTap)
@@ -127,7 +127,9 @@ func Observe(ctx context.Context, o Options) ([]plandiff.Action, error) {
 	}
 
 	tap := NewTapObserver(o.Tap)
-	if err := publishTap(ctx, io.Discard, o.Plan, o.Result, tap, o.Repo, o.Info); err != nil {
+	observing := o
+	observing.Tap = tap
+	if err := publishTap(ctx, io.Discard, observing); err != nil {
 		return nil, fmt.Errorf("observing the tap: %w", err)
 	}
 	actions = append(actions, tap.Actions()...)

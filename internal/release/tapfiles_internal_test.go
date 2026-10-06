@@ -50,11 +50,12 @@ func basePlan(t *testing.T) *plan.Plan {
 		Project: "gambit",
 		Version: "1.2.0",
 		Tag:     "v1.2.0",
-		RootDir: t.TempDir(),
-		HasRepo: true,
-		Repo:    discover.Repo{Host: "github.com", Owner: "you", Name: "gambit"},
-		Tap:     github.Repo{Owner: "you", Name: "homebrew-tap"},
-		Config:  &config.Config{BrewCaveats: "a caveat"},
+		Source: plan.Source{
+			RootDir:  t.TempDir(),
+			Location: discover.Location{Repo: discover.Repo{Host: "github.com", Owner: "you", Name: "gambit"}},
+		},
+		Tap:    github.Repo{Owner: "you", Name: "homebrew-tap"},
+		Config: &config.Config{BrewCaveats: "a caveat"},
 	}
 }
 

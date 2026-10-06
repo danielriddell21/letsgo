@@ -62,8 +62,7 @@ func releasePlan() *plan.Plan {
 	return &plan.Plan{
 		Version: "1.2.3",
 		Tag:     "v1.2.3",
-		Repo:    discover.Repo{Host: "github.com", Owner: "you", Name: "foo"},
-		HasRepo: true,
+		Source:  plan.Source{Location: discover.Location{Repo: discover.Repo{Host: "github.com", Owner: "you", Name: "foo"}}},
 		Config:  &config.Config{},
 	}
 }
@@ -104,7 +103,7 @@ func TestPublishTapSkipsAPrerelease(t *testing.T) {
 	result.Manifest.Version, result.Manifest.Tag = p.Version, p.Tag
 	tap := &fakeTap{}
 
-	if err := publishTap(context.Background(), io.Discard, p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil); err != nil {
+	if err := publishTap(context.Background(), io.Discard, Options{Plan: p, Result: result, Tap: tap, Repo: github.Repo{Owner: "you", Name: "foo"}}); err != nil {
 		t.Fatal(err)
 	}
 	if len(tap.writes) != 1 || tap.writes[0] != "Formula/foo@next.rb" {
@@ -122,7 +121,7 @@ func TestPublishTapWritesAFormulaForAStableRelease(t *testing.T) {
 	result := built(artifact("foo_1.2.3_linux_amd64.tar.gz", "linux", "amd64", "a1", "foo"))
 	tap := &fakeTap{}
 
-	if err := publishTap(context.Background(), io.Discard, p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil); err != nil {
+	if err := publishTap(context.Background(), io.Discard, Options{Plan: p, Result: result, Tap: tap, Repo: github.Repo{Owner: "you", Name: "foo"}}); err != nil {
 		t.Fatal(err)
 	}
 	if len(tap.writes) != 2 || tap.writes[0] != "Formula/foo.rb" || tap.writes[1] != "Formula/foo@next.rb" {
@@ -141,7 +140,7 @@ func TestDraftFlagHoldsTheTapBack(t *testing.T) {
 
 	p.MarkDraft()
 
-	if err := publishTap(context.Background(), io.Discard, p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil); err != nil {
+	if err := publishTap(context.Background(), io.Discard, Options{Plan: p, Result: result, Tap: tap, Repo: github.Repo{Owner: "you", Name: "foo"}}); err != nil {
 		t.Fatal(err)
 	}
 	if len(tap.writes) != 0 {
@@ -183,7 +182,7 @@ func TestPublishTapNamesTheFileItCouldNotWrite(t *testing.T) {
 			result.TapFiles = []plugin.TapFile{{Path: "Casks/foo.rb", Content: "cask"}}
 			tap := &writeFailingTap{path: tt.path}
 
-			err := publishTap(t.Context(), io.Discard, p, result, tap, github.Repo{Owner: "you", Name: "foo"}, nil)
+			err := publishTap(t.Context(), io.Discard, Options{Plan: p, Result: result, Tap: tap, Repo: github.Repo{Owner: "you", Name: "foo"}})
 
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("err = %v, want it to contain %q", err, tt.want)

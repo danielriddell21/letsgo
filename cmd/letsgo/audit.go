@@ -29,7 +29,7 @@ func (f forge) runAudit(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	run, err := f.resolveScratchRun(ctx, *repoFlag, *token, *work, "letsgo-audit-")
+	run, err := f.resolveScratchRun(ctx, scratchOptions{Repo: *repoFlag, Token: *token, Work: *work, TmpPrefix: "letsgo-audit-"})
 	if err != nil {
 		return err
 	}

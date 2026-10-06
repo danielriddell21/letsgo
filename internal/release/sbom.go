@@ -23,7 +23,7 @@ func writeSBOM(p *plan.Plan, m *manifest.Manifest, toolVersion, dir string) (str
 	}
 
 	repo := ""
-	if p.HasRepo {
+	if p.HasRepo() {
 		repo = p.Repo.Owner + "/" + p.Repo.Name
 	}
 

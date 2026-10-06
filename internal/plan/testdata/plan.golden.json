@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "project": "foo",
+  "version": "1.2.3",
+  "commit": "abc1234",
+  "resolved": [
+    {
+      "field": "project",
+      "value": "foo",
+      "from": "go.mod"
+    }
+  ],
+  "checks": [
+    {
+      "name": "go.mod",
+      "status": "pass",
+      "detail": "ok"
+    },
+    {
+      "name": "token",
+      "status": "warn",
+      "detail": "unconfirmed"
+    }
+  ],
+  "artifacts": [
+    "foo_1.2.3_linux_amd64.tar.gz"
+  ],
+  "features": {
+    "disabled": [
+      "changelog"
+    ],
+    "required": [
+      "vulncheck"
+    ]
+  },
+  "plugins": {
+    "ldflags": {
+      "command": "letsgo-env",
+      "version": "v1.0.0",
+      "digest": "sha256:deadbeef"
+    }
+  }
+}

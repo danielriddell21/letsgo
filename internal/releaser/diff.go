@@ -24,7 +24,7 @@ func Diff(ctx context.Context, p *plan.Plan, o Options) (*apply.Diff, error) {
 	if err := o.Clients.require(); err != nil {
 		return nil, err
 	}
-	if !p.HasRepo {
+	if !p.HasRepo() {
 		return nil, fmt.Errorf("letsgo: --diff needs a repository on a forge to compare against")
 	}
 

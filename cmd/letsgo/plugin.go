@@ -103,7 +103,7 @@ func (f forge) runPluginInstall(args []string) error {
 	tokenValue := f.forgeToken(ctx, *token)
 
 	if fs.NArg() == 0 {
-		return f.installAllPins(ctx, os.Stdout, *repo, tokenValue, *dir, *link)
+		return f.installAllPins(ctx, *repo, tokenValue, installTarget{Out: os.Stdout, LinkDir: *dir, Link: *link})
 	}
 
 	name, requested := splitPluginRef(fs.Arg(0))
@@ -124,12 +124,21 @@ func (f forge) runPluginInstall(args []string) error {
 		options.Tag = requested
 	}
 
-	return f.installPlugin(ctx, os.Stdout, name, options, *dir, *link)
+	return f.installPlugin(ctx, name, options, installTarget{Out: os.Stdout, LinkDir: *dir, Link: *link})
+}
+
+// installTarget is where an install reports, and whether a copy also goes on
+// PATH, for running a plugin by hand.
+type installTarget struct {
+	Out     io.Writer
+	LinkDir string
+	Link    bool
 }
 
 // installAllPins installs every plugin the repository's own config pins, in
 // the order they appear in the file.
-func (f forge) installAllPins(ctx context.Context, w io.Writer, repo, token, linkDir string, link bool) error {
+func (f forge) installAllPins(ctx context.Context, repo, token string, target installTarget) error {
+	w := target.Out
 	cfg, err := loadPluginConfig()
 	if err != nil {
 		return err
@@ -150,7 +159,7 @@ func (f forge) installAllPins(ctx context.Context, w io.Writer, repo, token, lin
 			Binary:    p.Command,
 			Tag:       p.Version,
 		}
-		if err := f.installPlugin(ctx, w, p.Command, options, linkDir, link); err != nil {
+		if err := f.installPlugin(ctx, p.Command, options, target); err != nil {
 			return fmt.Errorf("letsgo plugin install: %s: %w", p.Command, err)
 		}
 		// Installing proves the release is what it says it is, not that it is
@@ -182,7 +191,8 @@ func (f forge) verifyPinned(p config.Plugin) error {
 // asserting — that a verified binary lands where it was asked to, and that the
 // pin printed afterwards names its digest — can be tested against a forge
 // rather than against the network.
-func (f forge) installPlugin(ctx context.Context, w io.Writer, name string, options selfupdate.Options, linkDir string, link bool) error {
+func (f forge) installPlugin(ctx context.Context, name string, options selfupdate.Options, target installTarget) error {
+	w, linkDir, link := target.Out, target.LinkDir, target.Link
 	release, binary, path, err := f.fetchIntoStore(ctx, options)
 	if err != nil {
 		return err

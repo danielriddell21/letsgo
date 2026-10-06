@@ -5,8 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/danielriddell21/letsgo/internal/git"
-
 	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/semver"
@@ -85,7 +83,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 		return
 	}
 
-	tags, err := git.New(p.GitBin, p.RootDir).Tags(ctx, p.Scope.Prefix)
+	tags, err := p.Runner.Tags(ctx, p.Scope.Prefix)
 	if err != nil {
 		p.skip(apiCompatibility, feature.APIGate, "no earlier release to compare against")
 		return
@@ -96,7 +94,7 @@ func (p *Plan) checkAPICompatibility(ctx context.Context, opts Options) {
 		return
 	}
 
-	old, cleanup, err := git.New(p.GitBin, p.RootDir).CheckoutTag(ctx, previous, p.Scope.Dir)
+	old, cleanup, err := p.Runner.CheckoutTag(ctx, previous, p.Scope.Dir)
 	if err != nil {
 		p.add(apiCompatibility, Warn, "could not check out %s: %v", previous, err)
 		return

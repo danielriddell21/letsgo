@@ -215,7 +215,7 @@ func build(ctx context.Context, o Options, started time.Time, failureNote string
 // formula (or a tap-files plugin's cask) into, so a release with none never
 // touches the endpoint.
 func WantsRepoInfo(p *plan.Plan) bool {
-	return p.HasTap() && p.HasRepo
+	return p.HasTap() && p.HasRepo()
 }
 
 // RepoInfo reads the repository's description, licence and homepage for a
