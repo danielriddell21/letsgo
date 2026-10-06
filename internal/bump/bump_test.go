@@ -144,6 +144,36 @@ func TestBreakingBelowV1BumpsMinor(t *testing.T) {
 	}
 }
 
+// Graduating to v1 is a decision, so it takes an explicit request: a major the
+// commits or the API inferred stays a minor, one the person asked for is
+// honoured.
+func TestAskingForAMajorBelowV1ReachesV1(t *testing.T) {
+	p, err := Propose("v0.41.0", "example.com/foo",
+		Signal{Source: "exported API", Level: Major},
+		Signal{Source: "you", Level: Major})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Next != "v1.0.0" {
+		t.Errorf("Next = %s, want v1.0.0", p.Next)
+	}
+	if strings.Contains(strings.Join(p.Notes, " "), "v0 makes no compatibility promise") {
+		t.Errorf("a requested major was explained away: %v", p.Notes)
+	}
+}
+
+func TestAskingForAMinorDoesNotLetAnInferredMajorReachV1(t *testing.T) {
+	p, err := Propose("v0.41.0", "example.com/foo",
+		Signal{Source: "commit messages", Level: Major},
+		Signal{Source: "you", Level: Minor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Next != "v0.42.0" {
+		t.Errorf("Next = %s, want v0.42.0", p.Next)
+	}
+}
+
 func TestV0MinorAndPatchAreUnaffected(t *testing.T) {
 	for level, want := range map[Level]string{Minor: "v0.2.0", Patch: "v0.1.1"} {
 		p, err := Propose("v0.1.0", "example.com/foo", Signal{Level: level})

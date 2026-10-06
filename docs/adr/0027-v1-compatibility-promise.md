@@ -42,6 +42,11 @@ free.
   bypassed: a major bump is the only way a break ships.
 - Supported versions in SECURITY.md become the latest v1 release.
 
+- `letsgo tag` held a major back to a minor below v1, so it could never
+  graduate a project. An explicit `--major` is now honoured: `letsgo tag
+  --major --pre` proposes `v1.0.0-rc.1`, and a major inferred from commits or
+  the API is still held back.
+
 ## Alternatives considered
 
 - **Staying on v0.** Rejected: v0 tells users nothing is promised, and the
