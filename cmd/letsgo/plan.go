@@ -8,6 +8,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/releaser"
 )
@@ -47,7 +49,7 @@ func (f forge) runPlan(args []string) error {
 	defer run.toMarkdown(markdown)()
 
 	if *yankTag != "" {
-		return f.planYankCommand(*yankTag, yankFlags, *jsonOutput, diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken}, run)
+		return f.planYankCommand(*yankTag, yankFlags, *jsonOutput, credentials(context.Background(), credential.Flags{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken}), run)
 	}
 
 	saving := *planOut != ""
@@ -60,9 +62,16 @@ func (f forge) runPlan(args []string) error {
 	}
 
 	ctx := context.Background()
+
+	// Credentials are resolved only when something will use them: a plan that
+	// contacts nothing never runs the token-command.
+	var set credential.Set
+	if *publishGates || diffing {
+		set = credentials(ctx, credential.Flags{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken})
+	}
 	options := plan.Options{
 		Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty,
-		Publish: *publishGates, Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken,
+		Publish: *publishGates, Credentials: set,
 		// A diff predicts a release, whose manifest records the gates it ran.
 		Analyse: *analyse || diffing, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
 	}
@@ -81,7 +90,7 @@ func (f forge) runPlan(args []string) error {
 		Diff:    diffing,
 	}
 	if diffing {
-		planOptions.Clients, planOptions.Token = f.clients(ctx, diffTokens{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken})
+		planOptions.Clients, planOptions.Token = f.clients(set), set.Forge.Value
 	}
 	planned, err := releaser.Plan(ctx, planOptions)
 	if err != nil {

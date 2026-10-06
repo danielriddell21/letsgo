@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -227,7 +229,7 @@ func TestPlanOutSavesAPlanThatAnApplyWouldCheck(t *testing.T) {
 }
 
 func TestPlanDiffWithoutARepositoryCannotCompare(t *testing.T) {
-	_, err := unwired.planDiff(context.Background(), &plan.Plan{}, diffTokens{})
+	_, err := unwired.planDiff(context.Background(), &plan.Plan{}, credential.Set{})
 	if err == nil || !strings.Contains(err.Error(), "repository") {
 		t.Errorf("planDiff = %v, want a complaint about the missing repository", err)
 	}

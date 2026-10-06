@@ -12,7 +12,6 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
-	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/pluginstore"
 	"github.com/danielriddell21/letsgo/selfupdate"
@@ -101,7 +100,7 @@ func runPluginInstall(args []string) error {
 	}
 
 	ctx := context.Background()
-	tokenValue, _ := plan.Token(context.Background(), machineConfig(), *token)
+	tokenValue := forgeToken(ctx, *token)
 
 	if fs.NArg() == 0 {
 		return installAllPins(ctx, os.Stdout, *repo, tokenValue, *dir, *link)

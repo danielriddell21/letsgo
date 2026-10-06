@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/internal/credential"
 )
 
 // `letsgo yank`, run from a nested module's own directory, resolves the
@@ -20,7 +20,7 @@ func TestRunYankResolvesModuleScopeBeforeRequiringAToken(t *testing.T) {
 	}
 	t.Chdir(moduleDir)
 
-	for _, name := range plan.TokenEnvVars {
+	for _, name := range credential.EnvVars {
 		t.Setenv(name, "")
 	}
 

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
@@ -62,7 +64,7 @@ func releasable(t *testing.T) *repo {
 func tokenCheck(t *testing.T, r *repo, endpoint string) plan.Check {
 	t.Helper()
 	p, err := plan.Resolve(context.Background(), plan.Options{
-		Dir: r.dir, Publish: true, Token: "test-token", NewClient: plan.ClientAt(endpoint),
+		Dir: r.dir, Publish: true, Credentials: creds(t, credential.Flags{Token: "test-token"}), NewClient: plan.ClientAt(endpoint),
 	})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -146,7 +148,7 @@ func TestUnconfirmedPermissionDoesNotBlockTheRelease(t *testing.T) {
 	r := releasable(t)
 
 	p, err := plan.Resolve(context.Background(), plan.Options{
-		Dir: r.dir, Publish: true, Token: "t",
+		Dir: r.dir, Publish: true, Credentials: creds(t, credential.Flags{Token: "t"}),
 		NewClient: plan.ClientAt(forge{probeCode: http.StatusInternalServerError}.serve(t)),
 	})
 	if err != nil {
@@ -155,4 +157,11 @@ func TestUnconfirmedPermissionDoesNotBlockTheRelease(t *testing.T) {
 	if !p.OK() {
 		t.Errorf("an unconfirmed permission blocked the release: %+v", p.Checks)
 	}
+}
+
+// creds resolves credentials the way a command does, from flags and the
+// environment a test controls; no global config applies.
+func creds(t *testing.T, f credential.Flags) credential.Set {
+	t.Helper()
+	return credential.Resolve(t.Context(), nil, f)
 }

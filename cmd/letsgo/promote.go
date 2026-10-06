@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/promote"
@@ -35,7 +37,8 @@ func (f forge) runPromote(args []string) error {
 	ctx := context.Background()
 	started := time.Now()
 
-	m, err := f.resolveModuleRepo(ctx, *token)
+	set := credentials(ctx, credential.Flags{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken})
+	m, err := f.resolveModuleRepo(ctx, set.Forge)
 	if err != nil {
 		return err
 	}
@@ -45,8 +48,8 @@ func (f forge) runPromote(args []string) error {
 	// `letsgo release` splits them: the RC and the stable release are the
 	// same forge object regardless, but the tap may live in a repository the
 	// plain token cannot write to.
-	releaseClient := f.releaseClientFor(ctx, client, *releaseToken, *token)
-	tapClient := f.tapClientFor(ctx, client, *tapToken, *token)
+	releaseClient := f.splitClient(client, set.Forge, set.Release)
+	tapClient := f.tapClient(client, set)
 
 	workDir := *work
 	if workDir == "" {

@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/modsyntax"
 
 	"github.com/danielriddell21/letsgo/internal/archive"
@@ -53,19 +55,10 @@ type Options struct {
 	// a forge to publish to, and a token permitted to write there.
 	Publish bool
 
-	// Token overrides the token read from the environment.
-	Token string
-
-	// TapToken overrides the token the Homebrew tap is written with. Empty
-	// falls back to Token, which is what every repository did before the tap
-	// could be reached by a credential of its own.
-	TapToken string
-
-	// ReleaseToken overrides the token the GitHub release itself is created
-	// and published with. Empty falls back to Token, which is what every
-	// repository did before the release could be published under the same
-	// bot identity as the tap commit.
-	ReleaseToken string
+	// Credentials are the tokens the release is written with, resolved once
+	// by the caller (see internal/credential). plan never looks a token up: it
+	// checks the ones it is given, and reports where each came from.
+	Credentials credential.Set
 
 	// NewClient builds the forge client for a token, so the caller decides
 	// where the forge is. Nil means the real one.

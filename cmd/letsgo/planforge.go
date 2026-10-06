@@ -4,23 +4,19 @@ import (
 	"context"
 	"os"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/releaser"
 )
 
-// diffTokens are the credentials planDiff reads the forge with.
-type diffTokens struct {
-	Token, TapToken, ReleaseToken string
-}
-
 // planDiff builds the release into a scratch directory and reads the forge to
 // say what releasing would change.
-func (f forge) planDiff(ctx context.Context, p *plan.Plan, tokens diffTokens) (*apply.Diff, error) {
-	clients, tokenValue := f.clients(ctx, tokens)
+func (f forge) planDiff(ctx context.Context, p *plan.Plan, set credential.Set) (*apply.Diff, error) {
 	return releaser.Diff(ctx, p, releaser.Options{
-		Clients:     clients,
-		Token:       tokenValue,
+		Clients:     f.clients(set),
+		Token:       set.Forge.Value,
 		ToolVersion: version,
 		Log:         os.Stdout,
 		Warn:        os.Stderr,

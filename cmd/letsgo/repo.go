@@ -6,9 +6,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/github"
-	"github.com/danielriddell21/letsgo/internal/plan"
 )
 
 // moduleRepo bundles what a command needs to act on this module's own
@@ -27,9 +28,9 @@ type moduleRepo struct {
 // resolveModuleRepo runs the bootstrapping every command that acts on "the
 // current repository's release" (not an arbitrary --repo) needs before it
 // can do anything else: find the module, its repository, its git checkout,
-// its scope, and a forge client authenticated with token (or the default
-// env vars, when token is empty).
-func (f forge) resolveModuleRepo(ctx context.Context, token string) (moduleRepo, error) {
+// its scope, and a forge client authenticated with the forge credential the
+// caller resolved.
+func (f forge) resolveModuleRepo(ctx context.Context, cred credential.Credential) (moduleRepo, error) {
 	module, err := discover.FindModule(".")
 	if err != nil {
 		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
@@ -53,7 +54,7 @@ func (f forge) resolveModuleRepo(ctx context.Context, token string) (moduleRepo,
 		return moduleRepo{}, fmt.Errorf("letsgo: %w", err)
 	}
 
-	tokenValue, _ := plan.Token(ctx, machineConfig(), token)
+	tokenValue := cred.Value
 	if tokenValue == "" {
 		return moduleRepo{}, fmt.Errorf("letsgo: no token; set %s", envList())
 	}
@@ -107,8 +108,7 @@ func (f forge) resolveScratchRun(ctx context.Context, repoFlag, token, work, tmp
 		cleanup = func() { _ = os.RemoveAll(workDir) }
 	}
 
-	tokenValue, _ := plan.Token(ctx, machineConfig(), token)
-	client := f.client(tokenValue)
+	client := f.client(forgeToken(ctx, token))
 
 	return scratchRun{Repo: repo, Dir: dir, Prefix: prefix, WorkDir: workDir, Client: client, GitBin: gitBin, cleanup: cleanup}, nil
 }

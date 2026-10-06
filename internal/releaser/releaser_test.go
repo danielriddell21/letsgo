@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/release"
 
 	"github.com/danielriddell21/letsgo/internal/apply"
@@ -50,7 +52,8 @@ func (r *rig) options(t *testing.T) releaser.Options {
 	t.Helper()
 	return releaser.Options{
 		Plan: plan.Options{
-			Dir: r.module, Publish: true, Token: token, Global: &config.Global{},
+			Dir: r.module, Publish: true, Credentials: credential.Set{Forge: credential.Credential{Value: token, Source: "--token"}},
+			Global:  &config.Global{},
 			Analyse: false, DisableProxyWarm: true,
 			NewClient: func(string) *github.Client { return r.client },
 		},

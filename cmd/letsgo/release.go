@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/plan"
@@ -62,6 +64,11 @@ func runBuild(args []string) error {
 type releaseArgs struct {
 	draft, skipWarm, snapshot, appendNotes, allowVulnerable, allowBreaking bool
 	token, tapToken, releaseToken, out                                     string
+}
+
+// credentials resolves what the flags and the environment name, once.
+func (a *releaseArgs) credentials(ctx context.Context) credential.Set {
+	return credentials(ctx, credential.Flags{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken})
 }
 
 // bindCredentials declares the flags every release-shaped command shares.
@@ -124,7 +131,7 @@ func (f forge) applyPlanFile(a releaseArgs, path string) error {
 	fmt.Printf("  applying %s (%s) for %s\n", path, apply.Short12(strings.TrimPrefix(digest, "sha256:")), file.Tag)
 
 	if file.Kind == plandiff.FileKindYank {
-		return f.applyYank(context.Background(), file, diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken})
+		return f.applyYank(context.Background(), file, a.credentials(context.Background()))
 	}
 	return f.doRelease(context.Background(), a, file)
 }
@@ -175,15 +182,15 @@ func (f forge) applyFresh(ctx context.Context, a releaseArgs, autoApprove bool) 
 // planForApply resolves and diffs a release as `letsgo plan -out` does, shows
 // it, and saves it at path. It reports whether there is anything to apply.
 func (f forge) planForApply(ctx context.Context, a releaseArgs, path string) (bool, error) {
-	clients, tokenValue := f.clients(ctx, diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken})
+	set := a.credentials(ctx)
 	planned, err := releaser.Plan(ctx, releaser.PlanOptions{
 		Options: releaser.Options{
 			Plan: plan.Options{
-				Dir: ".", Publish: true, Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken,
+				Dir: ".", Publish: true, Credentials: set,
 				Analyse: true, AllowVulnerable: a.allowVulnerable, AllowBreaking: a.allowBreaking,
 				NewClient: f.client, DisableProxyWarm: a.skipWarm,
 			},
-			Clients: clients, Token: tokenValue, ToolVersion: version, Log: os.Stdout, Warn: os.Stderr,
+			Clients: f.clients(set), Token: set.Forge.Value, ToolVersion: version, Log: os.Stdout, Warn: os.Stderr,
 		},
 		Diff: true,
 	})
@@ -207,17 +214,16 @@ func (f forge) planForApply(ctx context.Context, a releaseArgs, path string) (bo
 // release must keep to: it is held to before anything is published, and only
 // what it lists is written.
 func (f forge) doRelease(ctx context.Context, a releaseArgs, applied *plandiff.File) error {
-	tokens := diffTokens{Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken}
-	clients, tokenValue := f.clients(ctx, tokens)
+	set := a.credentials(ctx)
 
 	res, err := releaser.Release(ctx, releaser.Options{
 		Plan: plan.Options{
-			Dir: ".", Publish: !a.snapshot, Token: a.token, TapToken: a.tapToken, ReleaseToken: a.releaseToken,
+			Dir: ".", Publish: !a.snapshot, Credentials: set,
 			Snapshot: a.snapshot, Analyse: true, AllowVulnerable: a.allowVulnerable, AllowBreaking: a.allowBreaking,
 			DisableProxyWarm: a.skipWarm, NewClient: f.client,
 		},
-		Clients:     clients,
-		Token:       tokenValue,
+		Clients:     f.clients(set),
+		Token:       set.Forge.Value,
 		ToolVersion: version,
 		Out:         a.out,
 		Log:         os.Stdout,

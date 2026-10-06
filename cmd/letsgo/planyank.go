@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/diff"
 	"github.com/danielriddell21/letsgo/internal/discover"
@@ -37,7 +39,7 @@ type yankTarget struct {
 
 // yankOptions is the one place a retraction is put together, so that doing it,
 // planning it and applying a plan of it all start from the same options.
-func (f forge) yankOptions(ctx context.Context, m moduleRepo, t yankTarget, tokens diffTokens) yank.Options {
+func (f forge) yankOptions(ctx context.Context, m moduleRepo, t yankTarget, set credential.Set) yank.Options {
 	o := yank.Options{
 		Client:   m.Client,
 		Repo:     m.Repo,
@@ -53,7 +55,7 @@ func (f forge) yankOptions(ctx context.Context, m moduleRepo, t yankTarget, toke
 		},
 	}
 	if !t.KeepTap {
-		tapFor(&o, m.Module.Dir, f.tapClientFor(ctx, m.Client, tokens.TapToken, tokens.Token))
+		tapFor(&o, m.Module.Dir, f.tapClient(m.Client, set))
 		// The release wrote its description, licence and homepage into the
 		// formula, so the rollback has to read them again or it drops them.
 		if o.Tap != (github.Repo{}) {
@@ -64,17 +66,17 @@ func (f forge) yankOptions(ctx context.Context, m moduleRepo, t yankTarget, toke
 }
 
 // planYankCommand is `letsgo plan -yank`.
-func (f forge) planYankCommand(tag string, y yankArgs, jsonOutput bool, tokens diffTokens, r diffRun) error {
+func (f forge) planYankCommand(tag string, y yankArgs, jsonOutput bool, set credential.Set, r diffRun) error {
 	if jsonOutput {
 		return errors.New("letsgo: a yank plan has no JSON form yet")
 	}
-	return f.planYank(context.Background(), tag, y, tokens, r)
+	return f.planYank(context.Background(), tag, y, set, r)
 }
 
 // planYank says what retracting a release would change and, with out, saves it
 // for `letsgo apply`.
-func (f forge) planYank(ctx context.Context, tag string, y yankArgs, tokens diffTokens, r diffRun) error {
-	m, err := f.resolveModuleRepo(ctx, tokens.Token)
+func (f forge) planYank(ctx context.Context, tag string, y yankArgs, set credential.Set, r diffRun) error {
+	m, err := f.resolveModuleRepo(ctx, set.Forge)
 	if err != nil {
 		return err
 	}
@@ -82,7 +84,7 @@ func (f forge) planYank(ctx context.Context, tag string, y yankArgs, tokens diff
 	if err != nil {
 		return err
 	}
-	options := f.yankOptions(ctx, m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap}, tokens)
+	options := f.yankOptions(ctx, m, yankTarget{Tag: tag, Reason: y.reason, Previous: previous, KeepTap: y.keepTap}, set)
 
 	fmt.Printf("retract %s from %s\n", tag, m.Repo)
 	actions, err := apply.ObserveYank(ctx, options)
@@ -100,8 +102,8 @@ func (f forge) planYank(ctx context.Context, tag string, y yankArgs, tokens diff
 
 // applyYank retracts a release as a saved plan agreed: the forge and go.mod
 // must still be as the plan found them, and only what it lists is written.
-func (f forge) applyYank(ctx context.Context, file *plandiff.File, tokens diffTokens) error {
-	m, err := f.resolveModuleRepo(ctx, tokens.Token)
+func (f forge) applyYank(ctx context.Context, file *plandiff.File, set credential.Set) error {
+	m, err := f.resolveModuleRepo(ctx, set.Forge)
 	if err != nil {
 		return err
 	}
@@ -111,7 +113,7 @@ func (f forge) applyYank(ctx context.Context, file *plandiff.File, tokens diffTo
 
 	// A plan that touches no tap file was made without one.
 	keepTap := !apply.Touches(file.Actions, plandiff.KindTap)
-	options := f.yankOptions(ctx, m, yankTarget{Tag: file.Tag, Reason: file.Reason, Previous: file.Previous, KeepTap: keepTap}, tokens)
+	options := f.yankOptions(ctx, m, yankTarget{Tag: file.Tag, Reason: file.Reason, Previous: file.Previous, KeepTap: keepTap}, set)
 
 	fmt.Println()
 	result, err := apply.Yank(ctx, file, options, say)

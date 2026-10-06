@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/credential"
+
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/plan"
 )
@@ -125,9 +127,8 @@ func TestTapGateProbesTheTapToken(t *testing.T) {
 			t.Setenv("LETSGO_TAP_TOKEN", tt.env)
 			r := withTap(t)
 			got := tapCheck(t, r, plan.Options{
-				Token:     tt.token,
-				TapToken:  tt.tapToken,
-				NewClient: plan.ClientAt(tapForge(t, "tap-token")),
+				Credentials: creds(t, credential.Flags{Token: tt.token, TapToken: tt.tapToken}),
+				NewClient:   plan.ClientAt(tapForge(t, "tap-token")),
 			}).Status
 			if got != tt.want {
 				t.Errorf("brew tap check = %q, want %q", got, tt.want)
@@ -143,7 +144,7 @@ func TestTapTokenDoesNotStandInForTheReleaseToken(t *testing.T) {
 
 	r := withTap(t)
 	p, err := plan.Resolve(context.Background(), plan.Options{
-		Dir: r.dir, Publish: true, TapToken: "tap-token",
+		Dir: r.dir, Publish: true, Credentials: creds(t, credential.Flags{TapToken: "tap-token"}),
 		NewClient: plan.ClientAt(tapForge(t, "tap-token")),
 	})
 	if err != nil {
@@ -151,57 +152,6 @@ func TestTapTokenDoesNotStandInForTheReleaseToken(t *testing.T) {
 	}
 	if got := check(t, p, "token").Status; got != plan.Fail {
 		t.Errorf("token check = %q, want %q: no release token was given", got, plan.Fail)
-	}
-}
-
-func TestTapTokenResolution(t *testing.T) {
-	noAmbientTokens(t)
-	t.Setenv("GITHUB_TOKEN", "release-env")
-
-	tests := []struct {
-		name       string
-		override   string
-		token      string
-		env        string
-		wantToken  string
-		wantSource string
-	}{
-		{
-			name:       "the flag wins",
-			override:   "flag",
-			env:        "env",
-			wantToken:  "flag",
-			wantSource: "--tap-token",
-		},
-		{
-			name:       "then the environment",
-			env:        "env",
-			wantToken:  "env",
-			wantSource: "LETSGO_TAP_TOKEN",
-		},
-		{
-			name:       "then the release token's flag",
-			token:      "release-flag",
-			wantToken:  "release-flag",
-			wantSource: "--token",
-		},
-		{
-			// The fallback that keeps every existing repository working.
-			name:       "and finally the release token's environment",
-			wantToken:  "release-env",
-			wantSource: "GITHUB_TOKEN",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("LETSGO_TAP_TOKEN", tt.env)
-			token, source := plan.TapToken(t.Context(), nil, tt.override, tt.token)
-			if token != tt.wantToken || source != tt.wantSource {
-				t.Errorf("TapToken(%q, %q) = %q from %q, want %q from %q",
-					tt.override, tt.token, token, source, tt.wantToken, tt.wantSource)
-			}
-		})
 	}
 }
 
@@ -241,7 +191,7 @@ func TestTapGateOnArchivedAndUnconfirmed(t *testing.T) {
 		})
 
 		r := withTap(t)
-		if got := tapCheck(t, r, plan.Options{Token: "t", NewClient: plan.ClientAt(endpoint)}).Status; got != plan.Fail {
+		if got := tapCheck(t, r, plan.Options{Credentials: creds(t, credential.Flags{Token: "t"}), NewClient: plan.ClientAt(endpoint)}).Status; got != plan.Fail {
 			t.Errorf("brew tap check = %q, want %q", got, plan.Fail)
 		}
 	})
@@ -260,14 +210,14 @@ func TestTapGateOnArchivedAndUnconfirmed(t *testing.T) {
 		})
 
 		r := withTap(t)
-		check := tapCheck(t, r, plan.Options{Token: "t", NewClient: plan.ClientAt(endpoint)})
+		check := tapCheck(t, r, plan.Options{Credentials: creds(t, credential.Flags{Token: "t"}), NewClient: plan.ClientAt(endpoint)})
 		if check.Status != plan.Warn {
 			t.Errorf("brew tap check = %q, want %q", check.Status, plan.Warn)
 		}
 		// The message has to say what to set, or the warning leaves somebody
 		// with a tap they cannot write to and no next step.
-		if !strings.Contains(check.Detail, plan.TapTokenEnvVars[0]) {
-			t.Errorf("detail = %q, want it to name %s", check.Detail, plan.TapTokenEnvVars[0])
+		if !strings.Contains(check.Detail, credential.TapEnvVars[0]) {
+			t.Errorf("detail = %q, want it to name %s", check.Detail, credential.TapEnvVars[0])
 		}
 	})
 
@@ -280,7 +230,7 @@ func TestTapGateOnArchivedAndUnconfirmed(t *testing.T) {
 		})
 
 		r := withTap(t)
-		if got := tapCheck(t, r, plan.Options{Token: "t", NewClient: plan.ClientAt(endpoint)}).Status; got != plan.Fail {
+		if got := tapCheck(t, r, plan.Options{Credentials: creds(t, credential.Flags{Token: "t"}), NewClient: plan.ClientAt(endpoint)}).Status; got != plan.Fail {
 			t.Errorf("brew tap check = %q, want %q", got, plan.Fail)
 		}
 	})
