@@ -22,6 +22,11 @@ letsgo has zero dependencies.
   repository.
 - In an untrusted workspace it runs `letsgo lsp --restricted` (parse only).
 - There is no publishing in v1.
+- **Problems are the language server's.** A plan's failing and warning checks
+  that name a line of config become diagnostics in `letsgo lsp`
+  (`planDiagnostics`) and only there. An editor client reads `letsgo plan
+  --json` for its panel and status bar but does not publish the same problems
+  itself, so each is reported once.
 
 ## Consequences
 
