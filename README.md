@@ -142,6 +142,13 @@ Nothing is written until `Apply`, so a program can offer the update rather than
 take it. `letsgo update` is the same package, pointed at letsgo — see
 [Self-update][].
 
+## Stability
+
+From v1.0.0 the command line, `letsgo.mod`, the JSON output, the manifest and
+plan files, the plugin wire contract and the public Go packages follow
+[semantic versioning](docs/stability.md). Internals and human-readable output
+do not.
+
 ## Documentation
 
 Full documentation lives in the [letsgo wiki][wiki]: every command, monorepo

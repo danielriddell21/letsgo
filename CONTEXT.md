@@ -45,12 +45,16 @@ A point in a Release where letsgo asks a Plugin a question and records the answe
 _Avoid_: Callback, event
 
 **Plugin config**:
-A Plugin's own `.letsgo/<name>.mod`, written in the same syntax as the Config. A legacy `letsgo-<name>.mod` at the repository root is still read.
+A Plugin's own `.letsgo/<name>.mod`, written in the same syntax as the Config and read through the public `modsyntax` package by `plugin.LoadConfig`. A legacy `letsgo-<name>.mod` at the repository root is still read.
 _Avoid_: Plugin settings
 
 **Tap**:
 The Homebrew repository that holds a project's formula.
 _Avoid_: Brew repo
+
+**Stable surface**:
+What v1 promises not to break within a major version: the command line, Config, JSON output, Manifest and plan files, the Plugin wire contract and the five public Go packages. Listed in `docs/stability.md`.
+_Avoid_: API, public interface
 
 **Gate**:
 A check that must pass before a Publication is considered safe, such as the proxy warm-up and checksum database lookup.

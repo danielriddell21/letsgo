@@ -2,7 +2,8 @@
 
 ## Supported versions
 
-Only the latest release is supported.
+Only the latest v1 release is supported. [Stability](docs/stability.md) says
+what a v1 release will not break.
 
 ## Reporting a vulnerability
 

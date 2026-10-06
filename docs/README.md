@@ -1,5 +1,7 @@
 # letsgo docs
 
+What v1 promises not to break is in [stability](stability.md).
+
 Proposals are split by audience:
 
 | type | answers | format |
@@ -54,6 +56,13 @@ Each HLD opens with its status. Implemented designs are kept as the record of wh
 | [0018](adr/0018-native-summary-terraform-export.md) | Native job summary; Terraform export is the `letsgo-tfplan` companion | proposed |
 | [0019](adr/0019-plan-apply-enforcement-in-core.md) | Plan/apply enforcement in core; only presentation may be a plugin | proposed |
 | [0020](adr/0020-plan-file-and-apply-surface.md) | The plan file, `apply`, and drift detection | accepted |
+| [0021](adr/0021-apply-module.md) | Plan/apply enforcement moves into an internal Apply module | accepted, amended by 0026 |
+| [0022](adr/0022-inject-the-forge-adapter.md) | Inject the forge adapter instead of building clients inside plan | accepted |
+| [0023](adr/0023-plugins-share-cores-wire-contract.md) | Plugins stay separate binaries; they share core's wire contract, not its code | accepted, amended by 0025 |
+| [0024](adr/0024-published-release-reader.md) | One Published Release reader selects and fetches what the forge holds | accepted |
+| [0025](adr/0025-core-owns-plugin-config-syntax.md) | Core owns Plugin config syntax, not just its location | accepted |
+| [0026](adr/0026-releaser-owns-the-release-flow.md) | An internal releaser module owns the release flow | accepted |
+| [0027](adr/0027-v1-compatibility-promise.md) | v1.0.0 promises compatibility for a named surface | accepted |
 
 New ADRs take the next number. Superseded ADRs stay, with their status set to
 `superseded by NNNN`.
