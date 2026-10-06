@@ -1,10 +1,13 @@
 package gobuild
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/safeexec"
@@ -50,25 +53,19 @@ func resolveToolchainWith(global *config.Global) (path, source string, err error
 	name := safeexec.Exe("go")
 
 	if override := os.Getenv(ToolchainEnvOverride); override != "" {
-		if !filepath.IsAbs(override) {
-			return "", "", fmt.Errorf("gobuild: %s must be an absolute path, got %q",
-				ToolchainEnvOverride, override)
+		bin, err := safeexec.Override("go", override, ToolchainEnvOverride)
+		if err != nil {
+			return "", "", fmt.Errorf("gobuild: %w", err)
 		}
-		if !safeexec.IsExecutable(override) {
-			return "", "", fmt.Errorf("gobuild: %s=%q is not an executable file",
-				ToolchainEnvOverride, override)
-		}
-		return override, ToolchainEnvOverride, nil
+		return bin, ToolchainEnvOverride, nil
 	}
 
 	if global.Go != "" {
-		if !filepath.IsAbs(global.Go) {
-			return "", "", fmt.Errorf("gobuild: go %q in %s must be an absolute path", global.Go, global.Path)
+		bin, err := safeexec.Override("go", global.Go, global.Path)
+		if err != nil {
+			return "", "", fmt.Errorf("gobuild: %w", err)
 		}
-		if !safeexec.IsExecutable(global.Go) {
-			return "", "", fmt.Errorf("gobuild: go %q in %s is not an executable file", global.Go, global.Path)
-		}
-		return global.Go, global.Path, nil
+		return bin, global.Path, nil
 	}
 
 	if goroot := os.Getenv("GOROOT"); goroot != "" {
@@ -99,4 +96,51 @@ func resolveToolchainWith(global *config.Global) (path, source string, err error
 // packages, reading versions — does so under the same conditions.
 func Env(t Target, toolchain, goBin string) []string {
 	return environ(t, toolchain, goBin)
+}
+
+// InstallDir is where a program should be installed to be found on a Go
+// developer's PATH: override, then $GOBIN, then $GOPATH/bin. The directory is
+// created if it does not exist.
+//
+// The same place go install puts things, because that is the directory a Go
+// developer already has on PATH, and a program they cannot find on PATH is one
+// that was not installed, however carefully it was downloaded.
+func InstallDir(ctx context.Context, global *config.Global, override string) (string, error) {
+	dir := override
+	if dir == "" {
+		dir = GoEnv(ctx, global, "GOBIN")
+	}
+	if dir == "" {
+		if gopath := GoEnv(ctx, global, "GOPATH"); gopath != "" {
+			dir = filepath.Join(gopath, "bin")
+		}
+	}
+	if dir == "" {
+		return "", errors.New("gobuild: nowhere to install: set GOBIN or GOPATH, or name a directory")
+	}
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", fmt.Errorf("gobuild: %w", err)
+	}
+	return dir, nil
+}
+
+// GoEnv asks the go command when the environment is silent: GOBIN and GOPATH
+// have defaults that no environment variable carries, and the answer that
+// matters is the one go itself would give.
+//
+// A silent failure is the right one here. Not knowing a value is not an error;
+// it only means the caller has to be told where to put things.
+func GoEnv(ctx context.Context, global *config.Global, name string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+	goBin, _, err := Toolchain(global)
+	if err != nil {
+		return ""
+	}
+	out, err := exec.CommandContext(ctx, goBin, "env", name).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }

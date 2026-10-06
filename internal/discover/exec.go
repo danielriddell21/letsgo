@@ -3,7 +3,6 @@ package discover
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/config"
@@ -53,25 +52,19 @@ func GitBinary(global *config.Global) (path, source string, err error) {
 // can be tested with an arbitrary override, global config and search path.
 func resolveGit(override string, global *config.Global, dirs []string) (path, source string, err error) {
 	if override != "" {
-		if !filepath.IsAbs(override) {
-			return "", "", fmt.Errorf("discover: %s must be an absolute path, got %q",
-				gitEnvOverride, override)
+		bin, err := safeexec.Override("git", override, gitEnvOverride)
+		if err != nil {
+			return "", "", fmt.Errorf("discover: %w", err)
 		}
-		if !isExecutable(override) {
-			return "", "", fmt.Errorf("discover: %s=%q is not an executable file",
-				gitEnvOverride, override)
-		}
-		return override, gitEnvOverride, nil
+		return bin, gitEnvOverride, nil
 	}
 
 	if global.Git != "" {
-		if !filepath.IsAbs(global.Git) {
-			return "", "", fmt.Errorf("discover: git %q in %s must be an absolute path", global.Git, global.Path)
+		bin, err := safeexec.Override("git", global.Git, global.Path)
+		if err != nil {
+			return "", "", fmt.Errorf("discover: %w", err)
 		}
-		if !isExecutable(global.Git) {
-			return "", "", fmt.Errorf("discover: git %q in %s is not an executable file", global.Git, global.Path)
-		}
-		return global.Git, global.Path, nil
+		return bin, global.Path, nil
 	}
 
 	if found, lookErr := safeexec.LookIn(dirs, safeexec.Exe("git")); lookErr == nil {
@@ -87,8 +80,6 @@ func resolveGit(override string, global *config.Global, dirs []string) (path, so
 			"  if git is installed elsewhere, set %s to its absolute path",
 		strings.Join(dirs, ", "), gitEnvOverride)
 }
-
-func isExecutable(path string) bool { return safeexec.IsExecutable(path) }
 
 // gitEnv returns the environment for a git subprocess: the caller's, with PATH
 // replaced by the fixed one.

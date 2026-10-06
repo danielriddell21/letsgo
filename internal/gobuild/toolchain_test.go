@@ -1,6 +1,7 @@
 package gobuild
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -239,5 +240,58 @@ func TestToolchainNotFound(t *testing.T) {
 	_, _, err := Toolchain(nil)
 	if err == nil || !strings.Contains(err.Error(), ToolchainEnvOverride) {
 		t.Errorf("err = %v, want it to name %s", err, ToolchainEnvOverride)
+	}
+}
+
+func TestInstallDirPrefersTheOverride(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "bin")
+
+	got, err := InstallDir(context.Background(), nil, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != dir {
+		t.Errorf("InstallDir = %q, want %q", got, dir)
+	}
+	// It has to exist afterwards, or the install that follows cannot write.
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Errorf("InstallDir did not create %s: %v", dir, err)
+	}
+}
+
+func TestInstallDirFallsBackToGOBIN(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("GOBIN", dir)
+
+	got, err := InstallDir(context.Background(), nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != dir {
+		t.Errorf("InstallDir = %q, want GOBIN %q", got, dir)
+	}
+}
+
+func TestInstallDirFallsBackToGOPATHBin(t *testing.T) {
+	gopath := t.TempDir()
+	t.Setenv("GOBIN", "")
+	t.Setenv("GOPATH", gopath)
+
+	got, err := InstallDir(context.Background(), nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(gopath, "bin"); got != want {
+		t.Errorf("InstallDir = %q, want %q", got, want)
+	}
+}
+
+// The environment wins without shelling out, which is what makes the fallback
+// to `go env` affordable.
+func TestGoEnvPrefersTheEnvironment(t *testing.T) {
+	t.Setenv("GOBIN", "/somewhere/particular")
+
+	if got := GoEnv(context.Background(), nil, "GOBIN"); got != "/somewhere/particular" {
+		t.Errorf("goEnv = %q", got)
 	}
 }

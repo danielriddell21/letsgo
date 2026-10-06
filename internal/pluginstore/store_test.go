@@ -256,3 +256,88 @@ func TestOpenReadOnlyFindsWhatOpenInstalled(t *testing.T) {
 		t.Errorf("Lookup = %q, %v, %v; want %q", got, ok, err, want)
 	}
 }
+
+// An interrupted install must leave the old plugin, never half of a new one,
+// so the write goes through a rename.
+func TestWriteExecutableReplacesAtomically(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "letsgo-multi")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := pluginstore.WriteExecutable(path, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new" {
+		t.Errorf("content = %q, want new", got)
+	}
+
+	// The temporary file is written beside the target; none may survive.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			t.Errorf("%s was left behind", e.Name())
+		}
+	}
+}
+
+// An unwritable destination has to fail before anything is reported installed.
+func TestWriteExecutableReportsAnUnwritableDir(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-dir", "letsgo-multi")
+
+	if err := pluginstore.WriteExecutable(missing, []byte("bytes")); err == nil {
+		t.Fatal("writing into a directory that does not exist should fail")
+	}
+}
+
+func TestUnreferencedAndPruneUnreferencedAgreeOnWhatNoPinNames(t *testing.T) {
+	s, err := pluginstore.Open(t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	put := func(name, content string) string {
+		t.Helper()
+		sum := sha256.Sum256([]byte(content))
+		digest := "sha256:" + hex.EncodeToString(sum[:])
+		if _, err := s.Put(digest, name, []byte(content)); err != nil {
+			t.Fatal(err)
+		}
+		return digest
+	}
+	kept := put("letsgo-env", "one")
+	put("letsgo-env", "two")  // same name, other digest: unreferenced
+	put("letsgo-cask", "one") // same digest, other name: unreferenced
+	pins := []pluginstore.Pin{{Digest: kept, Name: "letsgo-env"}}
+
+	listed, err := s.Unreferenced(pins)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("Unreferenced = %+v, want 2 entries", listed)
+	}
+
+	removed, err := s.PruneUnreferenced(pins)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 2 {
+		t.Fatalf("PruneUnreferenced removed %+v, want 2 entries", removed)
+	}
+	left, err := s.Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 1 || left[0].Digest != kept || left[0].Name != "letsgo-env" {
+		t.Errorf("left = %+v, want only the pinned entry", left)
+	}
+}

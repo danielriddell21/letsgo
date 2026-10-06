@@ -1,6 +1,7 @@
 package safeexec
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -125,5 +126,115 @@ func TestIsExecutable(t *testing.T) {
 		if IsExecutable(plain) {
 			t.Error("a non-executable file was reported as executable")
 		}
+	}
+}
+
+func TestSystemDirsOnWindowsUseSystemRootAndProgramFiles(t *testing.T) {
+	env := map[string]string{"SystemRoot": `D:\Win`, "ProgramFiles": `D:\PF`, "ProgramW6432": `D:\PF64`}
+	got := systemDirsFor("windows", func(k string) string { return env[k] })
+
+	want := []string{
+		filepath.Join(`D:\Win`, "system32"), `D:\Win`,
+		filepath.Join(`D:\PF`, "Git", "cmd"), filepath.Join(`D:\PF`, "Git", "bin"),
+		filepath.Join(`D:\PF64`, "Git", "cmd"), filepath.Join(`D:\PF64`, "Git", "bin"),
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("dirs = %v, want %v", got, want)
+	}
+}
+
+func TestSystemDirsOnWindowsDefaultTheRoot(t *testing.T) {
+	got := systemDirsFor("windows", func(string) string { return "" })
+	if len(got) != 2 || got[1] != `C:\Windows` {
+		t.Errorf("dirs = %v, want the default root and its system32", got)
+	}
+}
+
+func TestSystemDirsElsewhereAreTheFixedUnixOnes(t *testing.T) {
+	got := systemDirsFor("linux", func(string) string { return "/tmp/attacker" })
+	if strings.Join(got, ":") != "/usr/bin:/bin:/usr/sbin:/sbin" {
+		t.Errorf("dirs = %v", got)
+	}
+}
+
+func TestRunnableOnEachPlatform(t *testing.T) {
+	for _, tt := range []struct {
+		goos string
+		mode fs.FileMode
+		want bool
+	}{
+		{"linux", 0o755, true},
+		{"linux", 0o644, false},
+		{"linux", 0o100, true},
+		{"linux", fs.ModeDir | 0o755, false},
+		{"windows", 0o644, true},
+		{"windows", fs.ModeDir | 0o755, false},
+		{"windows", fs.ModeSymlink | 0o777, false},
+	} {
+		if got := runnable(tt.goos, tt.mode); got != tt.want {
+			t.Errorf("runnable(%s, %v) = %v, want %v", tt.goos, tt.mode, got, tt.want)
+		}
+	}
+}
+
+func TestExeSuffix(t *testing.T) {
+	if got := exeFor("windows", "go"); got != "go.exe" {
+		t.Errorf("windows: %q", got)
+	}
+	if got := exeFor("linux", "go"); got != "go" {
+		t.Errorf("linux: %q", got)
+	}
+	if got := Exe("go"); got != exeFor(runtime.GOOS, "go") {
+		t.Errorf("Exe = %q", got)
+	}
+}
+
+func TestOverride(t *testing.T) {
+	dir := t.TempDir()
+	tool := filepath.Join(dir, "tool")
+	if err := os.WriteFile(tool, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plain := filepath.Join(dir, "plain")
+	if err := os.WriteFile(plain, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name    string
+		value   string
+		want    string // substring of the error, "" for success
+		skipWin bool
+	}{
+		{"accepts an executable absolute path", tool, "", false},
+		{"rejects a bare name", "git", "must be an absolute path", false},
+		{"rejects a relative path", "./git", "must be an absolute path", false},
+		{"rejects an empty value", "", "must be an absolute path", false},
+		{"rejects a missing file", filepath.Join(dir, "absent"), "is not an executable file", false},
+		{"rejects a directory", dir, "is not an executable file", false},
+		{"rejects a non-executable file", plain, "is not an executable file", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.skipWin && runtime.GOOS == "windows" {
+				t.Skip("windows has no execute bit")
+			}
+			got, err := Override("git", tt.value, "LETSGO_GIT")
+			if tt.want == "" {
+				if err != nil || got != tt.value {
+					t.Fatalf("Override = %q, %v, want %q", got, err, tt.value)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want it to say %q", err, tt.want)
+			}
+			// The message must say what and where, so the user can fix it.
+			for _, part := range []string{"git", "LETSGO_GIT"} {
+				if !strings.Contains(err.Error(), part) {
+					t.Errorf("err = %q, want it to name %q", err, part)
+				}
+			}
+		})
 	}
 }

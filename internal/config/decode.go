@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/danielriddell21/letsgo/internal/suggest"
+
 	"github.com/danielriddell21/letsgo/modsyntax"
 )
 
@@ -100,58 +102,6 @@ func checkKnown(file, keyword string, pos modsyntax.Position) error {
 	return modDirectives.unknown(file, keyword, pos)
 }
 
-// nearestKeyword finds the name closest to keyword, for a did-you-mean
-// suggestion. A prefix or a case difference is caught outright; anything else
-// falls back to edit distance, so a transposed pair of letters (sbmo for
-// sbom) still gets a suggestion rather than the full list.
-func nearestKeyword(keyword string, names []string) string {
-	for _, name := range names {
-		if strings.EqualFold(name, keyword) || strings.HasPrefix(name, keyword) {
-			return name
-		}
-	}
-
-	best, bestDist := "", -1
-	for _, name := range names {
-		d := levenshtein(strings.ToLower(keyword), strings.ToLower(name))
-		if bestDist == -1 || d < bestDist {
-			best, bestDist = name, d
-		}
-	}
-
-	// Worth suggesting only when the typo is close: past this, a guess is as
-	// likely to be wrong as right, and the full list serves the reader better.
-	if best != "" && bestDist <= (len(keyword)+1)/2 {
-		return best
-	}
-	return ""
-}
-
-// levenshtein is the edit distance between two strings: the fewest
-// insertions, deletions and substitutions that turn one into the other.
-func levenshtein(a, b string) int {
-	ra, rb := []rune(a), []rune(b)
-
-	prev := make([]int, len(rb)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-
-	for i := 1; i <= len(ra); i++ {
-		cur := make([]int, len(rb)+1)
-		cur[0] = i
-		for j := 1; j <= len(rb); j++ {
-			cost := 1
-			if ra[i-1] == rb[j-1] {
-				cost = 0
-			}
-			cur[j] = min(cur[j-1]+1, prev[j]+1, prev[j-1]+cost)
-		}
-		prev = cur
-	}
-	return prev[len(rb)]
-}
-
 func checkOnce(file string, seen map[string]modsyntax.Position, keyword string, pos modsyntax.Position) error {
 	if first, ok := seen[keyword]; ok {
 		return errAt(file, pos, "%s is already set at line %d", keyword, first.Line)
@@ -164,7 +114,7 @@ func checkOnce(file string, seen map[string]modsyntax.Position, keyword string, 
 // when there is one. The suggestion rides on the error as data, so an editor
 // need not read it back out of the message.
 func unknownName(file string, pos modsyntax.Position, what, word string, names []string) error {
-	if near := nearestKeyword(word, names); near != "" {
+	if near := suggest.Nearest(word, names); near != "" {
 		return &modsyntax.SyntaxError{
 			File: file, Pos: pos, Wrong: word, Suggest: near,
 			Msg: fmt.Sprintf("unknown %s %q; did you mean %q?", what, word, near),
