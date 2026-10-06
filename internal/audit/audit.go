@@ -21,7 +21,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gate"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/internal/releases/githubsource"
 	"github.com/danielriddell21/letsgo/internal/verify"
@@ -317,7 +317,7 @@ func equalFindings(a, b []Finding) bool {
 
 // saveRecord writes a release's audit.json, replacing any existing one.
 // There is no "update asset content" API, so this follows the same
-// delete-then-upload replace pattern internal/publish uses (AU-8: nothing
+// delete-then-upload replace pattern internal/forgerelease uses (AU-8: nothing
 // else about the release is touched).
 func saveRecord(ctx context.Context, o Options, release *releases.Published, record *Record) error {
 	data, err := json.MarshalIndent(record, "", "  ")

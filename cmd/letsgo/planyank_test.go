@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/apply"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/yank"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )

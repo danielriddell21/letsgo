@@ -10,9 +10,9 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
-	"github.com/danielriddell21/letsgo/internal/publish"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/manifest"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -137,7 +137,7 @@ func TestPublishHoldsBackTheTapForADraft(t *testing.T) {
 func TestReportPublished(t *testing.T) {
 	t.Parallel()
 	var out strings.Builder
-	reportPublished(&out, &publish.Result{
+	reportPublished(&out, &forgerelease.Result{
 		Uploaded: []string{"a"}, Skipped: []string{"b", "c"}, Replaced: []string{"d"}, NotesRefused: true,
 	})
 
@@ -280,13 +280,13 @@ func TestIsLatest(t *testing.T) {
 
 func TestNotesMode(t *testing.T) {
 	t.Parallel()
-	if notesMode(true, true) != publish.NotesAppend {
+	if notesMode(true, true) != forgerelease.NotesAppend {
 		t.Error("--append-notes should append")
 	}
-	if notesMode(false, true) != publish.NotesReplace {
+	if notesMode(false, true) != forgerelease.NotesReplace {
 		t.Error("the default, with changelog enabled, should replace")
 	}
-	if notesMode(false, false) != publish.NotesAppend {
+	if notesMode(false, false) != forgerelease.NotesAppend {
 		t.Error("a disabled changelog should append (nothing), not replace")
 	}
 }
@@ -300,7 +300,7 @@ func diffFixture(t *testing.T) Options {
 	// The tap's formula is made from the manifest, which built() records.
 	result.Manifest.Schema = manifest.Schema
 
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	return Options{
 		Plan: p, Forge: recorder, Tap: recorder, Repo: github.Repo{Owner: "you", Name: "foo"},
 		Dir: t.TempDir(), Result: result,

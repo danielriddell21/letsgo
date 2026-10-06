@@ -10,10 +10,10 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/feature"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/notes/notestest"
 	"github.com/danielriddell21/letsgo/internal/pgpwords"
 	"github.com/danielriddell21/letsgo/internal/plan"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/manifest"
 )
 

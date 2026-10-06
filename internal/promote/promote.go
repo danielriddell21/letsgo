@@ -23,11 +23,11 @@ import (
 	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/feature"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publication"
-	"github.com/danielriddell21/letsgo/internal/publish"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/releases"
 	"github.com/danielriddell21/letsgo/internal/releases/githubsource"
@@ -100,7 +100,7 @@ type Result struct {
 	Plan  *plan.Plan
 	Build *release.Result
 
-	Published *publish.Result
+	Published *forgerelease.Result
 }
 
 // Run promotes an RC. See the package doc for the five steps.

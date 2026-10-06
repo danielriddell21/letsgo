@@ -8,15 +8,15 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
-	"github.com/danielriddell21/letsgo/internal/publish"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/yank"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
 
-func guardFor(t *testing.T, actions ...plandiff.Action) (publish.Forge, brew.FileAPI, *publish.Recorder) {
+func guardFor(t *testing.T, actions ...plandiff.Action) (forgerelease.Forge, brew.FileAPI, *forgerelease.Recorder) {
 	t.Helper()
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{ID: 1}
 	writes := NewWrites(actions)
 	return writes.Forge(recorder, "v1.2.3"), writes.Tap(recorder), recorder
@@ -77,7 +77,7 @@ func TestGuardedForgeRefusesWhatThePlanDoesNotList(t *testing.T) {
 func second[T any](_ T, err error) error { return err }
 
 func TestGuardYankRefusesWhatThePlanDidNotList(t *testing.T) {
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3"}
 	repo := github.Repo{Owner: "you", Name: "demo"}
 	nothing := NewWrites(nil)
@@ -98,7 +98,7 @@ func TestGuardYankRefusesWhatThePlanDidNotList(t *testing.T) {
 }
 
 func TestGuardYankAllowsWhatThePlanListed(t *testing.T) {
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3"}
 	repo := github.Repo{Owner: "you", Name: "demo"}
 	goMod := filepath.Join(t.TempDir(), "go.mod")

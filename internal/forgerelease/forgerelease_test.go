@@ -1,4 +1,4 @@
-package publish_test
+package forgerelease_test
 
 import (
 	"context"
@@ -15,8 +15,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/publish"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
+	"github.com/danielriddell21/letsgo/internal/github"
 )
 
 // fakeGitHub is enough of the releases API to exercise resume behaviour.
@@ -142,7 +142,7 @@ func (f *fakeGitHub) handler() http.Handler {
 
 type fixture struct {
 	fake  *fakeGitHub
-	opts  publish.Options
+	opts  forgerelease.Options
 	files map[string][]byte
 }
 
@@ -180,7 +180,7 @@ func setup(t *testing.T, reportSHA bool) *fixture {
 	return &fixture{
 		fake:  fake,
 		files: files,
-		opts: publish.Options{
+		opts: forgerelease.Options{
 			Client:  client,
 			Repo:    github.Repo{Owner: "you", Name: "foo"},
 			Dir:     dir,
@@ -202,7 +202,7 @@ func sortStrings(s []string) {
 func TestFirstRunCreatesAndUploadsEverything(t *testing.T) {
 	f := setup(t, true)
 
-	result, err := publish.Run(context.Background(), f.opts)
+	result, err := forgerelease.Run(context.Background(), f.opts)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -223,12 +223,12 @@ func TestFirstRunCreatesAndUploadsEverything(t *testing.T) {
 func TestSecondRunUploadsNothing(t *testing.T) {
 	f := setup(t, true)
 
-	if _, err := publish.Run(context.Background(), f.opts); err != nil {
+	if _, err := forgerelease.Run(context.Background(), f.opts); err != nil {
 		t.Fatal(err)
 	}
 	uploadsAfterFirst := len(f.fake.uploads)
 
-	result, err := publish.Run(context.Background(), f.opts)
+	result, err := forgerelease.Run(context.Background(), f.opts)
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -252,13 +252,13 @@ func TestResumeUploadsOnlyWhatIsMissing(t *testing.T) {
 	f := setup(t, true)
 
 	f.fake.failNext = f.opts.Files[1]
-	if _, err := publish.Run(context.Background(), f.opts); err == nil {
+	if _, err := forgerelease.Run(context.Background(), f.opts); err == nil {
 		t.Fatal("Run succeeded despite an upload failure")
 	}
 
 	before := len(f.fake.uploads)
 
-	result, err := publish.Run(context.Background(), f.opts)
+	result, err := forgerelease.Run(context.Background(), f.opts)
 	if err != nil {
 		t.Fatalf("resumed Run: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestCorruptAssetIsReplaced(t *testing.T) {
 	f.fake.release = &github.Release{ID: 42, TagName: "v1.0.0"}
 	f.fake.addAsset(name, []byte("truncated"))
 
-	result, err := publish.Run(context.Background(), f.opts)
+	result, err := forgerelease.Run(context.Background(), f.opts)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestFallsBackToSizeWithoutDigests(t *testing.T) {
 	f.fake.addAsset(name, f.files[name]) // right size
 	f.fake.addAsset(f.opts.Files[1], []byte("x"))
 
-	result, err := publish.Run(context.Background(), f.opts)
+	result, err := forgerelease.Run(context.Background(), f.opts)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestNotesAreReplacedByDefault(t *testing.T) {
 	f := setup(t, true)
 	f.fake.release = &github.Release{ID: 42, TagName: "v1.0.0", Body: "stale notes"}
 
-	result, err := publish.Run(context.Background(), f.opts)
+	result, err := forgerelease.Run(context.Background(), f.opts)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -342,10 +342,10 @@ func TestNotesAreReplacedByDefault(t *testing.T) {
 // generated changelog.
 func TestNotesCanBeAppended(t *testing.T) {
 	f := setup(t, true)
-	f.opts.Notes = publish.NotesAppend
+	f.opts.Notes = forgerelease.NotesAppend
 	f.fake.release = &github.Release{ID: 42, TagName: "v1.0.0", Body: "a hand-written preamble"}
 
-	result, err := publish.Run(context.Background(), f.opts)
+	result, err := forgerelease.Run(context.Background(), f.opts)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -363,10 +363,10 @@ func TestNotesCanBeAppended(t *testing.T) {
 // Appending to nothing is just setting.
 func TestAppendToEmptyNotesDoesNotAddSeparator(t *testing.T) {
 	f := setup(t, true)
-	f.opts.Notes = publish.NotesAppend
+	f.opts.Notes = forgerelease.NotesAppend
 	f.fake.release = &github.Release{ID: 42, TagName: "v1.0.0", Body: "   "}
 
-	if _, err := publish.Run(context.Background(), f.opts); err != nil {
+	if _, err := forgerelease.Run(context.Background(), f.opts); err != nil {
 		t.Fatal(err)
 	}
 	if f.fake.release.Body != "notes" {
@@ -379,11 +379,11 @@ func TestAppendToEmptyNotesDoesNotAddSeparator(t *testing.T) {
 // than being blanked.
 func TestAppendingEmptyNotesLeavesExistingBodyUntouched(t *testing.T) {
 	f := setup(t, true)
-	f.opts.Notes = publish.NotesAppend
+	f.opts.Notes = forgerelease.NotesAppend
 	f.opts.Release.Body = ""
 	f.fake.release = &github.Release{ID: 42, TagName: "v1.0.0", Body: "existing"}
 
-	result, err := publish.Run(context.Background(), f.opts)
+	result, err := forgerelease.Run(context.Background(), f.opts)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -402,7 +402,7 @@ func TestRefusedEditStillUploadsAssets(t *testing.T) {
 	f.fake.release = &github.Release{ID: 42, TagName: "v1.0.0", Body: "existing"}
 	f.fake.refuseEdits = true
 
-	result, err := publish.Run(context.Background(), f.opts)
+	result, err := forgerelease.Run(context.Background(), f.opts)
 	if err != nil {
 		t.Fatalf("Run abandoned an upload it was permitted to perform: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestNonPermissionUpdateFailureIsFatal(t *testing.T) {
 	f.fake.release = &github.Release{ID: 42, TagName: "v1.0.0"}
 	f.fake.failEditsWith = http.StatusInternalServerError
 
-	if _, err := publish.Run(context.Background(), f.opts); err == nil {
+	if _, err := forgerelease.Run(context.Background(), f.opts); err == nil {
 		t.Error("Run continued past a server error on the release update")
 	}
 }
@@ -431,12 +431,12 @@ func TestNonPermissionUpdateFailureIsFatal(t *testing.T) {
 func TestNotesAreCorrectedOnResume(t *testing.T) {
 	f := setup(t, true)
 
-	if _, err := publish.Run(context.Background(), f.opts); err != nil {
+	if _, err := forgerelease.Run(context.Background(), f.opts); err != nil {
 		t.Fatal(err)
 	}
 
 	f.opts.Release.Body = "corrected notes"
-	if _, err := publish.Run(context.Background(), f.opts); err != nil {
+	if _, err := forgerelease.Run(context.Background(), f.opts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -452,7 +452,7 @@ func TestUploadFailureIsReported(t *testing.T) {
 	f := setup(t, true)
 	f.fake.failNext = f.opts.Files[0]
 
-	_, err := publish.Run(context.Background(), f.opts)
+	_, err := forgerelease.Run(context.Background(), f.opts)
 	if err == nil {
 		t.Fatal("Run succeeded despite a failed upload")
 	}
@@ -465,7 +465,7 @@ func TestMissingFileIsReported(t *testing.T) {
 	f := setup(t, true)
 	f.opts.Files = append(f.opts.Files, "not-built.tar.gz")
 
-	if _, err := publish.Run(context.Background(), f.opts); err == nil {
+	if _, err := forgerelease.Run(context.Background(), f.opts); err == nil {
 		t.Error("Run succeeded with a file that does not exist")
 	}
 }

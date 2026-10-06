@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
-	"github.com/danielriddell21/letsgo/internal/publish"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/yank"
 	"github.com/danielriddell21/letsgo/manifest"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -25,7 +25,7 @@ func TestObserveYankSeesEachWriteAndMakesNone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3", Body: "notes"}
 
 	actions, err := ObserveYank(context.Background(), yank.Options{
@@ -52,7 +52,7 @@ func TestObserveYankKeepsWhatIsAlreadyRetracted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3", Prerelease: true, Body: "> [!CAUTION]\n> retracted\n\nnotes"}
 
 	actions, err := ObserveYank(context.Background(), yank.Options{
@@ -71,7 +71,7 @@ func TestObserveYankNamesAGoModInAScope(t *testing.T) {
 	if err := os.WriteFile(goMod, []byte("module example.com/demo/api\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{ID: 7, TagName: "api/v1.2.3", Body: "notes"}
 
 	actions, err := ObserveYank(context.Background(), yank.Options{
@@ -86,7 +86,7 @@ func TestObserveYankNamesAGoModInAScope(t *testing.T) {
 }
 
 func TestObserveYankReportsAGoModThatIsNotThere(t *testing.T) {
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3", Body: "notes"}
 	_, err := ObserveYank(context.Background(), yank.Options{
 		Client: recorder, Repo: github.Repo{Owner: "you", Name: "demo"}, Tag: "v1.2.3",
@@ -157,7 +157,7 @@ func TestObserveYankPlansTheTapRollback(t *testing.T) {
 		return content
 	}
 
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3", Body: "notes"}
 	recorder.Files = map[string][]byte{
 		"Formula/demo.rb":      render("1.2.3", false),
@@ -207,7 +207,7 @@ func readText(t *testing.T, path string) string {
 	return string(data)
 }
 
-func yankOptionsFor(t *testing.T, recorder *publish.Recorder) (yank.Options, string) {
+func yankOptionsFor(t *testing.T, recorder *forgerelease.Recorder) (yank.Options, string) {
 	t.Helper()
 	goMod := filepath.Join(t.TempDir(), "go.mod")
 	if err := os.WriteFile(goMod, []byte("module example.com/demo\n"), 0o600); err != nil {
@@ -219,7 +219,7 @@ func yankOptionsFor(t *testing.T, recorder *publish.Recorder) (yank.Options, str
 }
 
 func TestYankRetractsWhatThePlanListed(t *testing.T) {
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3", Body: "notes"}
 	options, goMod := yankOptionsFor(t, recorder)
 	actions, err := ObserveYank(t.Context(), options)
@@ -239,7 +239,7 @@ func TestYankRetractsWhatThePlanListed(t *testing.T) {
 }
 
 func TestYankSaysWhatAnEarlierApplyAlreadyDid(t *testing.T) {
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3", Body: "notes"}
 	options, _ := yankOptionsFor(t, recorder)
 	actions, err := ObserveYank(t.Context(), options)
@@ -263,7 +263,7 @@ func TestYankSaysWhatAnEarlierApplyAlreadyDid(t *testing.T) {
 }
 
 func TestYankRefusesAPlanThatWentStale(t *testing.T) {
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3", Body: "notes"}
 	options, goMod := yankOptionsFor(t, recorder)
 	actions, err := ObserveYank(t.Context(), options)
@@ -284,7 +284,7 @@ func TestYankRefusesAPlanThatWentStale(t *testing.T) {
 }
 
 func TestYankReportsAForgeItCannotRead(t *testing.T) {
-	options, _ := yankOptionsFor(t, publish.NewRecorder(nil))
+	options, _ := yankOptionsFor(t, forgerelease.NewRecorder(nil))
 	options.GoMod = filepath.Join(t.TempDir(), "go.mod")
 	if _, err := Yank(t.Context(), &plandiff.File{Tag: "v1.2.3"}, options, discard); err == nil {
 		t.Error("Yank went ahead with no go.mod to read")

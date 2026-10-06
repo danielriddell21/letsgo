@@ -7,10 +7,11 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/danielriddell21/letsgo/internal/goproxy"
+
 	"github.com/danielriddell21/letsgo/internal/feature"
 	gatepkg "github.com/danielriddell21/letsgo/internal/gate"
 	"github.com/danielriddell21/letsgo/internal/plan"
-	"github.com/danielriddell21/letsgo/internal/publish"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/sumdb"
 )
@@ -52,7 +53,7 @@ func sumdbDecision(p *plan.Plan, snapshot bool) gatepkg.SumdbDecision {
 // Best effort: a proxy that is slow has not broken a release that is not yet
 // public.
 func warmProxy(ctx context.Context, out io.Writer, p *plan.Plan) {
-	if err := publish.WarmProxy(ctx, p.Proxy, p.Module.Path, p.Version); err != nil {
+	if err := goproxy.WarmProxy(ctx, p.Proxy, p.Module.Path, p.Version); err != nil {
 		fmt.Fprintf(out, "  ! could not prime the module proxy: %v\n", err)
 		fmt.Fprintf(out, "    `go install` may fail briefly until the proxy fetches %s\n", p.Tag)
 		return

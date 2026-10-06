@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/github"
 )
 
 // FileAPI is the part of a forge that publishing a formula needs.

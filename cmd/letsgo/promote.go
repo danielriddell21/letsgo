@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/promote"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 )
 
 // runPromote rebuilds a prerelease as a stable release: see

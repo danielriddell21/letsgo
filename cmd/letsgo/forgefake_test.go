@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/github"
 )
 
 // fakeForge is an in-memory GitHub for the one repository you/demo: enough of

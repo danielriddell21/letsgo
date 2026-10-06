@@ -17,11 +17,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/promote"
 	"github.com/danielriddell21/letsgo/internal/publication"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/manifest"
 )
@@ -125,7 +125,7 @@ type fakeRelease struct {
 }
 
 // fakeForge is a minimal, in-memory GitHub releases API: just the endpoints
-// internal/promote and internal/publish call, nothing more.
+// internal/promote and internal/forgerelease call, nothing more.
 type fakeForge struct {
 	t    *testing.T
 	repo string // "owner/name"

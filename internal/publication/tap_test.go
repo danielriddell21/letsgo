@@ -10,9 +10,9 @@ import (
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
-	"github.com/danielriddell21/letsgo/internal/publish"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/manifest"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -344,7 +344,7 @@ func TestFormulasCarryTheConfiguredCaveats(t *testing.T) {
 
 func observeTap(t *testing.T, existing map[string][]byte, writes map[string][]byte) []plandiff.Action {
 	t.Helper()
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	recorder.Files = existing
 	tap := NewTapObserver(recorder)
 	repo := github.Repo{Owner: "you", Name: "homebrew-tap"}
@@ -396,7 +396,7 @@ func TestTapObserverNamesTheFileItCouldNotRead(t *testing.T) {
 
 func TestTapObserverRefusesAWriteWithoutARead(t *testing.T) {
 	t.Parallel()
-	tap := NewTapObserver(publish.NewRecorder(nil))
+	tap := NewTapObserver(forgerelease.NewRecorder(nil))
 	err := tap.WriteFile(t.Context(), github.Repo{}, github.FileInput{Path: "x"})
 	if err == nil || !strings.Contains(err.Error(), "without being read") {
 		t.Errorf("err = %v", err)

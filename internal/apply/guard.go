@@ -10,8 +10,8 @@ import (
 	"os"
 
 	"github.com/danielriddell21/letsgo/internal/brew"
-	"github.com/danielriddell21/letsgo/internal/publish"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/yank"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
@@ -52,16 +52,16 @@ func (w *Writes) anyAsset() bool { return len(w.pending[plandiff.KindAsset]) > 0
 
 // Forge wraps f so it refuses a write the plan did not list. tag is the
 // release the plan is for.
-func (w *Writes) Forge(f publish.Forge, tag string) publish.Forge {
+func (w *Writes) Forge(f forgerelease.Forge, tag string) forgerelease.Forge {
 	return guardedForge{Forge: f, tag: tag, writes: w}
 }
 
 // Tap wraps t so it refuses a write the plan did not list.
 func (w *Writes) Tap(t brew.FileAPI) brew.FileAPI { return guardedTap{FileAPI: t, writes: w} }
 
-// guardedForge is a publish.Forge that refuses a write the plan did not list.
+// guardedForge is a forgerelease.Forge that refuses a write the plan did not list.
 type guardedForge struct {
-	publish.Forge
+	forgerelease.Forge
 	tag    string
 	writes *Writes
 }

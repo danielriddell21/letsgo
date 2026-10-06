@@ -10,10 +10,10 @@ import (
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publication"
-	"github.com/danielriddell21/letsgo/internal/publish"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/manifest"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -44,7 +44,7 @@ func TestFreshAgainstRefusesAHandEditedTapFile(t *testing.T) {
 	}
 
 	// Between the plan and the apply, someone edits the formula by hand.
-	targets.Tap.(*publish.Recorder).Files = map[string][]byte{"Formula/foo.rb": []byte("by hand")}
+	targets.Tap.(*forgerelease.Recorder).Files = map[string][]byte{"Formula/foo.rb": []byte("by hand")}
 
 	_, err = Fresh(t.Context(), &plandiff.File{Actions: saved}, targets, discard)
 	if err == nil || !strings.Contains(err.Error(), "stale") || !strings.Contains(err.Error(), "Formula/foo.rb") {
@@ -60,7 +60,7 @@ func TestFreshAgainstResumesAnApplyThatStoppedHalfway(t *testing.T) {
 	}
 
 	// The earlier apply created the release and wrote the formula, then stopped.
-	recorder := targets.Forge.(*publish.Recorder)
+	recorder := targets.Forge.(*forgerelease.Recorder)
 	recorder.Existing = &github.Release{ID: 1, TagName: "v1.2.3"}
 	done, err := publication.Observe(t.Context(), targets)
 	if err != nil {
@@ -113,7 +113,7 @@ func TestGuardApplyReturnsClientsThatHoldToThePlan(t *testing.T) {
 		t.Error("an unplanned tap write was allowed")
 	}
 
-	targets.Tap.(*publish.Recorder).Files = map[string][]byte{"Formula/foo.rb": []byte("by hand")}
+	targets.Tap.(*forgerelease.Recorder).Files = map[string][]byte{"Formula/foo.rb": []byte("by hand")}
 	if _, _, err := Guard(t.Context(), &plandiff.File{Actions: saved}, targets, discard); err == nil {
 		t.Error("a stale plan was guarded instead of refused")
 	}
@@ -132,7 +132,7 @@ func diffFixture(t *testing.T) publication.Options {
 		Config:  &config.Config{},
 		Tap:     github.Repo{Owner: "you", Name: "homebrew-tap"},
 	}
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	return publication.Options{
 		Plan: p, Forge: recorder, Tap: recorder, Repo: github.Repo{Owner: "you", Name: "foo"},
 		Dir: t.TempDir(), Result: &release.Result{
@@ -151,7 +151,7 @@ func diffFixture(t *testing.T) publication.Options {
 	}
 }
 
-type brokenForge struct{ publish.Forge }
+type brokenForge struct{ forgerelease.Forge }
 
 func (brokenForge) ReleaseByTag(context.Context, github.Repo, string) (*github.Release, error) {
 	return nil, errors.New("forge is down")

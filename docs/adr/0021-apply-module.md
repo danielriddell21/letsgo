@@ -23,7 +23,7 @@ leaving it as an internal detail of one command.
 ## Decision
 
 Move those four files into one `internal/apply` module. Its interface is
-diff, save and apply, built on the same `publish.Forge` / `brew.FileAPI`
+diff, save and apply, built on the same `forgerelease.Forge` / `brew.FileAPI`
 seams the rest of core already uses. `cmd/letsgo`'s `runPlan` and `runApply`
 shrink to mapping flags onto `apply.Options`.
 

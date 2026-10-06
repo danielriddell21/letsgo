@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/audit"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
+	"github.com/danielriddell21/letsgo/internal/github"
 )
 
 func TestRunRejectsReleaseWithoutManifest(t *testing.T) {

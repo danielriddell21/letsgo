@@ -16,7 +16,7 @@ Status: proposal. Nothing here is implemented.
   forge unless `--publish` is passed, and even then it only checks access.
 - `letsgo release --snapshot` runs the whole release against `Recorder`, a
   `Forge` that records calls instead of making them
-  (`internal/publish/recorder.go`). Its principle is that a dry run taking its
+  (`internal/forgerelease/recorder.go`). Its principle is that a dry run taking its
   own path proves nothing.
 - `letsgo release` builds and publishes in one step, and the publisher is
   idempotent (existing matching assets are kept, and mismatches replaced).

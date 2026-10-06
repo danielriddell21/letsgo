@@ -16,14 +16,14 @@ import (
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/feature"
+	"github.com/danielriddell21/letsgo/internal/forgerelease"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	installer "github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/notes"
 	"github.com/danielriddell21/letsgo/internal/notes/notestest"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/publication"
-	"github.com/danielriddell21/letsgo/internal/publish"
-	"github.com/danielriddell21/letsgo/internal/publish/github"
 	"github.com/danielriddell21/letsgo/internal/release"
 	"github.com/danielriddell21/letsgo/internal/sbom"
 	"github.com/danielriddell21/letsgo/manifest"
@@ -413,7 +413,7 @@ func proxyWarmRan(t *testing.T, disabled []string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recorder := publish.NewRecorder(nil)
+	recorder := forgerelease.NewRecorder(nil)
 	if _, err := publication.Publish(context.Background(), publication.Options{
 		Plan: p, Dir: dir, Forge: recorder, Tap: recorder,
 		Result: &release.Result{Manifest: &manifest.Manifest{}},

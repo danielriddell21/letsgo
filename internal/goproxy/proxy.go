@@ -1,4 +1,8 @@
-package publish
+// Package goproxy is the Go module proxy: which one to use, warming it with a
+// new version, and escaping module paths for its URLs. It is a leaf package, so
+// the planner, the publication gate and the sumdb check can all use it without
+// importing the forge-release code.
+package goproxy
 
 import (
 	"context"
