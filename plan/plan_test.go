@@ -92,3 +92,19 @@ func TestMarkdownOmitsTheBlockWhenNothingChanges(t *testing.T) {
 		t.Errorf("an empty plan renders a block or a kept count: %q", got)
 	}
 }
+
+func TestKindsListsEveryKind(t *testing.T) {
+	want := map[plan.Kind]bool{plan.KindRelease: true, plan.KindAsset: true, plan.KindTap: true, plan.KindImage: true, plan.KindProxy: true, plan.KindGoMod: true}
+	if len(plan.Kinds) != len(want) {
+		t.Fatalf("plan.Kinds = %v, want %d kinds", plan.Kinds, len(want))
+	}
+	for _, k := range plan.Kinds {
+		if !want[k] {
+			t.Errorf("unexpected kind %q", k)
+		}
+		delete(want, k)
+	}
+	if len(want) != 0 {
+		t.Errorf("plan.Kinds is missing %v", want)
+	}
+}
