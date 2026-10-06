@@ -3,19 +3,13 @@ package main
 import (
 	"bufio"
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/bump"
-	"github.com/danielriddell21/letsgo/internal/changelog"
 	"github.com/danielriddell21/letsgo/internal/discover"
-	"github.com/danielriddell21/letsgo/internal/gate"
-	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
 
 func runTag(args []string) error {
@@ -60,12 +54,13 @@ func runTag(args []string) error {
 	}
 	previous, _ := scope.LatestStableTag(tags, git.Tags...)
 
-	proposal, err := proposeVersion(ctx, gitBin, module, scope, previous, forced(*major, *minor, *patch))
+	repo := bump.Repo{GitBin: gitBin, Module: module, Scope: scope, Global: machineConfig()}
+	proposal, err := repo.ProposeFor(ctx, previous, bump.Forced(*major, *minor, *patch))
 	if err != nil {
 		return err
 	}
 	if *pre {
-		proposal.Next = nextPrerelease(tags, scope.Prefix, proposal.Next)
+		proposal.Next = bump.NextPrerelease(tags, scope.Prefix, proposal.Next)
 	}
 
 	if *jsonOutput {
@@ -126,110 +121,6 @@ func createTag(
 	}
 	fmt.Printf("\n  tagged %s\n  push it with: git push origin %s\n", tag, tag)
 	return nil
-}
-
-// nextPrerelease appends an auto-incrementing "-rc.N" suffix to a proposed
-// base version. It scans the existing tags for the highest N already used
-// under that exact base, so repeated --pre runs advance rc.1, rc.2, ...
-// instead of colliding on the same candidate.
-func nextPrerelease(tags []string, prefix, base string) string {
-	want := prefix + base + "-rc."
-	n := 0
-	for _, tag := range tags {
-		suffix, ok := strings.CutPrefix(tag, want)
-		if !ok {
-			continue
-		}
-		if v, err := strconv.Atoi(suffix); err == nil && v > n {
-			n = v
-		}
-	}
-	return fmt.Sprintf("%s-rc.%d", base, n+1)
-}
-
-// forced returns the level a flag demands, or bump.None for no flag.
-func forced(major, minor, patch bool) bump.Level {
-	switch {
-	case major:
-		return bump.Major
-	case minor:
-		return bump.Minor
-	case patch:
-		return bump.Patch
-	default:
-		return bump.None
-	}
-}
-
-// proposeVersion gathers both signals and combines them.
-//
-// previous is the real git tag, prefixed exactly as it exists in the
-// repository — Commits and checkoutForDiff need that to resolve it — but the
-// version bump.Propose computes is a plain "vX.Y.Z", so scope.Prefix is
-// stripped before it reaches the semver parser.
-func proposeVersion(
-	ctx context.Context, gitBin string, module discover.Module, scope discover.Scope, previous string, force bump.Level,
-) (bump.Proposal, error) {
-	previousVersion := strings.TrimPrefix(previous, scope.Prefix)
-
-	if force != bump.None {
-		return bump.Propose(previousVersion, module.Path,
-			bump.Signal{Source: "you", Level: force, Detail: "requested on the command line"})
-	}
-
-	nested, err := discover.NestedModuleDirs(module.Dir)
-	if err != nil {
-		return bump.Proposal{}, err
-	}
-	commits, err := discover.Commits(ctx, gitBin, module.Dir, previous, "HEAD", nested...)
-	if err != nil {
-		return bump.Proposal{}, err
-	}
-	notes := changelog.Build(previous, "", commits)
-
-	// The API signal needs an earlier tree to compare against, and something
-	// importable to compare. Whatever stopped it is carried into the signal
-	// rather than swallowed: a signal that dropped out leaves the version
-	// decided by commit messages alone, and the report should say so.
-	var (
-		changes []gate.Change
-		apiErr  = errors.New("no earlier release to compare against")
-	)
-	if previous != "" {
-		global := machineConfig()
-		goBin, _, _ := gobuild.Toolchain(global)
-		old, cleanup, err := checkoutForDiff(ctx, gitBin, module.Dir, previous, scope.Dir)
-		if err != nil {
-			apiErr = err
-		} else {
-			defer cleanup()
-			changes, apiErr = gate.APIDiff(ctx, global, goBin, old, module.Dir)
-		}
-	}
-
-	return bump.Propose(previousVersion, module.Path,
-		bump.FromAPI(changes, apiErr),
-		bump.FromCommits(notes.Entries))
-}
-
-// checkoutForDiff checks out tag into a scratch worktree and returns the
-// module's own directory within it — a worktree always holds the whole
-// repository, so a module nested in it (relDir, slash-separated) is compared
-// at <worktree>/relDir, never at the worktree's own root.
-func checkoutForDiff(ctx context.Context, gitBin, repoDir, tag, relDir string) (string, func(), error) {
-	base, err := os.MkdirTemp("", "letsgo-tag-")
-	if err != nil {
-		return "", nil, fmt.Errorf("letsgo: scratch directory: %w", err)
-	}
-	worktree := filepath.Join(base, "previous")
-	if err := discover.AddWorktree(ctx, gitBin, repoDir, worktree, tag); err != nil {
-		_ = os.RemoveAll(base)
-		return "", nil, err
-	}
-	return filepath.Join(worktree, filepath.FromSlash(relDir)), func() {
-		_ = discover.RemoveWorktree(ctx, gitBin, repoDir, worktree)
-		_ = os.RemoveAll(base)
-	}, nil
 }
 
 func reportProposal(p bump.Proposal, previous string) {

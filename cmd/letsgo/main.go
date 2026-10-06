@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/danielriddell21/letsgo/internal/releaser"
 )
 
 // version is replaced at link time. It is declared exactly the way letsgo
@@ -123,10 +125,4 @@ var errDoctorFailed = errors.New("doctor found a problem")
 // took formats an elapsed duration at a resolution a person cares about.
 // Rounding everything to tenths of a second reports a plan that finished in
 // forty milliseconds as "0s", which reads like the tool did nothing.
-func took(started time.Time) time.Duration {
-	elapsed := time.Since(started)
-	if elapsed < time.Second {
-		return elapsed.Round(time.Millisecond)
-	}
-	return elapsed.Round(100 * time.Millisecond)
-}
+func took(started time.Time) time.Duration { return releaser.Took(started) }

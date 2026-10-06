@@ -5,13 +5,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/danielriddell21/letsgo/internal/apply"
 	"github.com/danielriddell21/letsgo/internal/diff"
 	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/github"
+	"github.com/danielriddell21/letsgo/internal/releaser"
 	"github.com/danielriddell21/letsgo/internal/yank"
 	"github.com/danielriddell21/letsgo/manifest"
 	plandiff "github.com/danielriddell21/letsgo/plan"
@@ -56,7 +57,7 @@ func (f forge) yankOptions(ctx context.Context, m moduleRepo, t yankTarget, toke
 		// The release wrote its description, licence and homepage into the
 		// formula, so the rollback has to read them again or it drops them.
 		if o.Tap != (github.Repo{}) {
-			o.RepoInfo = describeRepo(ctx, m.Client, m.Repo)
+			o.RepoInfo = releaser.DescribeRepo(ctx, m.Client, m.Repo, os.Stdout)
 		}
 	}
 	return o
@@ -89,20 +90,12 @@ func (f forge) planYank(ctx context.Context, tag string, y yankArgs, tokens diff
 		return err
 	}
 
-	file := &plandiff.File{
-		Schema:        plandiff.FileSchema,
-		LetsgoVersion: version,
-		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
-		Kind:          plandiff.FileKindYank,
-		Repo:          m.Repo.Owner + "/" + m.Repo.Name,
-		Tag:           tag,
-		Reason:        y.reason,
-		Previous:      previous,
-		Actions:       actions,
+	yankPlan := apply.YankPlan{
+		Repo: m.Repo.Owner + "/" + m.Repo.Name, Tag: tag, Reason: y.reason, Previous: previous, Actions: actions,
 	}
 	r.Then = "letsgo yank " + tag
 	r.Title = "letsgo plan: yank " + tag
-	return finishPlan(actions, func(path string) (string, error) { return apply.Write(file, path) }, r)
+	return finishPlan(actions, func(path string) (string, error) { return apply.SaveYank(yankPlan, path, version) }, r)
 }
 
 // applyYank retracts a release as a saved plan agreed: the forge and go.mod

@@ -14,10 +14,6 @@ import (
 	"github.com/danielriddell21/letsgo/manifest"
 )
 
-// A worktree always checks out the whole repository, so a nested module has
-// to be compared at <worktree>/relDir, never at the worktree's own root: the
-// same bug `plan.checkoutTag` had, in the command that proposes a tag rather
-// than the one that resolves one.
 // An unknown --format is rejected before the two sides are even resolved,
 // so a typo doesn't cost a network round trip.
 func TestRunDiffRejectsAnUnknownFormat(t *testing.T) {

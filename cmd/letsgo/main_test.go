@@ -4,86 +4,27 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/danielriddell21/letsgo/internal/gobuild"
+	"github.com/danielriddell21/letsgo/internal/forgetest"
+
 	"github.com/danielriddell21/letsgo/manifest"
 )
 
-// demoMainGo is a program small enough to build in a test, but one that
-// answers --version: planAndBuild's smoke test insists on that from anything
-// it builds.
-const demoMainGo = `package main
-
-import (
-	"fmt"
-	"os"
-)
-
-var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
-)
-
-func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("demo %s (%s) built %s\n", version, commit, date)
-	}
-}
-`
-
 // moduleFixture writes a minimal buildable module and commits it, so
 // plan.Resolve has a real repository to work from.
-//
-// Driven as one shell-independent command list, with the identity given as
-// -c flags rather than a GIT_AUTHOR_* environment: a test fixture belongs to
-// this file, not copied from the shape another package's already has.
 func moduleFixture(t *testing.T) string {
 	t.Helper()
-	return moduleFixtureWith(t, "", nil)
+	return forgetest.Module(t)
 }
 
 // moduleFixtureWith is moduleFixture with directives appended to its
 // letsgo.mod and extra files committed beside it.
 func moduleFixtureWith(t *testing.T, config string, extra map[string]string) string {
 	t.Helper()
-	dir := t.TempDir()
-
-	files := map[string]string{
-		"go.mod":     "module example.com/demo\n\ngo 1.24\n",
-		"main.go":    demoMainGo,
-		"letsgo.mod": "build " + gobuild.Host().String() + "\n" + config,
-	}
-	for name, content := range extra {
-		files[name] = content
-	}
-	for name, content := range files {
-		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	identity := []string{"-c", "user.name=Test", "-c", "user.email=t@example.com"}
-	for _, args := range [][]string{
-		{"-C", dir, "init", "-q", "-b", "main"},
-		{"-C", dir, "remote", "add", "origin", "https://github.com/you/demo.git"},
-		{"-C", dir, "add", "."},
-		append(append([]string{"-C", dir}, identity...), "commit", "-q", "-m", "feat: first release"),
-		{"-C", dir, "tag", "v1.2.3"},
-	} {
-		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	return dir
+	return forgetest.ModuleWith(t, config, extra)
 }
 
 func writeManifest(t *testing.T, dir, name, version, goVersion string) string {

@@ -10,6 +10,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/promote"
+	"github.com/danielriddell21/letsgo/internal/releaser"
 )
 
 // runPromote rebuilds a prerelease as a stable release: see
@@ -105,10 +106,10 @@ func (f forge) runPromote(args []string) error {
 // same way before spending an API call on an answer nothing will use.
 func tapRepoInfo(ctx context.Context, moduleDir string, client *github.Client) *github.RepoInfo {
 	p, err := plan.Resolve(ctx, plan.Options{Dir: moduleDir, Snapshot: true, AllowDirty: true})
-	if err != nil || !wantsRepoInfo(p) {
+	if err != nil || !releaser.WantsRepoInfo(p) {
 		return nil
 	}
-	return describeRepo(ctx, client, github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name})
+	return releaser.DescribeRepo(ctx, client, github.Repo{Owner: p.Repo.Owner, Name: p.Repo.Name}, os.Stdout)
 }
 
 func confirmPromote(tag string) bool {

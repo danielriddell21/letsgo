@@ -5,22 +5,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/danielriddell21/letsgo/internal/bump"
-	"github.com/danielriddell21/letsgo/internal/config"
-	"github.com/danielriddell21/letsgo/internal/discover"
-	"github.com/danielriddell21/letsgo/internal/plan"
 )
-
-func releasePlan() *plan.Plan {
-	return &plan.Plan{
-		Version: "1.2.3",
-		Tag:     "v1.2.3",
-		Repo:    discover.Repo{Host: "github.com", Owner: "you", Name: "foo"},
-		HasRepo: true,
-		Config:  &config.Config{},
-	}
-}
 
 // The flag has to survive the trip from the command line to the publishers:
 // this drives a rehearsed release rather than the helpers it is made of.
@@ -53,36 +38,6 @@ func TestReleaseDraftFlagReachesTheTap(t *testing.T) {
 				t.Errorf("tap skipped = %v, want %v\n%s", got, tc.wantSkipped, out)
 			}
 		})
-	}
-}
-
-func TestNoDraftFlagLeavesAConfiguredDraftAlone(t *testing.T) {
-	p := releasePlan()
-	p.MarkDraft()
-
-	applyDraftFlag(p, false)
-
-	if !p.Draft() {
-		t.Error("an absent --draft flag cleared draft = true from the config")
-	}
-}
-
-func TestForced(t *testing.T) {
-	for _, c := range []struct {
-		major, minor, patch bool
-		want                bump.Level
-	}{
-		{true, false, false, bump.Major},
-		{false, true, false, bump.Minor},
-		{false, false, true, bump.Patch},
-		{false, false, false, bump.None},
-		// Several at once resolves to the largest, which is the only reading
-		// that cannot under-bump.
-		{true, true, true, bump.Major},
-	} {
-		if got := forced(c.major, c.minor, c.patch); got != c.want {
-			t.Errorf("forced(%v,%v,%v) = %v, want %v", c.major, c.minor, c.patch, got, c.want)
-		}
 	}
 }
 

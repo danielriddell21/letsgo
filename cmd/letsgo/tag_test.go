@@ -1,15 +1,12 @@
 package main
 
 import (
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/danielriddell21/letsgo/internal/bump"
-	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
 
@@ -256,88 +253,5 @@ func TestRunTagJSONWorksWithUncommittedChanges(t *testing.T) {
 
 	if !strings.Contains(out, `"schema": 1`) {
 		t.Errorf("runTag --json output = %q, want it to contain a schema field", out)
-	}
-}
-
-func TestCheckoutForDiffReturnsTheModulesOwnDirectory(t *testing.T) {
-	repoDir, _ := scopedModuleFixture(t)
-
-	old, cleanup, err := checkoutForDiff(context.Background(), "git", repoDir, "services/api/v1.2.3", "services/api")
-	if err != nil {
-		t.Fatalf("checkoutForDiff: %v", err)
-	}
-	defer cleanup()
-
-	data, err := os.ReadFile(filepath.Join(old, "go.mod"))
-	if err != nil {
-		t.Fatalf("the returned directory is not the nested module's own: %v", err)
-	}
-	if string(data) != "module github.com/you/foo/services/api\n\ngo 1.24\n" {
-		t.Errorf("go.mod = %q, want the nested module's own", data)
-	}
-}
-
-// bump.Propose parses the previous tag as a plain "vX.Y.Z"; a module scoped
-// under services/api carries that version behind a "services/api/" prefix,
-// which has to come off before proposeVersion hands it to bump.Propose, or
-// every scoped tag proposal fails outright.
-func TestProposeVersionStripsThePrefixBeforeParsingSemver(t *testing.T) {
-	_, moduleDir := scopedModuleFixture(t)
-	module := discover.Module{Path: "github.com/you/foo/services/api", Dir: moduleDir}
-	scope := discover.Scope{Dir: "services/api", Prefix: "services/api/"}
-
-	proposal, err := proposeVersion(context.Background(), "git", module, scope, "services/api/v1.2.3", bump.None)
-	if err != nil {
-		t.Fatalf("proposeVersion: %v", err)
-	}
-	if proposal.Next != "v1.2.4" {
-		t.Errorf("Next = %q, want v1.2.4 (a patch bump of the stripped version)", proposal.Next)
-	}
-}
-
-// A commit that only touched a further-nested module (one inside the module
-// being tagged) is not evidence for this module's own bump: it belongs to a
-// release with its own history.
-func TestProposeVersionExcludesANestedModulesOwnCommits(t *testing.T) {
-	dir := t.TempDir()
-	run := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	write := func(name, content string) {
-		t.Helper()
-		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
-	write("main.go", "package main\n\nfunc main() {}\n")
-	run("init", "-q", "-b", "main")
-	run("config", "user.name", "Test")
-	run("config", "user.email", "t@example.com")
-	run("add", ".")
-	run("commit", "-q", "-m", "first")
-	run("tag", "v1.0.0")
-
-	write("plugin/go.mod", "module github.com/you/foo/plugin\n")
-	run("add", ".")
-	run("commit", "-q", "-m", "feat!: nested module's own breaking change")
-
-	module := discover.Module{Path: "github.com/you/foo", Dir: dir}
-	proposal, err := proposeVersion(context.Background(), "git", module, discover.Scope{}, "v1.0.0", bump.None)
-	if err != nil {
-		t.Fatalf("proposeVersion: %v", err)
-	}
-	if proposal.Next != "v1.0.1" {
-		t.Errorf("Next = %q, want v1.0.1: the nested module's commit must not count as a signal here", proposal.Next)
 	}
 }
