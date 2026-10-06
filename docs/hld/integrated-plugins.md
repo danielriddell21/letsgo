@@ -8,7 +8,7 @@ The `letsgo/plugins/{multi,env,cask}` packages described below — folding each
 plugin's logic into core — were never built, and per ADR-0023 they won't be:
 plugins keep their logic in letsgo-plugins and call core's exported helpers
 (`manifest.Read`, `manifest.BaseName`, the shared download URL builder, and a
-new `plugin.ReadConfig`) directly instead. The drift this proposal set out to
+new `plugin.ReadConfig`, since replaced by `plugin.LoadConfig`, ADR-0025) directly instead. The drift this proposal set out to
 end (private manifest reader, mismatched `base()`, unescaped download URL,
 `ConfigDir` never read) is still there either way. Tracked in
 [#150](https://github.com/danielriddell21/letsgo/issues/150).

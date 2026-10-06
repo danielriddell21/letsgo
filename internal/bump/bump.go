@@ -193,8 +193,9 @@ func Propose(previous, modulePath string, signals ...Signal) (Proposal, error) {
 	// Below v1 there is no compatibility promise to break, and the convention
 	// is that minor absorbs what would otherwise be a major. Promoting to
 	// v1.0.0 on the first removal would commit the project to stability it has
-	// not claimed.
-	if from.Major == 0 && level == Major {
+	// not claimed. Only an inferred major is held back: someone who asks for
+	// one on the command line is how a project graduates to v1.
+	if from.Major == 0 && level == Major && !asked(signals, Major) {
 		level = Minor
 		p.Notes = append(p.Notes,
 			"breaking, but v0 makes no compatibility promise, so the minor is bumped instead of reaching v1.0.0")
@@ -228,6 +229,17 @@ func Propose(previous, modulePath string, signals ...Signal) (Proposal, error) {
 	}
 
 	return p, nil
+}
+
+// asked reports whether the person running the command demanded this level,
+// rather than it being inferred from the commits or the API.
+func asked(signals []Signal, level Level) bool {
+	for _, s := range signals {
+		if s.Source == "you" && s.Level == level {
+			return true
+		}
+	}
+	return false
 }
 
 // Signalled reports whether anything actually called for a release.
