@@ -76,10 +76,13 @@ jobs:
       - uses: ./.github/actions/champ-git-identity
 
       - name: promote
-        run: go run ./cmd/letsgo promote --yes --work dist "${{ inputs.tag || github.event.release.tag_name }}"
-        env:
-          GITHUB_TOKEN: ${{ steps.letsgo-token.outputs.token }}
-          LETSGO_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
+        uses: danielriddell21/letsgo-action@v1
+        with:
+          version: local
+          command: promote
+          args: --yes --work dist ${{ inputs.tag || github.event.release.tag_name }}
+          token: ${{ steps.letsgo-token.outputs.token }}
+          tap-token: ${{ steps.tap-token.outputs.token }}
 
       - name: attest provenance
         uses: actions/attest-build-provenance@v4
