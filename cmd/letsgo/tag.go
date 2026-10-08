@@ -3,14 +3,17 @@ package main
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/internal/git"
 
 	"github.com/danielriddell21/letsgo/internal/bump"
+	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/discover"
 )
 
@@ -49,7 +52,12 @@ func (f forge) runTag(args []string) error {
 	}
 	previous, _ := scope.LatestStableTag(tags, loc.Git.Tags...)
 
-	repo := bump.Repo{Runner: loc.Runner, Module: loc.Module, Scope: scope, Global: f.machine()}
+	module, err := releasedModule(loc.Module)
+	if err != nil {
+		return err
+	}
+
+	repo := bump.Repo{Runner: loc.Runner, Module: module, Scope: scope, Global: f.machine()}
 	proposal, err := repo.ProposeFor(ctx, previous, bump.Forced(*major, *minor, *patch))
 	if err != nil {
 		return err
@@ -178,4 +186,34 @@ func readYes() bool {
 	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	return answer == "y" || answer == "yes"
+}
+
+// releasedModule is the module a release builds: the one letsgo.mod's module
+// directive names, or the one beside it when there is no directive. The
+// version is measured against that module, as plan resolves it, so a commit
+// to a released nested module is read as a release signal rather than
+// excluded as some other module's.
+func releasedModule(m discover.Module) (discover.Module, error) {
+	cfg, _, err := config.Load(m.Dir)
+	if errors.Is(err, config.ErrNotFound) {
+		return m, nil
+	}
+	if err != nil {
+		return discover.Module{}, err
+	}
+	if cfg.ModuleDir == "" {
+		return m, nil
+	}
+
+	dir := filepath.Join(m.Dir, filepath.FromSlash(cfg.ModuleDir))
+	released, err := discover.FindModule(dir)
+	if err != nil {
+		return discover.Module{}, fmt.Errorf("module %s: %w", cfg.ModuleDir, err)
+	}
+	// FindModule walks up, so a directory with no go.mod of its own would
+	// resolve to the module above it, which is not the one that was named.
+	if released.Dir != dir {
+		return discover.Module{}, fmt.Errorf("module %s: no go.mod in that directory", cfg.ModuleDir)
+	}
+	return released, nil
 }
