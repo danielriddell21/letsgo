@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/danielriddell21/letsgo/internal/discover"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 )
 
@@ -254,5 +255,131 @@ func TestRunTagJSONWorksWithUncommittedChanges(t *testing.T) {
 
 	if !strings.Contains(out, `"schema": 1`) {
 		t.Errorf("runTag --json output = %q, want it to contain a schema field", out)
+	}
+}
+
+// A repository whose letsgo.mod releases a nested module (`module web`) is
+// versioned by that module's commits. Measured from the root module instead,
+// the nested module's directory is excluded as another module's, so a fix
+// that only touches it calls for no release at all.
+func TestRunTagReadsCommitsInTheModuleTheDirectiveNames(t *testing.T) {
+	repoDir := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		path := filepath.Join(repoDir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git := func(args ...string) {
+		t.Helper()
+		if out, err := exec.Command("git", append([]string{"-C", repoDir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	write("go.mod", "module github.com/you/foo\n\ngo 1.24\n")
+	write("letsgo.mod", "module web\n")
+	write("web/go.mod", "module github.com/you/foo/web\n\ngo 1.24\n")
+	git("init", "-q", "-b", "main")
+	git("config", "user.name", "Test")
+	git("config", "user.email", "t@example.com")
+	git("remote", "add", "origin", "https://github.com/you/foo.git")
+	git("add", ".")
+	git("commit", "-q", "-m", "first")
+	git("tag", "v0.2.1")
+
+	write("web/web.go", "package web\n")
+	git("add", ".")
+	git("commit", "-q", "-m", "fix(deps): bump something in web")
+	t.Chdir(repoDir)
+
+	out := captureStdout(t, func() {
+		if err := unwired.runTag([]string{"--json", "--warranted"}); err != nil {
+			t.Fatalf("runTag: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "1 patch") {
+		t.Errorf("runTag --json = %s, want the fix in web/ counted as a patch", out)
+	}
+}
+
+// releasedModule resolves the module a release builds the way plan does:
+// beside letsgo.mod unless a module directive names another, and an error
+// when the directive names something that is not a module.
+func TestReleasedModule(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		files   map[string]string
+		wantDir string
+		wantErr string
+	}{
+		{
+			name:    "no letsgo.mod",
+			files:   map[string]string{},
+			wantDir: ".",
+		},
+		{
+			name:    "no module directive",
+			files:   map[string]string{"letsgo.mod": "brew you/tap\n"},
+			wantDir: ".",
+		},
+		{
+			name: "nested module",
+			files: map[string]string{
+				"letsgo.mod": "module web\n",
+				"web/go.mod": "module github.com/you/foo/web\n\ngo 1.24\n",
+			},
+			wantDir: "web",
+		},
+		{
+			name:    "directory without a go.mod",
+			files:   map[string]string{"letsgo.mod": "module web\n", "web/web.go": "package web\n"},
+			wantErr: "module web: no go.mod in that directory",
+		},
+		{
+			name:    "go.mod without a module line",
+			files:   map[string]string{"letsgo.mod": "module web\n", "web/go.mod": "go 1.24\n"},
+			wantErr: "module web:",
+		},
+		{
+			name:    "letsgo.mod that does not parse",
+			files:   map[string]string{"letsgo.mod": "module (\n"},
+			wantErr: "letsgo.mod",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.files["go.mod"] = "module github.com/you/foo\n\ngo 1.24\n"
+			for name, content := range tt.files {
+				path := filepath.Join(dir, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root := discover.Module{Path: "github.com/you/foo", Dir: dir}
+
+			got, err := releasedModule(root)
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("releasedModule() error = %v, want it to contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("releasedModule() error = %v", err)
+			}
+			if want := filepath.Join(dir, tt.wantDir); got.Dir != want {
+				t.Errorf("releasedModule().Dir = %s, want %s", got.Dir, want)
+			}
+		})
 	}
 }
