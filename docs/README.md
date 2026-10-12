@@ -63,6 +63,7 @@ Each HLD opens with its status. Implemented designs are kept as the record of wh
 | [0025](adr/0025-core-owns-plugin-config-syntax.md) | Core owns Plugin config syntax, not just its location | accepted |
 | [0026](adr/0026-releaser-owns-the-release-flow.md) | An internal releaser module owns the release flow | accepted |
 | [0027](adr/0027-v1-compatibility-promise.md) | v1.0.0 promises compatibility for a named surface | accepted |
+| [0028](adr/0028-installer-fingerprint-and-record.md) | The installer checks the manifest, shows its fingerprint, and leaves a record | accepted |
 
 New ADRs take the next number. Superseded ADRs stay, with their status set to
 `superseded by NNNN`.
