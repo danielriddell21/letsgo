@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -16,6 +17,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/danielriddell21/letsgo/internal/install"
 )
 
 // executable finds the running binary. A variable so that a test can exercise
@@ -47,12 +50,64 @@ func resolve(path string) string {
 // archive and once as the binary inside it — and the replacement itself is a
 // rename, so an interrupted update leaves the old binary in place rather than
 // half of a new one.
+//
+// A binary Homebrew installed is refused: brew would go on believing it had
+// the old version, and its next upgrade would undo this one. A binary that
+// install.sh installed has its install record rewritten to describe the new
+// one, so the record never vouches for a binary that is no longer there.
 func (u *Update) ApplyTo(ctx context.Context, path string) error {
+	if formula := homebrewFormula(resolve(path)); formula != "" {
+		return fmt.Errorf("selfupdate: %s was installed by Homebrew; update it with: brew upgrade %s", path, formula)
+	}
 	binary, err := u.Download(ctx)
 	if err != nil {
 		return err
 	}
-	return replace(path, binary)
+	if err := replace(path, binary); err != nil {
+		return err
+	}
+	return u.rewriteRecord(path, binary)
+}
+
+// homebrewFormula is the formula that owns path, when path is inside a
+// Homebrew Cellar (…/Cellar/<formula>/<version>/…), and empty otherwise.
+func homebrewFormula(path string) string {
+	_, rest, ok := strings.Cut(filepath.ToSlash(path), "/Cellar/")
+	if !ok {
+		return ""
+	}
+	formula, _, ok := strings.Cut(rest, "/")
+	if !ok {
+		return ""
+	}
+	return formula
+}
+
+// rewriteRecord brings the install record beside path, if there is one, up
+// to date with the binary just written there.
+func (u *Update) rewriteRecord(path string, binary []byte) error {
+	previous, err := install.ReadRecord(path)
+	if err != nil || previous == nil {
+		// An unreadable record is left alone rather than failing an update
+		// that has already happened; doctor reports it.
+		return nil
+	}
+	err = install.WriteRecord(path, &install.Record{
+		Schema:         install.RecordSchema,
+		Via:            "selfupdate",
+		Project:        cmp.Or(u.project, previous.Project),
+		Version:        u.Version,
+		Tag:            u.Tag,
+		ManifestSHA256: u.manifestSHA256,
+		Archive:        u.Archive,
+		ArchiveSHA256:  u.SHA256,
+		Binary:         filepath.Base(path),
+		BinarySHA256:   digest(binary),
+	})
+	if err != nil {
+		return fmt.Errorf("selfupdate: %s was updated, but %w", path, err)
+	}
+	return nil
 }
 
 // Download fetches the update and returns the verified binary, without
