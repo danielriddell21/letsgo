@@ -29,6 +29,7 @@ Each HLD opens with its status. Implemented designs are kept as the record of wh
 | Randomart | [#34](https://github.com/danielriddell21/letsgo/issues/34) | [#42](https://github.com/danielriddell21/letsgo/issues/42) | [prd](prd/randomart.md) | [hld](hld/randomart.md) | [pbs](pbs/randomart.md) | [0014](adr/0014-fingerprints-from-manifest-digest.md) |
 | PGP words | [#35](https://github.com/danielriddell21/letsgo/issues/35) | [#42](https://github.com/danielriddell21/letsgo/issues/42) | [prd](prd/pgp-words.md) | [hld](hld/pgp-words.md) | [pbs](pbs/pgp-words.md) | [0014](adr/0014-fingerprints-from-manifest-digest.md) |
 | Receipt | [#36](https://github.com/danielriddell21/letsgo/issues/36) | [#42](https://github.com/danielriddell21/letsgo/issues/42) | [prd](prd/receipt.md) | [hld](hld/receipt.md) | [pbs](pbs/receipt.md) | [0014](adr/0014-fingerprints-from-manifest-digest.md), [0015](adr/0015-easter-eggs-render-verify-result.md) |
+| Dockerfile images (`images` hook) | — | — | — | [hld](hld/images-hook.md) | — | [0027](adr/0027-images-hook-plugin-builds-core-pushes.md) |
 
 ## ADRs
 
@@ -54,6 +55,7 @@ Each HLD opens with its status. Implemented designs are kept as the record of wh
 | [0018](adr/0018-native-summary-terraform-export.md) | Native job summary; Terraform export is the `letsgo-tfplan` companion | proposed |
 | [0019](adr/0019-plan-apply-enforcement-in-core.md) | Plan/apply enforcement in core; only presentation may be a plugin | proposed |
 | [0020](adr/0020-plan-file-and-apply-surface.md) | The plan file, `apply`, and drift detection | accepted |
+| [0027](adr/0027-images-hook-plugin-builds-core-pushes.md) | Dockerfile images via an `images` hook; Plugin builds, core pushes | proposed |
 
 New ADRs take the next number. Superseded ADRs stay, with their status set to
 `superseded by NNNN`.
