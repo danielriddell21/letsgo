@@ -44,7 +44,7 @@ image fixer (
 
 | setting | | meaning |
 | --- | --- | --- |
-| `suffix <text>` | required | `[A-Za-z0-9_.-]+`; appended to every tag |
+| `suffix <text>` | required | `-` or `_`, then a letter; letters, digits, `.`, `-`, `_`, with a letter after every `.` (`plugin.CheckSuffix`), so it can't spell another version's tag (`-rc.1`, `.4`); appended to every tag |
 | `base <ref>` | optional | as `image base`; scratch when unset |
 | `cmd <arg>…` | optional | as `image cmd` |
 | `expose <port>…` | optional | as `image expose` |
@@ -138,8 +138,10 @@ After the build and archives, before any publication:
 2. **Stage.** The release's own Linux binaries (not variants) are copied to
    `<dist>/images-hook/context/<os>_<arch>/<binary>`.
 3. **Run.** The Plugin runs with its config's timeout, the repository root
-   as its working directory, and no forge or registry credentials in its
-   environment. Its input:
+   as its working directory, and no forge, registry or GitHub Actions
+   (`ACTIONS_ID_TOKEN_REQUEST_*`, `ACTIONS_RUNTIME_TOKEN`) credentials in its
+   environment. It runs in its own process group, so a timeout kills
+   whatever it started too. Its input:
 
    ```json
    {
@@ -153,10 +155,12 @@ After the build and archives, before any publication:
    }
    ```
 
-   letsgo-docker runs, for each image:
+   letsgo-docker creates a `docker-container` buildx builder named
+   `letsgo-docker` on first use (docker's default driver can export OCI
+   only with the containerd image store), then runs, for each image:
 
    ```
-   docker buildx build --file <dockerfile> [--target <stage>]
+   docker buildx build --builder letsgo-docker --file <dockerfile> [--target <stage>]
      --platform <platforms> --build-context letsgo=<context>
      --output type=oci,tar=false,dest=<output>/<name> <repo root>
    ```
@@ -172,15 +176,18 @@ After the build and archives, before any publication:
    `COPY --from=letsgo ${TARGETOS}_${TARGETARCH}/talos /usr/local/bin/`.
 
 4. **Check.** The whole answer is checked before any layout is read:
-   - every suffix is valid, or empty;
+   - every suffix passes `plugin.CheckSuffix`, or is empty;
    - suffixes are unique across the answer and core's own images;
    - the unsuffixed-image rules above hold;
    - no full tag is longer than 128 characters;
    - each layout is a directory under `output` after resolving symlinks.
 5. **Load.** `oci.LoadLayout` reads each layout: its image manifests, the
-   attestations a builder attaches, and their blobs, checked by digest and
-   size. Core builds the index itself over those manifests, with the
-   release's annotations, which is what lets a floating tag read the version.
+   attestations a builder attaches, and their blobs. Every blob is hashed as
+   it is read and checked by digest and size before anything is pushed, and
+   only regular files are read, never a symlink. Core builds the index itself
+   over those manifests, with the release's annotations, which is what lets a
+   floating tag read the version; the names a builder gave the image on its
+   own machine (`org.opencontainers.image.ref.name`) are dropped.
 
 ### Publication
 
