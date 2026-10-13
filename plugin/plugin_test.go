@@ -289,3 +289,16 @@ func TestReadConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckSuffix(t *testing.T) {
+	for _, ok := range []string{"-fixer", "_tool", "-fixer.debug", "-a1", "-x-y_z"} {
+		if err := CheckSuffix(ok); err != nil {
+			t.Errorf("CheckSuffix(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "fixer", "-1", "-rc.1", "-beta.2", ".4", "-a/b", "-a.", "-a..b", "-fixer.1"} {
+		if err := CheckSuffix(bad); err == nil {
+			t.Errorf("CheckSuffix(%q) = nil, want a refusal", bad)
+		}
+	}
+}

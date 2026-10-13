@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/danielriddell21/letsgo/internal/build"
-	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
+	pub "github.com/danielriddell21/letsgo/plugin"
 )
 
 // SourcePlugin marks an image an images-hook plugin built, in ImageBuild and
@@ -22,10 +22,6 @@ const SourcePlugin = "plugin"
 // imagesHookDir is where the hook works, under the release's output: the
 // staged binaries it builds from, and the layouts it writes.
 const imagesHookDir = "images-hook"
-
-// suffixPattern is what a suffix may contain, the same rule letsgo.mod's
-// image blocks are held to.
-var suffixPattern = config.ImageSuffix
 
 // maxTag is the longest tag a registry accepts.
 const maxTag = oci.MaxTagLength
@@ -220,8 +216,11 @@ func checkReleaseImage(p *plan.Plan, images []plugin.OutputImage) error {
 // registry rejects. An empty suffix is the release image, which
 // checkReleaseImage has already allowed or refused.
 func checkSuffix(suffix string, seen map[string]bool, tags []string) error {
-	if suffix != "" && !suffixPattern.MatchString(suffix) {
-		return fmt.Errorf("suffix %q %s", suffix, config.ImageSuffixRule)
+	if suffix != "" {
+		// The same rule letsgo.mod's image blocks are held to.
+		if err := pub.CheckSuffix(suffix); err != nil {
+			return err
+		}
 	}
 	if seen[suffix] {
 		return fmt.Errorf("suffix %q is already used by another image", suffix)

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/danielriddell21/letsgo/modsyntax"
+	pub "github.com/danielriddell21/letsgo/plugin"
 
 	"github.com/danielriddell21/letsgo/internal/feature"
 )
@@ -269,18 +270,6 @@ func applyImagePlugin(img *Image, file string, line *modsyntax.Line) error {
 // messages, so it is kept to one plain word.
 var imageName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
-// ImageSuffix is what a suffix may be: '-' or '_', then a letter, then
-// letters, digits, '-' and '_', with a '.' only before a letter. It is
-// appended to every tag a release pushes, so it must not be able to spell
-// another version's tag: "-rc.1" on 1.2.3 is the 1.2.3-rc.1 prerelease, and
-// ".4" on 1.2 is the next patch's.
-var ImageSuffix = regexp.MustCompile(`^[-_][A-Za-z][A-Za-z0-9_-]*(\.[A-Za-z][A-Za-z0-9_-]*)*$`)
-
-// ImageSuffixRule says what ImageSuffix requires, for an error to quote.
-const ImageSuffixRule = "must start with '-' or '_' and then a letter, such as -fixer, " +
-	"hold only letters, digits, '.', '-' and '_', and have a letter after every '.'; " +
-	"anything else could spell another version's tag"
-
 // imageBlockSettings are what an image block may set: how the image runs,
 // and the suffix that tells its tags apart. Where it is pushed is the release
 // image's, and is not repeated.
@@ -357,8 +346,9 @@ func applyImageSuffix(extra *ExtraImage, file string, line *modsyntax.Line) erro
 		return errAt(file, line.P, "expected `suffix <text>`")
 	case extra.Suffix != "":
 		return errAt(file, line.P, "suffix is already set")
-	case !ImageSuffix.MatchString(line.Args[1]):
-		return errAt(file, line.P, "suffix %q %s", line.Args[1], ImageSuffixRule)
+	}
+	if err := pub.CheckSuffix(line.Args[1]); err != nil {
+		return errAt(file, line.P, "%v", err)
 	}
 	extra.Suffix = line.Args[1]
 	return nil

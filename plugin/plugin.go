@@ -17,6 +17,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 )
 
 // Hook is a point in a release a plugin can answer for.
@@ -226,6 +227,23 @@ type ImageBinary struct {
 
 	// Path is relative to the input's Context.
 	Path string `json:"path"`
+}
+
+// imageSuffix is what an image's suffix may be: '-' or '_', then a letter,
+// then letters, digits, '-' and '_', with a '.' only before a letter.
+var imageSuffix = regexp.MustCompile(`^[-_][A-Za-z][A-Za-z0-9_-]*(\.[A-Za-z][A-Za-z0-9_-]*)*$`)
+
+// CheckSuffix reports whether suffix may follow every tag a release pushes.
+// It must not be able to spell another version's tag: "-rc.1" on 1.2.3 is
+// the 1.2.3-rc.1 prerelease, and ".4" on 1.2 is the next patch's. The empty
+// suffix, the release image itself, is the caller's to allow or refuse.
+func CheckSuffix(suffix string) error {
+	if !imageSuffix.MatchString(suffix) {
+		return fmt.Errorf("suffix %q must start with '-' or '_' and then a letter, such as -fixer, "+
+			"hold only letters, digits, '.', '-' and '_', and have a letter after every '.'; "+
+			"anything else could spell another version's tag", suffix)
+	}
+	return nil
 }
 
 // ImagesOutput is what the hook answers: the images it built.
