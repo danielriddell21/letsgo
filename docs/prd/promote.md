@@ -23,13 +23,13 @@ Prereleases become channels, named by their semver suffix. `letsgo promote
 <rc>` rebuilds the RC's commit at the final tag, proves the build matches,
 and creates a new stable release with cumulative notes. Flipping an RC to
 "release" in the GitHub UI triggers promote through a documented workflow.
-The flipped RC is always restored to prerelease. Brew gets `foo@next`,
+The flipped RC is always restored to prerelease. Brew gets `foo-next`,
 Docker gets floating and channel tags, and selfupdate gets channels.
 
 ## User Stories
 
 1. As a brew user, I want the stable formula untouched by prereleases, so that I never get an RC unasked.
-2. As a tester, I want `brew install you/tap/foo@next`, so that I get the newest build of any kind.
+2. As a tester, I want `brew install you/tap/foo-next`, so that I get the newest build of any kind.
 3. As a Docker user, I want `rc` and `beta` tags, so that I can follow a channel.
 4. As a Docker user, I want floating `1.3` and `1` tags that only move forward, so that I can pin a minor or major.
 5. As a maintainer, I want `letsgo promote v1.3.0-rc.1` to release `v1.3.0` from the RC's commit, so that what I tested is what ships.

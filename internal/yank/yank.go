@@ -283,7 +283,7 @@ func (o Options) revertTap(ctx context.Context, result *Result, logf func(string
 	return nil
 }
 
-// revertNext points each @next formula back at the previous release, when it
+// revertNext points each -next formula back at the previous release, when it
 // names the one being retracted. One that has moved on to something newer is
 // not this release's to undo.
 func (o Options) revertNext(ctx context.Context, m *manifest.Manifest, logf func(string, ...any)) error {

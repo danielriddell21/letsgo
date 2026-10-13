@@ -36,7 +36,7 @@ disagree, the latest comment wins: promote **creates a new release** and
 | who creates `v1.3.0` | `letsgo promote` (CLI, or a workflow started by a UI flip) |
 | RC required before stable? | no; direct `v1.3.0` tags still work |
 | channel names | taken from the semver suffix (`-rc.N` → `rc`, `-beta.N` → `beta`), with no config |
-| brew prereleases | one separate formula, `foo@next` |
+| brew prereleases | one separate formula, `foo-next` |
 | Docker | `latest` on stable; floating `1.3` and `1`; channel tags `rc` and `beta` |
 | channel follow rule | newest of the channel or stable, so a beta user moves to stable when it is newer |
 | GitHub release | promote **creates** `v1.3.0`; the RC release stays and is restored to prerelease |
@@ -150,9 +150,9 @@ Brew, Docker and selfupdate are unaffected, because they only move in step 5.
 
 - Stable formula `foo`: written **only** for stable releases. This is the bug
   fix, and it stands alone.
-- `foo@next`: written on every prerelease and every stable release, pointing
+- `foo-next`: written on every prerelease and every stable release, pointing
   at whichever is newer.
-- Yank rolls back `foo@next` the same way it rolls back `foo`.
+- Yank rolls back `foo-next` the same way it rolls back `foo`.
 
 ## Docker
 
@@ -194,7 +194,7 @@ Phases, in order. Each is a vertical slice: a thin path through every layer, ver
 1. `semver.Previous` (user stories 11 (partial), 12)
 2. Brew stable guard (user stories 1)
 3. Docker floating and channel tags (user stories 3, 4)
-4. `foo@next` (user stories 2)
+4. `foo-next` (user stories 2)
 5. selfupdate channels (user stories 13, 14)
 6. Tracer bullet: `letsgo promote` from the CLI (user stories 5, 6, 7, 9, 10, 11, 15)
 7. UI trigger (user stories 8)

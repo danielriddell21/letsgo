@@ -41,7 +41,7 @@ apply commands.
 | PA-10 | The published manifest MUST include `plan.sha256` equal to the sha256 of the attached `letsgo.plan.json`. | 9 |
 | PA-11 | The rebuild comparison MUST exclude the manifest's `plan` field. | 4 |
 | PA-12 | `verify` MUST print the plan record, and check that the attached plan's sha256 matches it. | 10 |
-| PA-13 | `plan -yank TAG` MUST produce a `kind: "yank"` plan covering the retract, formula, cask and `@next` rollbacks, and the release marking. | 11 |
+| PA-13 | `plan -yank TAG` MUST produce a `kind: "yank"` plan covering the retract, formula, cask and `-next` rollbacks, and the release marking. | 11 |
 | PA-14 | `release` MUST produce the same forge calls as `plan -out` followed by `apply` for the same state. | 12 |
 | PA-15 | `apply` without a file MUST render the plan and prompt on a TTY; without a TTY it MUST require `-auto-approve`. | 13 |
 | PA-16 | `plan --json` MUST output the plan file's schema. | 14 |

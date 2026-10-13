@@ -109,7 +109,7 @@ non-interactive session it requires `-auto-approve`.
 ```
   ~ go.mod     retract v1.3.0            (commit on trunk)
   ~ tap        Formula/gambit.rb        → v1.2.8
-  ~ tap        Formula/gambit@next.rb   → v1.2.8   (#29)
+  ~ tap        Formula/gambit-next.rb   → v1.2.8   (#29)
   ~ tap        Casks/gambit.rb          → v1.2.8   (#25)
   ~ release    v1.3.0                    mark yanked in notes
   Plan: 0 to add, 5 to change, 0 to remove.

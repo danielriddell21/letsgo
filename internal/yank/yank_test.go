@@ -518,7 +518,7 @@ func TestRunLeavesAReleaseThatIsAlreadyRetracted(t *testing.T) {
 	}
 }
 
-// @next is rolled back with the formula, but only while it names the release
+// -next is rolled back with the formula, but only while it names the release
 // being retracted.
 func TestRunRollsBackNextOnlyWhileItNamesTheRetractedRelease(t *testing.T) {
 	artifact := manifest.Artifact{Name: "foo_1.2.0_darwin_arm64.tar.gz", OS: "darwin", Arch: "arm64", Binary: "foo", SHA256: "aaa"}
@@ -558,15 +558,15 @@ func TestRunRollsBackNextOnlyWhileItNamesTheRetractedRelease(t *testing.T) {
 
 			var next *github.FileInput
 			for i, w := range tap.writes {
-				if strings.HasSuffix(w.Path, "@next.rb") {
+				if strings.HasSuffix(w.Path, "-next.rb") {
 					next = &tap.writes[i]
 				}
 			}
 			if (next != nil) != tc.writes {
-				t.Fatalf("@next written = %v, want %v (writes %+v)", next != nil, tc.writes, tap.writes)
+				t.Fatalf("-next written = %v, want %v (writes %+v)", next != nil, tc.writes, tap.writes)
 			}
 			if next != nil && !strings.Contains(string(next.Content), `"1.2.0"`) {
-				t.Errorf("@next was not rolled back to 1.2.0:\n%s", next.Content)
+				t.Errorf("-next was not rolled back to 1.2.0:\n%s", next.Content)
 			}
 		})
 	}

@@ -88,7 +88,7 @@ func TestPublishCreatesTheReleaseThenWritesTheTap(t *testing.T) {
 	if len(forge.created) != 1 || forge.created[0].TagName != "v1.2.3" {
 		t.Errorf("created = %+v, want one release for v1.2.3", forge.created)
 	}
-	if want := []string{"Formula/foo.rb", "Formula/foo@next.rb"}; !slices.Equal(tap.writes, want) {
+	if want := []string{"Formula/foo.rb", "Formula/foo-next.rb"}; !slices.Equal(tap.writes, want) {
 		t.Errorf("tap writes = %v, want %v", tap.writes, want)
 	}
 
@@ -322,7 +322,7 @@ func TestObserveAddsTheReleaseAndTheTapFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The release, then the formula and its @next.
+	// The release, then the formula and its -next.
 	want := []plandiff.Op{plandiff.Add, plandiff.Add, plandiff.Add}
 	if got := opsOf(actions); !slices.Equal(got, want) {
 		t.Errorf("ops = %v, want %v\n%+v", got, want, actions)

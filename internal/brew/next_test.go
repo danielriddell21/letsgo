@@ -25,7 +25,7 @@ func TestPublishNextAdvancesAFormulaThatHasNeverBeenPublished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != brew.Created || result.Path != "Formula/my-tool@next.rb" {
+	if result.Status != brew.Created || result.Path != "Formula/my-tool-next.rb" {
 		t.Fatalf("result = %+v", result)
 	}
 	if len(tap.writes) != 1 {
@@ -33,7 +33,7 @@ func TestPublishNextAdvancesAFormulaThatHasNeverBeenPublished(t *testing.T) {
 	}
 }
 
-// An existing @next older than the release is overwritten: the ordinary
+// An existing -next older than the release is overwritten: the ordinary
 // rc -> stable progression.
 func TestPublishNextOverwritesAnOlderFormula(t *testing.T) {
 	old := nextSample("1.3.0-rc.1")
@@ -53,7 +53,7 @@ func TestPublishNextOverwritesAnOlderFormula(t *testing.T) {
 	}
 }
 
-// A backport releasing behind an already-published @next must not roll it
+// A backport releasing behind an already-published -next must not roll it
 // back.
 func TestPublishNextKeepsAFormulaNewerThanTheRelease(t *testing.T) {
 	ahead := nextSample("1.3.0")
@@ -76,7 +76,7 @@ func TestPublishNextKeepsAFormulaNewerThanTheRelease(t *testing.T) {
 	}
 }
 
-// An @next equal to the release is also left alone: only strictly newer
+// A -next equal to the release is also left alone: only strictly newer
 // counts as an advance, so a re-run of the same release does not churn the
 // tap.
 func TestPublishNextKeepsAnEqualFormula(t *testing.T) {
@@ -100,7 +100,7 @@ func TestPublishNextKeepsAnEqualFormula(t *testing.T) {
 // A file at the path that isn't a formula this package wrote (no readable
 // version line) is left alone rather than guessed at.
 func TestPublishNextKeepsAnUnparseableFormula(t *testing.T) {
-	tap := &fakeTap{files: map[string][]byte{"Formula/my-tool@next.rb": []byte("not a formula\n")}}
+	tap := &fakeTap{files: map[string][]byte{"Formula/my-tool-next.rb": []byte("not a formula\n")}}
 	repo := github.Repo{Owner: "you", Name: "homebrew-tap"}
 
 	result, err := brew.PublishNext(context.Background(), tap, repo, nextSample("1.3.0"))
@@ -115,7 +115,7 @@ func TestPublishNextKeepsAnUnparseableFormula(t *testing.T) {
 	}
 }
 
-// Retracting the release @next names points it back at the previous one.
+// Retracting the release -next names points it back at the previous one.
 func TestRevertNextRollsBackAFormulaThatNamesTheRetractedRelease(t *testing.T) {
 	yanked := nextSample("1.3.0")
 	content, err := yanked.Render()
@@ -134,7 +134,7 @@ func TestRevertNextRollsBackAFormulaThatNamesTheRetractedRelease(t *testing.T) {
 	}
 }
 
-// An @next that has moved on, is absent, or is not ours is not this release's
+// A -next that has moved on, is absent, or is not ours is not this release's
 // to undo.
 func TestRevertNextLeavesAFormulaThatDoesNotNameTheRetractedRelease(t *testing.T) {
 	newer := nextSample("1.4.0")
