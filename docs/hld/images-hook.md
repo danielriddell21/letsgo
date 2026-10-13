@@ -1,6 +1,6 @@
 # HLD: more than one image
 
-Status: proposed.
+Status: implemented. Re-running a failed image push is not yet supported: a rerun rebuilds the images hook's images with new digests, so it starts from a new tag.
 
 | | |
 |---|---|
