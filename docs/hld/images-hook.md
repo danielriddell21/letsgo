@@ -126,7 +126,9 @@ when the hook runs. That is still before anything is published.
    - `docker buildx version` must work, or it's a **Fail**. That probe is
      letsgo-docker's need, but buildx is the only builder a first-party
      Plugin uses, so core probes for it when the pinned command is
-     `letsgo-docker`.
+     `letsgo-docker`. Core and letsgo-docker find docker the same way:
+     at the absolute path in `LETSGO_DOCKER`, else in the system
+     directories, never through `PATH`.
 
 ### Release
 

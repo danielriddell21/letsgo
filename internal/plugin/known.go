@@ -16,7 +16,11 @@ type KnownPlugin struct {
 	// Probe is a command that must succeed on this machine for the plugin to
 	// work, run while planning so a missing tool fails before anything is
 	// built. Empty for a plugin that needs nothing beyond itself.
-	Probe []string
+	//
+	// Its program is found as the plugin finds it: in the system directories,
+	// or at the absolute path ProbeEnv names. Never through PATH.
+	Probe    []string
+	ProbeEnv string
 }
 
 // Known is the catalogue of first-party plugins.
@@ -42,10 +46,11 @@ var Known = []KnownPlugin{
 		Summary: "writes a Homebrew cask alongside the formula",
 	},
 	{
-		Command: "letsgo-docker",
-		Hook:    HookImages,
-		Summary: "builds container images from Dockerfiles, pushed under the release's tags",
-		Probe:   []string{"docker", "buildx", "version"},
+		Command:  "letsgo-docker",
+		Hook:     HookImages,
+		Summary:  "builds container images from Dockerfiles, pushed under the release's tags",
+		Probe:    []string{"docker", "buildx", "version"},
+		ProbeEnv: "LETSGO_DOCKER",
 	},
 }
 

@@ -283,3 +283,41 @@ func TestBuildImagesBuildsEachBlock(t *testing.T) {
 		t.Errorf("under image plugin, built %+v", builds)
 	}
 }
+
+// One path holds one binary: the same binary built twice for a platform has
+// no single answer to stage.
+func TestStageBinariesRefusesABinaryBuiltTwice(t *testing.T) {
+	p := basePlan(t)
+	a, b := linuxArtifact(t, "one"), linuxArtifact(t, "two")
+	b.Archive = "gambit-extra_1.2.0-rc.1_linux_amd64.tar.gz"
+
+	_, err := stageBinaries(p, []build.Artifact{a, b}, filepath.Join(t.TempDir(), "context"))
+	if err == nil || !strings.Contains(err.Error(), "built twice") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestStageBinariesReportsAMissingBinary(t *testing.T) {
+	p := basePlan(t)
+	a := linuxArtifact(t, "ELF")
+	a.Paths["gambit"] = filepath.Join(t.TempDir(), "gone")
+
+	_, err := stageBinaries(p, []build.Artifact{a}, filepath.Join(t.TempDir(), "context"))
+	if err == nil || !strings.Contains(err.Error(), "staging") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// A layout path that is a file, not a directory, is refused before reading.
+func TestBuildPluginImagesRefusesALayoutThatIsAFile(t *testing.T) {
+	dist := t.TempDir()
+	out := filepath.Join(dist, imagesHookDir, "out")
+	p := imagesPlan(t, `cat > /dev/null
+touch `+filepath.Join(out, "x")+`
+echo '{"images":[{"suffix":"-a","layout":"x"}]}'`)
+
+	_, err := buildPluginImages(context.Background(), p, nil, dist)
+	if err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Errorf("err = %v", err)
+	}
+}

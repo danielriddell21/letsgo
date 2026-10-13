@@ -15,8 +15,9 @@ import (
 const imagesPin = "plugin images letsgo-docker v0.1.0 sha256:" +
 	"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
 
-// fakeDocker puts a docker on PATH ahead of anything real, answering
-// `docker buildx version` successfully or not.
+// fakeDocker names a docker in LETSGO_DOCKER, as a machine with docker
+// outside the system directories would, answering `docker buildx version`
+// successfully or not.
 func fakeDocker(t *testing.T, works bool) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -30,7 +31,7 @@ func fakeDocker(t *testing.T, works bool) {
 	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("LETSGO_DOCKER", filepath.Join(dir, "docker"))
 }
 
 // imagesRepo is a one-command module on GitHub pinning the images hook, with
@@ -275,5 +276,57 @@ func TestImageBlocksAreResolvedBesideTheReleaseImage(t *testing.T) {
 	}
 	if !reported {
 		t.Errorf("the block's image was not reported: %+v", p.Checks)
+	}
+}
+
+// A docker that is only on PATH is not found: PATH is whoever set it last.
+func TestImagesHookOverrideMustBeAbsolute(t *testing.T) {
+	fakeDocker(t, true)
+	t.Setenv("LETSGO_DOCKER", "docker")
+	failsWith(t, imagesRepo(t, "", ""), "must be an absolute path")
+}
+
+// An image left to the runner's platform, on a release that does not build
+// it, gets no staged binary; worth one warning. s390x is a platform no CI
+// runner is, so the runner's own is never among the release's targets.
+func TestImagesHookWarnsWhenTheRunnersPlatformIsNotBuilt(t *testing.T) {
+	fakeDocker(t, true)
+	r := newRepo(t)
+	r.git("remote", "add", "origin", "https://github.com/you/gambit.git")
+	r.write("go.mod", "module github.com/you/gambit\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/s390x\n"+imagesPin)
+	r.write(".letsgo/docker.mod", "image fixer (\n\tsuffix -fixer\n)\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+	for _, c := range imagesChecks(p) {
+		if c.Status == plan.Warn && strings.Contains(c.Detail, "this machine's") {
+			return
+		}
+	}
+	t.Errorf("no warning about the runner's platform in %+v", imagesChecks(p))
+}
+
+func TestImagesHookRefusesAConfigThatDoesNotParse(t *testing.T) {
+	fakeDocker(t, true)
+	p := imagesRepo(t, "", "image fixer (\n")
+	if p.OK() || p.ImagesHook != nil {
+		t.Errorf("a docker.mod that does not parse was accepted: %+v", imagesChecks(p))
+	}
+}
+
+func TestImageBlockWithABadBaseFails(t *testing.T) {
+	r := newRepo(t)
+	r.git("remote", "add", "origin", "https://github.com/you/gambit.git")
+	r.write("go.mod", "module github.com/you/gambit\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\nimage\n\nimage fixer (\n\tsuffix -fixer\n\tbase bad@sha256:nope\n)\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+	c := check(t, p, "image")
+	if c.Status != plan.Fail || !strings.Contains(c.Detail, "image fixer base") || c.Pos == nil {
+		t.Errorf("check = %+v", c)
 	}
 }

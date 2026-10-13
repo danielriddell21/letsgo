@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -15,6 +16,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/oci"
 	"github.com/danielriddell21/letsgo/internal/plugin"
+	"github.com/danielriddell21/letsgo/internal/safeexec"
 	pub "github.com/danielriddell21/letsgo/plugin"
 )
 
@@ -78,7 +80,7 @@ func (p *Plan) resolveImagesHook(ctx context.Context) {
 	}
 
 	if known, ok := plugin.Lookup(configured.Command); ok && len(known.Probe) > 0 {
-		if err := probe(ctx, known.Probe); err != nil {
+		if err := probe(ctx, known.Probe, known.ProbeEnv); err != nil {
 			p.addAt(pos, "images", Fail, "%s needs `%s` to work, and it does not here: %v",
 				configured.Command, strings.Join(known.Probe, " "), err)
 			return
@@ -210,16 +212,41 @@ func (p *Plan) imagesHookTarget(pos *Pos) *ImageTarget {
 }
 
 // probe checks that a tool a known plugin needs answers at all.
-func probe(ctx context.Context, command []string) error {
+//
+// The program is looked for where the plugin itself looks: an absolute path
+// in envVar, else the system directories. Probing anywhere else could pass a
+// plan the plugin then fails, or run a program nobody chose.
+func probe(ctx context.Context, command []string, envVar string) error {
+	bin, err := probeProgram(command[0], envVar)
+	if err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, command[0], command[1:]...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, bin, command[1:]...)
+	cmd.Env = safeexec.EnvWithFixedPath(os.Environ(), filepath.Dir(bin))
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if detail := strings.TrimSpace(string(out)); detail != "" {
 			return fmt.Errorf("%w: %s", err, detail)
 		}
-		return fmt.Errorf("%s: %w", command[0], err)
+		return fmt.Errorf("%s: %w", bin, err)
 	}
 	return nil
+}
+
+// probeProgram finds a probe's program without consulting PATH.
+func probeProgram(name, envVar string) (string, error) {
+	if envVar != "" {
+		if value := os.Getenv(envVar); value != "" {
+			return safeexec.Override(name, value, envVar)
+		}
+	}
+	bin, err := safeexec.LookIn(safeexec.SystemDirs(), safeexec.Exe(name))
+	if err != nil && envVar != "" {
+		return "", fmt.Errorf("%w; set %s to its absolute path", err, envVar)
+	}
+	return bin, err
 }
