@@ -8,6 +8,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/config"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
 	"github.com/danielriddell21/letsgo/internal/oci"
+	"github.com/danielriddell21/letsgo/internal/plugin"
 )
 
 // ImageTarget is where a release's container images go.
@@ -36,6 +37,26 @@ type ImageTarget struct {
 	// Platforms are the targets that get an image, which is the Linux subset
 	// of the build matrix: nothing else runs in a container.
 	Platforms []gobuild.Target
+
+	// Plugin says the release image comes from the images hook, so core
+	// builds none of its own. Extra images are still core's.
+	Plugin bool
+
+	// Extra are the `image <name> ( ... )` blocks: more images of the same
+	// binaries, pushed to the same repositories under suffixed tags.
+	Extra []ExtraImage
+}
+
+// ExtraImage is one more image of the release's binaries, set up its own way.
+type ExtraImage struct {
+	Name   string
+	Suffix string
+
+	// Base, Cmd and Expose are the block's own: nothing is inherited from
+	// the release image.
+	Base   oci.Reference
+	Cmd    []string
+	Expose []string
 }
 
 // Repos returns the repository each binary publishes to.
@@ -63,14 +84,12 @@ func (p *Plan) resolveImage(ctx context.Context) {
 
 	reference, source := p.Config.Image.Reference, config.FileName
 	if reference == "" {
-		if !p.HasRepo() {
+		var ok bool
+		if reference, ok = p.defaultImageReference(); !ok {
 			p.addAt(p.posOf("image"), "image", Fail,
 				"no 'origin' remote, so there is no default image name; write one after `image`")
 			return
 		}
-		// ghcr.io mirrors the repository it is released from, which is the
-		// one name nobody has to be told.
-		reference = "ghcr.io/" + p.Repo.Owner + "/" + p.Project
 		source = "the repository owner and project name"
 	}
 
@@ -88,11 +107,7 @@ func (p *Plan) resolveImage(ctx context.Context) {
 	target := &ImageTarget{
 		Registry: ref.Registry, APIHost: ref.APIHost(), Repository: ref.Repository,
 		Cmd: p.Config.Image.Cmd, Expose: p.Config.Image.Expose,
-	}
-	for _, t := range p.Targets {
-		if t.OS == "linux" {
-			target.Platforms = append(target.Platforms, t)
-		}
+		Platforms: p.linuxTargets(),
 	}
 	if len(target.Platforms) == 0 {
 		p.addAt(p.posOf("image"), "image", Fail, "an image was asked for but no linux target is built")
@@ -108,14 +123,100 @@ func (p *Plan) resolveImage(ctx context.Context) {
 		target.Base = parsed
 	}
 
+	if p.Config.Image.Plugin && !p.checkImagePlugin(target) {
+		return
+	}
+	if !p.resolveExtraImages(target) {
+		return
+	}
+
 	p.Image = target
 	p.note("image", ref.Registry+"/"+ref.Repository, source)
+	p.reportImages(ctx, reference, target)
+}
 
+// reportImages adds the image check for every image core builds, and for a
+// release image the images hook builds instead.
+func (p *Plan) reportImages(ctx context.Context, reference string, target *ImageTarget) {
+	if target.Plugin {
+		p.add("image", Pass, "%s: the release image comes from the images hook", reference)
+	} else {
+		p.reportBase(ctx, reference, target)
+	}
+	for _, extra := range target.Extra {
+		p.reportBase(ctx, fmt.Sprintf("%s (%s, tagged *%s)", reference, extra.Name, extra.Suffix),
+			&ImageTarget{Base: extra.Base, Platforms: target.Platforms})
+	}
+}
+
+// linuxTargets are the targets that get an image: nothing else runs in a
+// container.
+func (p *Plan) linuxTargets() []gobuild.Target {
+	var out []gobuild.Target
+	for _, t := range p.Targets {
+		if t.OS == "linux" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// reportBase is the image check for one image: a pass on scratch, or what
+// resolving its base said.
+func (p *Plan) reportBase(ctx context.Context, reference string, target *ImageTarget) {
 	if target.Base == (oci.Reference{}) {
 		p.add("image", Pass, "%s on scratch, for %d platform(s)", reference, len(target.Platforms))
 		return
 	}
 	p.checkBase(ctx, reference, target)
+}
+
+// checkImagePlugin settles `image plugin`: the images hook builds the
+// release image, so it must be pinned, and the settings only core's own
+// release image reads would be ignored, which is worth refusing rather than
+// letting someone believe they apply.
+func (p *Plan) checkImagePlugin(target *ImageTarget) bool {
+	if _, ok := p.Plugins[plugin.HookImages]; !ok {
+		p.addAt(p.posOf("image"), "image", Fail,
+			"image plugin says the release image comes from the images hook, but no plugin is pinned to it; "+
+				"pin one, such as letsgo-docker")
+		return false
+	}
+	cfg := p.Config.Image
+	if cfg.Base != "" || cfg.Cmd != nil || cfg.Expose != nil {
+		p.addAt(p.posOf("image"), "image", Fail,
+			"image plugin builds the release image elsewhere, so image base, cmd and expose would not apply; "+
+				"set them in the plugin's own config, or in an image block")
+		return false
+	}
+	target.Plugin = true
+	return true
+}
+
+// resolveExtraImages parses each image block's base.
+func (p *Plan) resolveExtraImages(target *ImageTarget) bool {
+	for _, extra := range p.Config.Image.Extra {
+		resolved := ExtraImage{Name: extra.Name, Suffix: extra.Suffix, Cmd: extra.Cmd, Expose: extra.Expose}
+		if extra.Base != "" {
+			parsed, err := oci.ParseReference(extra.Base)
+			if err != nil {
+				p.addAt(p.configPos(extra.Pos), "image", Fail, "image %s base: %v", extra.Name, err)
+				return false
+			}
+			resolved.Base = parsed
+		}
+		target.Extra = append(target.Extra, resolved)
+	}
+	return true
+}
+
+// defaultImageReference is the image name nobody has to be told: ghcr.io
+// mirrors the repository it is released from. There is none without one.
+func (p *Plan) defaultImageReference() (string, bool) {
+	if !p.HasRepo() {
+		return "", false
+	}
+	return "ghcr.io/" + p.Repo.Owner + "/" + p.Project, true
 }
 
 // checkBase resolves the base image while planning rather than while building.

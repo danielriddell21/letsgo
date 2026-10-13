@@ -65,6 +65,78 @@ func TestImageDirectiveRejectsRepeats(t *testing.T) {
 	}
 }
 
+// A named block is another image of the same binaries: its own base, cmd and
+// ports, and a suffix for its tags. It inherits nothing from the release
+// image, so an unset base means scratch rather than the release image's.
+func TestImageBlocks(t *testing.T) {
+	cfg := decode(t, `image ghcr.io/you/talos
+image base gcr.io/distroless/static
+image cmd serve
+
+image fixer (
+	suffix -fixer
+	cmd    fix --all
+	expose 8080
+)
+
+image debug (
+	suffix -debug
+	base   busybox:1.36
+)
+`)
+	if cfg.Image == nil || cfg.Image.Reference != "ghcr.io/you/talos" || cfg.Image.Plugin {
+		t.Fatalf("image = %+v", cfg.Image)
+	}
+	extra := cfg.Image.Extra
+	if len(extra) != 2 {
+		t.Fatalf("extra = %+v", extra)
+	}
+	fixer, debug := extra[0], extra[1]
+	if fixer.Name != "fixer" || fixer.Suffix != "-fixer" || fixer.Base != "" ||
+		strings.Join(fixer.Cmd, " ") != "fix --all" || strings.Join(fixer.Expose, ",") != "8080/tcp" {
+		t.Errorf("fixer = %+v", fixer)
+	}
+	if debug.Base != "busybox:1.36" || debug.Cmd != nil || debug.Pos.Line == 0 {
+		t.Errorf("debug = %+v", debug)
+	}
+}
+
+// A block alone still asks for images, so the release image is built too.
+func TestImageBlockAloneTurnsImagesOn(t *testing.T) {
+	cfg := decode(t, "image fixer (\n\tsuffix -fixer\n)\n")
+	if cfg.Image == nil || cfg.Image.Reference != "" || len(cfg.Image.Extra) != 1 {
+		t.Errorf("image = %+v", cfg.Image)
+	}
+}
+
+func TestImagePlugin(t *testing.T) {
+	cfg := decode(t, "image 123.dkr.ecr.eu-west-2.amazonaws.com/talos\nimage plugin\n")
+	if !cfg.Image.Plugin || cfg.Image.Reference != "123.dkr.ecr.eu-west-2.amazonaws.com/talos" {
+		t.Errorf("image = %+v", cfg.Image)
+	}
+}
+
+func TestImageBlocksReject(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"image fixer (\n\tcmd fix\n)\n", "needs a suffix"},
+		{"image fixer (\n\tsuffix -a\n\tsuffix -b\n)\n", "already set"},
+		{"image fixer (\n\tsuffix a/b\n)\n", "must be letters"},
+		{"image fixer (\n\tsuffix -a\n\ttarget fixer\n)\n", "is not one of them"},
+		{"image fixer (\n\tsuffix -a\n)\nimage fixer (\n\tsuffix -b\n)\n", "already defined"},
+		{"image a (\n\tsuffix -x\n)\nimage b (\n\tsuffix -x\n)\n", "share the suffix"},
+		{"image base (\n\tsuffix -x\n)\n", "cannot name"},
+		{"image plugin (\n\tsuffix -x\n)\n", "cannot name"},
+		{"image fixer (\n\tsuffix -x\n\tcmd\n)\n", ""},
+		{"image plugin\nimage plugin\n", "already set"},
+		{"image plugin extra\n", ""},
+	} {
+		_, err := Decode(parse(t, tc.in))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%q: err = %v, want one mentioning %q", tc.in, err, tc.want)
+		}
+	}
+}
+
 // No directive means no image: publishing a package to a registry is not
 // something to do to a repository that did not ask.
 func TestNoImageDirectiveMeansNoImage(t *testing.T) {

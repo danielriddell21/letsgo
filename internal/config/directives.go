@@ -26,7 +26,8 @@ var known = map[string]string{
 	"version": "version <symbol>, or version commit|date <symbol>",
 	"archive": "archive <file>... or an archive ( ... ) block",
 	"budget":  "budget <goos/goarch> <size>",
-	"image":   "image, image <reference>, image base <ref>, image cmd <arg>..., or image expose <port>...",
+	"image": "image, image <reference>, image base <ref>, image cmd <arg>..., image expose <port>..., " +
+		"image plugin, or an image <name> ( ... ) block",
 	"brew":    "brew <owner/tap-repo>, or brew caveats <text>",
 	"release": "release <key=value>...",
 	"disable": "disable <feature>...",
@@ -52,7 +53,7 @@ var docs = map[string]string{
 	"version": "Names the variables version metadata is injected into.",
 	"archive": "Extra files to include in each archive.",
 	"budget":  "Caps a target's binary size; over it fails the release.",
-	"image":   "Describes the container image a release publishes.",
+	"image":   "Describes the container images a release publishes.",
 	"brew":    "The Homebrew tap a formula is published to, or its caveats text.",
 	"release": "Sets a release option by key=value.",
 	"disable": "Turns off an optional feature by name.",
