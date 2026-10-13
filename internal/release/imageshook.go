@@ -28,7 +28,7 @@ const imagesHookDir = "images-hook"
 var suffixPattern = config.ImageSuffix
 
 // maxTag is the longest tag a registry accepts.
-const maxTag = 128
+const maxTag = oci.MaxTagLength
 
 // buildPluginImages asks the images hook for the images it builds, and
 // prepares each for pushing under the release's tags with its suffix.
@@ -221,7 +221,7 @@ func checkReleaseImage(p *plan.Plan, images []plugin.OutputImage) error {
 // checkReleaseImage has already allowed or refused.
 func checkSuffix(suffix string, seen map[string]bool, tags []string) error {
 	if suffix != "" && !suffixPattern.MatchString(suffix) {
-		return fmt.Errorf("suffix %q must be letters, digits, '.', '-' or '_'", suffix)
+		return fmt.Errorf("suffix %q %s", suffix, config.ImageSuffixRule)
 	}
 	if seen[suffix] {
 		return fmt.Errorf("suffix %q is already used by another image", suffix)

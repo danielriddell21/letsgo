@@ -197,6 +197,12 @@ func (p *Plan) checkImagePlugin(target *ImageTarget) bool {
 func (p *Plan) resolveExtraImages(target *ImageTarget) bool {
 	for _, extra := range p.Config.Image.Extra {
 		resolved := ExtraImage{Name: extra.Name, Suffix: extra.Suffix, Cmd: extra.Cmd, Expose: extra.Expose}
+		if tag, err := oci.Tag(p.Version); err == nil && len(tag+extra.Suffix) > oci.MaxTagLength {
+			p.addAt(p.configPos(extra.Pos), "image", Fail,
+				"image %s: its suffix makes the tag %s%s, longer than the %d characters a registry accepts",
+				extra.Name, tag, extra.Suffix, oci.MaxTagLength)
+			return false
+		}
 		if extra.Base != "" {
 			parsed, err := oci.ParseReference(extra.Base)
 			if err != nil {

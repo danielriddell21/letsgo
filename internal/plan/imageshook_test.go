@@ -330,3 +330,19 @@ func TestImageBlockWithABadBaseFails(t *testing.T) {
 		t.Errorf("check = %+v", c)
 	}
 }
+
+// A suffix that makes a tag too long fails the plan, not the push.
+func TestImageBlockWithATooLongSuffixFails(t *testing.T) {
+	r := newRepo(t)
+	r.git("remote", "add", "origin", "https://github.com/you/gambit.git")
+	r.write("go.mod", "module github.com/you/gambit\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/amd64\nimage\n\nimage fixer (\n\tsuffix -"+strings.Repeat("x", 125)+"\n)\n")
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+	c := check(t, p, "image")
+	if c.Status != plan.Fail || !strings.Contains(c.Detail, "128 characters") || c.Pos == nil {
+		t.Errorf("check = %+v", c)
+	}
+}

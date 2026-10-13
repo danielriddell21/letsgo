@@ -128,6 +128,8 @@ func TestBuildPluginImagesRefusesABadAnswer(t *testing.T) {
 	for _, tc := range []struct{ name, answer, want string }{
 		{"two release images", `{"images":[{"suffix":"","layout":"x"},{"suffix":"","layout":"x"}]}`, "only one"},
 		{"a suffix with a slash", `{"images":[{"suffix":"/fixer","layout":"x"}]}`, "suffix"},
+		{"a suffix spelling a prerelease", `{"images":[{"suffix":"-rc.1","layout":"x"}]}`, "another version's tag"},
+		{"a suffix spelling a patch", `{"images":[{"suffix":".4","layout":"x"}]}`, "another version's tag"},
 		{"a repeated suffix", `{"images":[{"suffix":"-a","layout":"x"},{"suffix":"-a","layout":"x"}]}`, "already used"},
 		{"a layout outside the output", `{"images":[{"suffix":"-a","layout":"` + outside + `"}]}`, "not inside"},
 		{"a layout escaping by ..", `{"images":[{"suffix":"-a","layout":"../context"}]}`, "not inside"},

@@ -7,8 +7,9 @@ import (
 	"github.com/danielriddell21/letsgo/internal/semver"
 )
 
-// maxTag is the length limit the distribution specification puts on a tag.
-const maxTag = 128
+// MaxTagLength is the length limit the distribution specification puts on a
+// tag.
+const MaxTagLength = 128
 
 // Tag converts a semantic version into a valid image tag.
 //
@@ -41,8 +42,8 @@ func validTag(tag string) error {
 	switch {
 	case tag == "":
 		return fmt.Errorf("it is empty")
-	case len(tag) > maxTag:
-		return fmt.Errorf("it is longer than %d characters", maxTag)
+	case len(tag) > MaxTagLength:
+		return fmt.Errorf("it is longer than %d characters", MaxTagLength)
 	}
 
 	if first := tag[0]; !alphanumeric(first) && first != '_' {

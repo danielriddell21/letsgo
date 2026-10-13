@@ -120,7 +120,12 @@ func TestImageBlocksReject(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{
 		{"image fixer (\n\tcmd fix\n)\n", "needs a suffix"},
 		{"image fixer (\n\tsuffix -a\n\tsuffix -b\n)\n", "already set"},
-		{"image fixer (\n\tsuffix a/b\n)\n", "must be letters"},
+		{"image fixer (\n\tsuffix a/b\n)\n", "must start with"},
+		{"image fixer (\n\tsuffix -rc.1\n)\n", "another version's tag"},
+		{"image fixer (\n\tsuffix .4\n)\n", "another version's tag"},
+		{"image fixer (\n\tsuffix fixer\n)\n", "must start with"},
+		{"image fixer (\n\tsuffix -1\n)\n", "must start with"},
+		{"image fixer (\n\tsuffix -beta.2\n)\n", "another version's tag"},
 		{"image fixer (\n\tsuffix -a\n\ttarget fixer\n)\n", "is not one of them"},
 		{"image fixer (\n\tsuffix -a\n)\nimage fixer (\n\tsuffix -b\n)\n", "already defined"},
 		{"image a (\n\tsuffix -x\n)\nimage b (\n\tsuffix -x\n)\n", "share the suffix"},
