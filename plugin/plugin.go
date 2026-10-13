@@ -36,10 +36,18 @@ const (
 	// in the manifest; it never changes a released byte, so verification has
 	// nothing to replay.
 	HookTapFiles Hook = "tap-files"
+
+	// HookImages asks for container images built some way core does not
+	// build them, from a Dockerfile most often. The plugin writes each one as
+	// an OCI image layout; core pushes it under the release's tags and
+	// records its digest. Unlike every other answer it is not replayable, so
+	// verification checks the published tag against the recorded digest and
+	// nothing more.
+	HookImages Hook = "images"
 )
 
 // Hooks is the closed set, in the order they run.
-var Hooks = []Hook{HookLDFlags, HookArchiveLayout, HookTapFiles}
+var Hooks = []Hook{HookLDFlags, HookArchiveLayout, HookTapFiles, HookImages}
 
 // Valid reports whether a hook is one letsgo knows.
 func (h Hook) Valid() bool {
@@ -181,6 +189,59 @@ type TapFile struct {
 	Path string `json:"path"`
 
 	Content string `json:"content"`
+}
+
+// ImagesInput is what the images hook is told.
+type ImagesInput struct {
+	Project string `json:"project"`
+	Version string `json:"version"`
+	Tag     string `json:"tag"`
+	Commit  string `json:"commit"`
+
+	// Date is the commit's timestamp, RFC 3339, for an image that wants a
+	// creation time that is not the clock.
+	Date string `json:"date"`
+
+	// Context is a directory holding the release's Linux binaries, as
+	// <os>_<arch>/<binary>: the bytes the release published, for a
+	// Dockerfile to copy rather than compile again.
+	Context string `json:"context"`
+
+	// Output is the directory to write image layouts into. Core reads
+	// nothing from outside it.
+	Output string `json:"output"`
+
+	Binaries []ImageBinary `json:"binaries"`
+
+	// ConfigDir is where this plugin's own config lives, ".letsgo" beside
+	// letsgo.mod, so a plugin never has to guess where it runs from.
+	ConfigDir string `json:"config_dir"`
+}
+
+// ImageBinary is one binary staged in the build context.
+type ImageBinary struct {
+	Name string `json:"name"`
+	OS   string `json:"os"`
+	Arch string `json:"arch"`
+
+	// Path is relative to the input's Context.
+	Path string `json:"path"`
+}
+
+// ImagesOutput is what the hook answers: the images it built.
+type ImagesOutput struct {
+	Images []OutputImage `json:"images"`
+}
+
+// OutputImage is one image the plugin built.
+type OutputImage struct {
+	// Suffix is appended to every tag the release pushes, so "-fixer" puts
+	// this image at 1.2.3-fixer, latest-fixer and so on. It is what tells the
+	// image apart from the release's own, which has none.
+	Suffix string `json:"suffix"`
+
+	// Layout is an OCI image layout directory under the input's Output.
+	Layout string `json:"layout"`
 }
 
 // Main runs a hook and exits: the whole of a plugin's main function.

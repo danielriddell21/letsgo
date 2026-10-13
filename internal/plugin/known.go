@@ -12,6 +12,11 @@ type KnownPlugin struct {
 	Command string
 	Hook    Hook
 	Summary string
+
+	// Probe is a command that must succeed on this machine for the plugin to
+	// work, run while planning so a missing tool fails before anything is
+	// built. Empty for a plugin that needs nothing beyond itself.
+	Probe []string
 }
 
 // Known is the catalogue of first-party plugins.
@@ -35,6 +40,12 @@ var Known = []KnownPlugin{
 		Command: "letsgo-cask",
 		Hook:    HookTapFiles,
 		Summary: "writes a Homebrew cask alongside the formula",
+	},
+	{
+		Command: "letsgo-docker",
+		Hook:    HookImages,
+		Summary: "builds container images from Dockerfiles, pushed under the release's tags",
+		Probe:   []string{"docker", "buildx", "version"},
 	},
 }
 

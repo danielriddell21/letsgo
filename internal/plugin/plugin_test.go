@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/pluginstore"
@@ -206,7 +207,8 @@ func putInStore(t *testing.T, storeDir, digest, name, src string) {
 }
 
 func TestHooksAreAClosedSet(t *testing.T) {
-	if !plugin.HookLDFlags.Valid() || !plugin.HookArchiveLayout.Valid() || !plugin.HookTapFiles.Valid() {
+	if !plugin.HookLDFlags.Valid() || !plugin.HookArchiveLayout.Valid() || !plugin.HookTapFiles.Valid() ||
+		!plugin.HookImages.Valid() {
 		t.Error("a documented hook is not valid")
 	}
 	if plugin.Hook("exec").Valid() {
@@ -236,6 +238,52 @@ echo '{"files":[]}'`)
 		t.TempDir(), "", plugin.TapFilesInput{}, &out)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The images hook builds for core to push, so neither the forge's token nor
+// the registry's credentials belong in its environment.
+func TestRunStripsCredentialsFromTheImagesHookEnv(t *testing.T) {
+	noStore(t)
+	dir, digest := fake(t, `
+if [ -n "$GITHUB_TOKEN$GH_TOKEN$LETSGO_TAP_TOKEN$LETSGO_RELEASE_TOKEN$REGISTRY_PASSWORD$DOCKER_PASSWORD" ]; then
+  echo "a credential reached the plugin" >&2
+  exit 1
+fi
+echo '{"images":[]}'`)
+	t.Setenv("PATH", dir)
+	for _, name := range []string{
+		"GITHUB_TOKEN", "GH_TOKEN", "LETSGO_TAP_TOKEN", "LETSGO_RELEASE_TOKEN",
+		"REGISTRY_PASSWORD", "DOCKER_PASSWORD",
+	} {
+		t.Setenv(name, "secret")
+	}
+
+	var out plugin.ImagesOutput
+	err := plugin.Run(context.Background(),
+		plugin.Plugin{Hook: plugin.HookImages, Command: "letsgo-fake", Digest: digest},
+		t.TempDir(), "", plugin.ImagesInput{}, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// RunWithin's limit is the one that applies: a plugin outliving it is killed
+// and the run fails rather than hanging the release.
+func TestRunWithinStopsAPluginAtItsLimit(t *testing.T) {
+	noStore(t)
+	dir, digest := fake(t, `exec sleep 5`)
+	t.Setenv("PATH", dir)
+
+	start := time.Now()
+	err := plugin.RunWithin(context.Background(), 100*time.Millisecond,
+		plugin.Plugin{Hook: plugin.HookImages, Command: "letsgo-fake", Digest: digest},
+		t.TempDir(), "", plugin.ImagesInput{}, &plugin.ImagesOutput{})
+	if err == nil {
+		t.Fatal("a plugin past its limit succeeded")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("the run took %s; the limit was not applied", elapsed)
 	}
 }
 
