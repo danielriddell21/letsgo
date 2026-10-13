@@ -2,13 +2,17 @@ package oci
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 )
 
@@ -127,7 +131,7 @@ func (l *Layout) collectManifest(d Descriptor) error {
 		return err
 	}
 	for _, blob := range append([]Descriptor{m.Config}, m.Layers...) {
-		if err := l.present(blob); err != nil {
+		if err := l.verify(blob); err != nil {
 			return err
 		}
 	}
@@ -144,8 +148,27 @@ func (l *Layout) collectManifest(d Descriptor) error {
 			return nil
 		}
 	}
+	d.Annotations = withoutLocalNames(d.Annotations)
 	l.Manifests = append(l.Manifests, d)
 	return nil
+}
+
+// localNames are annotations a builder puts on a layout's descriptors to name
+// the image on the machine that built it. They mean nothing in a registry,
+// and would publish the builder's own naming in the release's index.
+var localNames = []string{"org.opencontainers.image.ref.name", "io.containerd.image.name"}
+
+func withoutLocalNames(annotations map[string]string) map[string]string {
+	out := make(map[string]string, len(annotations))
+	for k, v := range annotations {
+		if !slices.Contains(localNames, k) {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (l *Layout) manifest(d Descriptor) (Manifest, error) {
@@ -183,35 +206,65 @@ func (l *Layout) path(digest Digest) (string, error) {
 	return filepath.Join(l.Dir, "blobs", "sha256", digest.Hex()), nil
 }
 
-// present checks a blob is there, at the size its descriptor claims, without
-// reading it: layers are the large part of an image, and they are read once,
-// when they are pushed.
-func (l *Layout) present(d Descriptor) error {
-	path, err := l.path(d.Digest)
+// verify checks a blob is there, at the size and digest its descriptor
+// claims, before anything is pushed: a corrupt layer found halfway through a
+// push would leave the release half published. The blob is hashed as it is
+// read, so a layer of any size costs no more memory than a buffer.
+func (l *Layout) verify(d Descriptor) error {
+	f, err := l.open(d.Digest)
 	if err != nil {
 		return err
 	}
-	info, err := os.Stat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("oci: %s is missing blob %s", l.Dir, d.Digest.Short())
-	}
+	defer func() { _ = f.Close() }() // read-only: a close error loses nothing
+
+	h := sha256.New()
+	n, err := io.Copy(h, f)
 	if err != nil {
-		return fmt.Errorf("oci: %w", err)
+		return fmt.Errorf("oci: %s: blob %s: %w", l.Dir, d.Digest.Short(), err)
 	}
-	if info.Size() != d.Size {
+	if n != d.Size {
 		return fmt.Errorf("oci: %s: blob %s is %d bytes, not the %d its descriptor says",
-			l.Dir, d.Digest.Short(), info.Size(), d.Size)
+			l.Dir, d.Digest.Short(), n, d.Size)
+	}
+	if got := Digest("sha256:" + hex.EncodeToString(h.Sum(nil))); got != d.Digest {
+		return fmt.Errorf("oci: %s: blob %s holds %s", l.Dir, d.Digest.Short(), got.Short())
 	}
 	return nil
 }
 
+// open opens a blob, refusing anything but a regular file: a symlink could
+// point anywhere on this machine, and a FIFO or device would hang the read.
+func (l *Layout) open(digest Digest) (*os.File, error) {
+	path, err := l.path(digest)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("oci: %s is missing blob %s", l.Dir, digest.Short())
+	}
+	if err != nil {
+		return nil, fmt.Errorf("oci: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("oci: %s: blob %s is not a regular file", l.Dir, digest.Short())
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("oci: %w", err)
+	}
+	return f, nil
+}
+
 // Blob reads one blob and checks it is what its digest says.
 func (l *Layout) Blob(digest Digest) (Blob, error) {
-	path, err := l.path(digest)
+	f, err := l.open(digest)
 	if err != nil {
 		return Blob{}, err
 	}
-	content, err := os.ReadFile(path)
+	defer func() { _ = f.Close() }() // read-only: a close error loses nothing
+
+	content, err := io.ReadAll(f)
 	if err != nil {
 		return Blob{}, fmt.Errorf("oci: %s: blob %s: %w", l.Dir, digest.Short(), err)
 	}

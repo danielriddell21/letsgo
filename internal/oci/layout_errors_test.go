@@ -119,6 +119,38 @@ func TestLoadLayoutRefusesWhatIsNotAnImage(t *testing.T) {
 				SchemaVersion: 2, MediaType: oci.MediaTypeManifest, Config: cfg, Layers: []oci.Descriptor{layer},
 			}))
 		}, "bytes, not the"},
+		{"a layer of the right size whose bytes are wrong", func(l rawLayout) {
+			manifest := l.image(linuxConfig)
+			layer := oci.DigestOf([]byte("a layer"))
+			l.file(filepath.Join("blobs", "sha256", layer.Hex()), "b layer")
+			l.index(manifest)
+		}, "holds"},
+		{"a blob that is a symlink", func(l rawLayout) {
+			manifest := l.image(linuxConfig)
+			layer := filepath.Join(l.dir, "blobs", "sha256", oci.DigestOf([]byte("a layer")).Hex())
+			outside := filepath.Join(l.t.TempDir(), "elsewhere")
+			if err := os.WriteFile(outside, []byte("a layer"), 0o600); err != nil {
+				l.t.Fatal(err)
+			}
+			if err := os.Remove(layer); err != nil {
+				l.t.Fatal(err)
+			}
+			if err := os.Symlink(outside, layer); err != nil {
+				l.t.Fatal(err)
+			}
+			l.index(manifest)
+		}, "not a regular file"},
+		{"a blob that is a directory", func(l rawLayout) {
+			manifest := l.image(linuxConfig)
+			layer := filepath.Join(l.dir, "blobs", "sha256", oci.DigestOf([]byte("a layer")).Hex())
+			if err := os.Remove(layer); err != nil {
+				l.t.Fatal(err)
+			}
+			if err := os.Mkdir(layer, 0o750); err != nil {
+				l.t.Fatal(err)
+			}
+			l.index(manifest)
+		}, "not a regular file"},
 		{"a blob that is not what its digest says", func(l rawLayout) {
 			manifest := l.image(linuxConfig)
 			l.file(filepath.Join("blobs", "sha256", manifest.Digest.Hex()), `{"tampered":true}`)
@@ -173,5 +205,39 @@ func TestPushLayoutRefusesAnIncompletePush(t *testing.T) {
 		if _, err := oci.PushLayout(context.Background(), o); err == nil {
 			t.Errorf("%s: PushLayout went ahead", name)
 		}
+	}
+}
+
+// The name a builder gave the image on its own machine stays there; what a
+// descriptor says about attestations is kept.
+func TestLoadLayoutDropsBuilderLocalNames(t *testing.T) {
+	l := newRawLayout(t)
+	image := l.image(`{"os":"linux","architecture":"amd64"}`)
+	image.Annotations = map[string]string{
+		"org.opencontainers.image.ref.name": "latest",
+		"io.containerd.image.name":          "docker.io/library/fixer:latest",
+		"vnd.docker.reference.type":         "attestation-manifest",
+	}
+	l.index(image)
+
+	layout, err := oci.LoadLayout(l.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := layout.Manifests[0].Annotations
+	if len(got) != 1 || got["vnd.docker.reference.type"] != "attestation-manifest" {
+		t.Errorf("annotations = %v", got)
+	}
+
+	bare := newRawLayout(t)
+	named := bare.image(`{"os":"linux","architecture":"amd64"}`)
+	named.Annotations = map[string]string{"org.opencontainers.image.ref.name": "latest"}
+	bare.index(named)
+	layout, err = oci.LoadLayout(bare.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.Manifests[0].Annotations != nil {
+		t.Errorf("annotations = %v, want none", layout.Manifests[0].Annotations)
 	}
 }
