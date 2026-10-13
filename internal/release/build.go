@@ -124,6 +124,11 @@ func Build(ctx context.Context, o BuildOptions) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	pluginImages, err := buildPluginImages(ctx, p, artifacts, dir)
+	if err != nil {
+		return nil, err
+	}
+	images = append(images, pluginImages...)
 
 	tapFiles, err := applyTapFilesPlugin(ctx, p, artifacts, info)
 	if err != nil {

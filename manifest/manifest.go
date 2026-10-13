@@ -159,6 +159,12 @@ type Image struct {
 	// Base is the base image, pinned to the digest that was actually used
 	// rather than the tag that was written down.
 	Base string `json:"base,omitempty"`
+
+	// Source is "plugin" for an image an images-hook plugin built, from a
+	// Dockerfile most often, and empty for one letsgo assembled itself. A
+	// plugin's image cannot be rebuilt to compare; verification checks only
+	// that its tags still point at Digest.
+	Source string `json:"source,omitempty"`
 }
 
 // APIChange is one difference in the exported API.

@@ -162,3 +162,54 @@ func TestObserveImagesSaysWhatPushingWouldChange(t *testing.T) {
 		t.Errorf("after pushing: %+v, want nothing to change", after)
 	}
 }
+
+// A plugin's image is pushed beside core's, from its layout, with the same
+// floating-tag rule: latest-fixer moves only forward, judged by the version
+// the release's own index carries.
+func TestPushImagesPushesAPluginLayoutBesideCoresImage(t *testing.T) {
+	r := newRegistryRig(t, "1.2.3")
+
+	dir := t.TempDir()
+	images := ocitest.WriteLayout(t, dir, ocitest.LayoutOptions{
+		Platforms: []oci.Platform{{OS: "linux", Architecture: "amd64"}}, Attest: true,
+	})
+	layout, err := oci.LoadLayout(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := layout.Index(map[string]string{"org.opencontainers.image.version": "1.2.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixer := release.ImageBuild{
+		Registry: "registry.test", APIHost: "registry.test", Repository: "you/tool",
+		Version: "1.2.3", Tags: []string{"1.2.3-fixer"}, Floating: []string{"latest-fixer"},
+		Layout: layout, Index: index, Source: release.SourcePlugin,
+	}
+
+	if err := pushImages(context.Background(), []release.ImageBuild{r.build, fixer}, r.registryAt, nil); err != nil {
+		t.Fatal(err)
+	}
+	for tag, want := range map[string]oci.Digest{
+		"1.2.3": r.build.Index.Digest, "latest": r.build.Index.Digest,
+		"1.2.3-fixer": index.Digest, "latest-fixer": index.Digest,
+	} {
+		got, ok := r.published(tag)
+		if !ok || oci.DigestOf(got) != want {
+			t.Errorf("%s: published %v, want %s", tag, ok, want.Short())
+		}
+	}
+	if _, ok := r.published(string(images[0])); !ok {
+		t.Error("the plugin image's manifest was not pushed by digest")
+	}
+
+	// An older release's plugin image leaves latest-fixer where it is.
+	older := fixer
+	older.Version, older.Tags = "1.2.2", []string{"1.2.2-fixer"}
+	if err := pushImages(context.Background(), []release.ImageBuild{older}, r.registryAt, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := r.published("latest-fixer"); oci.DigestOf(got) != index.Digest {
+		t.Error("an older release moved latest-fixer back")
+	}
+}
