@@ -12,10 +12,14 @@ package install
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
 	"text/template"
+
+	"github.com/danielriddell21/letsgo/internal/pgpwords"
+	"github.com/danielriddell21/letsgo/internal/randomart"
 )
 
 // FileName is the installer's published name.
@@ -29,16 +33,43 @@ type Target struct {
 	SHA256  string
 }
 
+// File is one published file the script fetches and checks by digest.
+type File struct {
+	Name   string
+	SHA256 string
+}
+
 // Options describe the release to install.
 type Options struct {
 	Project string
 	Version string
+
+	// Tag is the release tag, recorded beside each binary and used to title
+	// the fingerprint. Empty means "v" + Version.
+	Tag string
 
 	// BaseURL is the directory the archives are published under, without a
 	// trailing slash.
 	BaseURL string
 
 	Targets []Target
+
+	// Manifest is the release's letsgo.json. When it is set the script
+	// fetches it and checks it against this digest before anything else, so
+	// what the fingerprint is drawn from has been verified like an archive.
+	Manifest File
+
+	// Fingerprint ends a successful install with the manifest's randomart
+	// and PGP words: the same block the release page shows and a passing
+	// `letsgo verify` prints. It needs Manifest.
+	Fingerprint bool
+}
+
+// data is what the template renders: the options, plus the fingerprint drawn
+// here rather than in shell.
+type data struct {
+	Options
+	Art string
 }
 
 // Script renders the installer.
@@ -61,6 +92,16 @@ func Script(o Options) ([]byte, error) {
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("install: no targets a shell script can install")
 	}
+	if o.Tag == "" {
+		o.Tag = "v" + o.Version
+	}
+	var art string
+	if o.Fingerprint {
+		var err error
+		if art, err = fingerprint(o.Manifest.SHA256, o.Tag); err != nil {
+			return nil, err
+		}
+	}
 	sort.Slice(targets, func(i, j int) bool {
 		if targets[i].OS != targets[j].OS {
 			return targets[i].OS < targets[j].OS
@@ -75,10 +116,21 @@ func Script(o Options) ([]byte, error) {
 	o.BaseURL = strings.TrimSuffix(o.BaseURL, "/")
 
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, o); err != nil {
+	if err := tmpl.Execute(&buf, data{Options: o, Art: art}); err != nil {
 		return nil, fmt.Errorf("install: rendering %s: %w", FileName, err)
 	}
 	return buf.Bytes(), nil
+}
+
+// fingerprint draws the manifest digest the way the release page does: the
+// randomart, the digest, then the PGP words (ADR-0014).
+func fingerprint(manifestSHA256, tag string) (string, error) {
+	sum, err := hex.DecodeString(manifestSHA256)
+	if err != nil || len(sum) == 0 {
+		return "", fmt.Errorf("install: a fingerprint needs the manifest's digest, got %q", manifestSHA256)
+	}
+	return fmt.Sprintf("%s\nsha256:%s\n\n%s",
+		randomart.Render(sum, randomart.Title(tag)), manifestSHA256, pgpwords.Rows(pgpwords.Encode(sum))), nil
 }
 
 // Platforms lists the os/arch pairs the script supports, for reporting.
@@ -106,29 +158,36 @@ var tmpl = template.Must(template.New("install.sh").Parse(`#!/bin/sh
 # Nothing downloaded by this script is trusted before it has been checked
 # against them, so a compromised release page cannot substitute an archive.
 #
-# usage: install.sh [-b <dir>]
+# usage: install.sh [-n] [-b <dir>]
 #   -b   where to put the binaries (default: ./bin, or $BINDIR)
+#   -n   dry run: show what would be installed, and install nothing
 
 set -eu
 
 PROJECT='{{.Project}}'
 VERSION='{{.Version}}'
+TAG='{{.Tag}}'
 BASE='{{.BaseURL}}'
+MANIFEST='{{.Manifest.Name}}'
+MANIFEST_SHA256='{{.Manifest.SHA256}}'
 
 # os arch archive sha256
 ARCHIVES='{{range .Targets}}
 {{.OS}} {{.Arch}} {{.Archive}} {{.SHA256}}{{end}}'
 
 usage() {
-	echo "usage: install.sh [-b <dir>]"
+	echo "usage: install.sh [-n] [-b <dir>]"
 	echo "  installs $PROJECT $VERSION, verifying each archive against a recorded digest"
 	echo "  -b   where to put the binaries (default: ./bin, or \$BINDIR)"
+	echo "  -n   dry run: show what would be installed, and install nothing"
 }
 
 BINDIR="${BINDIR:-./bin}"
-while getopts 'b:h' opt; do
+DRYRUN=0
+while getopts 'b:nh' opt; do
 	case "$opt" in
 		b) BINDIR="$OPTARG" ;;
+		n) DRYRUN=1 ;;
 		h) usage; exit 0 ;;
 		*) usage >&2; exit 2 ;;
 	esac
@@ -172,26 +231,84 @@ else
 	fail 'neither sha256sum nor shasum is installed, so nothing could be verified'
 fi
 
+# check fails unless file $1, published as $2, has the digest $3.
+check() {
+	got=$(digest "$1")
+	if [ "$got" != "$3" ]; then
+		fail "$2 does not match its recorded digest
+  expected $3
+  got      $got"
+	fi
+}
+
+# record writes what was installed beside the binary, so that letsgo update
+# and letsgo doctor can later tell how it got there and whether it is still
+# the binary that was checked. A record that cannot be written costs nothing
+# but that, so it does not fail the install.
+record() {
+	cat > "$BINDIR/.$1.install.json" <<EOF || echo "install: could not write $BINDIR/.$1.install.json" >&2
+{
+  "schema": 1,
+  "via": "install.sh",
+  "project": "$PROJECT",
+  "version": "$VERSION",
+  "tag": "$TAG",
+  "manifest_sha256": "$MANIFEST_SHA256",
+  "archive": "$2",
+  "archive_sha256": "$3",
+  "binary": "$1",
+  "binary_sha256": "$(digest "$BINDIR/$1")"
+}
+EOF
+}
+{{- if .Art}}
+
+# The release's fingerprint, drawn from the manifest digest above. It is only
+# ever printed after that manifest has been checked, so it cannot vouch for
+# anything that was not.
+fingerprint() {
+	cat <<'FINGERPRINT'
+{{.Art}}FINGERPRINT
+}
+{{- end}}
+
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
-mkdir -p "$tmp/unpacked"
+
+# The manifest is checked first: it is small, and a dry run needs it for the
+# fingerprint without downloading any archive.
+if [ -n "$MANIFEST" ]; then
+	fetch "$BASE/$MANIFEST" "$tmp/$MANIFEST" || fail "could not download $MANIFEST"
+	check "$tmp/$MANIFEST" "$MANIFEST" "$MANIFEST_SHA256"
+	echo "install: $MANIFEST matches its recorded digest"
+fi
+
+if [ "$DRYRUN" = 1 ]; then
+	echo "install: would install $PROJECT $VERSION for $os/$arch into $BINDIR from:"
+	echo "$matches" | while read -r archive want; do
+		echo "  $BASE/$archive"
+		echo "    sha256 $want"
+	done
+{{- if .Art}}
+	echo
+	fingerprint
+{{- end}}
+	echo "install: dry run; nothing was installed"
+	exit 0
+fi
 
 # Read from a file rather than a pipe: a pipeline runs the loop in a subshell,
 # where a failed verification would exit that subshell and not this script.
 echo "$matches" > "$tmp/matches"
 
+# Every archive is checked before any binary is installed, and each unpacks
+# into its own directory so the record can name the archive it came from.
 while read -r archive want; do
 	echo "install: downloading $archive"
 	fetch "$BASE/$archive" "$tmp/$archive" || fail "could not download $archive"
-
-	got=$(digest "$tmp/$archive")
-	if [ "$got" != "$want" ]; then
-		fail "$archive does not match its recorded digest
-  expected $want
-  got      $got"
-	fi
-
-	tar -xzf "$tmp/$archive" -C "$tmp/unpacked" || fail "could not extract $archive"
+	check "$tmp/$archive" "$archive" "$want"
+	mkdir -p "$tmp/unpacked/$archive"
+	tar -xzf "$tmp/$archive" -C "$tmp/unpacked/$archive" || fail "could not extract $archive"
 done < "$tmp/matches"
 
 mkdir -p "$BINDIR"
@@ -199,15 +316,23 @@ mkdir -p "$BINDIR"
 # The archives hold the binary at the top level alongside documentation, so
 # anything executable that is not a directory is a binary to install.
 installed=0
-for file in "$tmp"/unpacked/*; do
-	[ -f "$file" ] && [ -x "$file" ] || continue
-	name=$(basename "$file")
-	mv "$file" "$BINDIR/$name"
-	chmod +x "$BINDIR/$name"
-	echo "install: $BINDIR/$name"
-	installed=$((installed + 1))
-done
+while read -r archive want; do
+	for file in "$tmp/unpacked/$archive"/*; do
+		[ -f "$file" ] && [ -x "$file" ] || continue
+		name=$(basename "$file")
+		mv "$file" "$BINDIR/$name"
+		chmod +x "$BINDIR/$name"
+		record "$name" "$archive" "$want"
+		echo "install: $BINDIR/$name"
+		installed=$((installed + 1))
+	done
+done < "$tmp/matches"
 [ "$installed" -gt 0 ] || fail 'the archive contained no executable'
 
 echo "install: $PROJECT $VERSION installed to $BINDIR"
+{{- if .Art}}
+echo
+fingerprint
+echo "install: compare this with the release page, or with 'letsgo verify $TAG' on another machine"
+{{- end}}
 `))

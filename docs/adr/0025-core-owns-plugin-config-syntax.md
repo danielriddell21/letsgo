@@ -60,4 +60,5 @@ working directory, so every Plugin test that touches config calls
 - **A `repo_root` field on every hook input.** Rejected: it changes the wire
   contract of three hooks, to carry a value `ConfigDir` already implies.
 - **Removing `ReadConfig` now.** Rejected: it breaks the public API without
-  a breaking release.
+  a breaking release. It was removed in v1.0.0, the next one
+  ([ADR-0027](0027-v1-compatibility-promise.md)).

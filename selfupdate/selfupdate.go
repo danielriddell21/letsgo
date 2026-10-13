@@ -119,8 +119,10 @@ type Update struct {
 	// Binary is the executable's name inside the archive.
 	Binary string
 
-	downloadURL string
-	options     Options
+	downloadURL    string
+	manifestSHA256 string
+	project        string
+	options        Options
 }
 
 // Check asks whether a newer release exists.
@@ -146,7 +148,7 @@ func Check(ctx context.Context, o Options) (*Update, error) {
 		return nil, nil
 	}
 
-	m, err := fetchManifest(ctx, o, release)
+	m, manifestSum, err := fetchManifest(ctx, o, release)
 	if err != nil {
 		return nil, err
 	}
@@ -167,16 +169,18 @@ func Check(ctx context.Context, o Options) (*Update, error) {
 	}
 
 	return &Update{
-		Version:      m.Version,
-		Tag:          release.Tag,
-		Notes:        release.Body,
-		URL:          release.URL,
-		Archive:      artifact.Name,
-		SHA256:       artifact.SHA256,
-		BinarySHA256: artifact.BinarySHA256,
-		Binary:       binaryName(artifact, m.Project, o.OS),
-		downloadURL:  asset.URL,
-		options:      o,
+		Version:        m.Version,
+		Tag:            release.Tag,
+		Notes:          release.Body,
+		URL:            release.URL,
+		Archive:        artifact.Name,
+		SHA256:         artifact.SHA256,
+		BinarySHA256:   artifact.BinarySHA256,
+		Binary:         binaryName(artifact, m.Project, o.OS),
+		downloadURL:    asset.URL,
+		manifestSHA256: manifestSum,
+		project:        m.Project,
+		options:        o,
 	}, nil
 }
 
@@ -370,16 +374,17 @@ func channelMatch(v semver.Version, channel string) bool {
 	return name == channel
 }
 
-func fetchManifest(ctx context.Context, o Options, r *releases.Published) (*manifest.Manifest, error) {
-	m, _, err := releases.Manifest(ctx, &source{o: o}, r)
+// fetchManifest returns the release's manifest and the digest of its bytes.
+func fetchManifest(ctx context.Context, o Options, r *releases.Published) (*manifest.Manifest, string, error) {
+	m, raw, err := releases.Manifest(ctx, &source{o: o}, r)
 	if releases.IsNoManifest(err) {
-		return nil, fmt.Errorf(
+		return nil, "", fmt.Errorf(
 			"selfupdate: release %s has no %s, so there is nothing describing what to download\n"+
 				"  only releases published by letsgo can be self-updated",
 			r.Tag, manifest.FileName)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("selfupdate: %w", err)
+		return nil, "", fmt.Errorf("selfupdate: %w", err)
 	}
-	return m, nil
+	return m, digest(raw), nil
 }

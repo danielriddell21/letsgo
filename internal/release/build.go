@@ -171,7 +171,7 @@ func writeMetadata(
 		return nil, err
 	}
 
-	installer, installerSum, err := writeInstaller(p, artifacts, dir)
+	installer, installerSum, err := writeInstaller(p, artifacts, dir, manifestSum)
 	if err != nil {
 		return nil, err
 	}
