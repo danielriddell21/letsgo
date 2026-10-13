@@ -65,13 +65,29 @@ func fmtStdin() error {
 // formatConfig parses and decodes data before formatting it, so formatting a
 // file that cannot be decoded doesn't tidy something meaningless into
 // something meaningless and well-indented.
+//
+// Only letsgo.mod and the global config.mod are decoded, each against its
+// own directives. Any other file is a Plugin config, such as
+// .letsgo/docker.mod: it shares the grammar but its directives are the
+// Plugin's, so it is parsed and formatted and nothing more, as the editor
+// support already does.
 func formatConfig(name string, data []byte) ([]byte, error) {
 	file, err := modsyntax.Parse(name, data)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := config.Decode(file); err != nil {
+	switch filepath.Base(name) {
+	case config.FileName:
+		_, err = config.Decode(file)
+	case globalConfigName:
+		_, err = config.DecodeGlobal(file)
+	}
+	if err != nil {
 		return nil, err
 	}
 	return file.Format(), nil
 }
+
+// globalConfigName is the machine's own config file, which has directives of
+// its own.
+const globalConfigName = "config.mod"
