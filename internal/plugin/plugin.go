@@ -121,10 +121,17 @@ func RunWithin(ctx context.Context, timeout time.Duration, p Plugin, dir, plugin
 	cmd.Env = os.Environ()
 	switch p.Hook {
 	case HookTapFiles:
-		cmd.Env = withoutEnv(cmd.Env, forgeTokens...)
+		cmd.Env = withoutEnv(withoutEnv(cmd.Env, forgeTokens...), ciTokens...)
 	case HookImages:
-		cmd.Env = withoutEnv(withoutEnv(cmd.Env, forgeTokens...), registryCredentials...)
+		cmd.Env = withoutEnv(withoutEnv(withoutEnv(cmd.Env, forgeTokens...), ciTokens...), registryCredentials...)
 	}
+
+	// A plugin may start programs of its own: the images hook runs a whole
+	// build. Run in its own process group, a timeout stops all of it rather
+	// than the plugin alone, and WaitDelay stops the wait on a child that
+	// still holds stdout open.
+	inOwnGroup(cmd)
+	cmd.WaitDelay = waitDelay
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -144,6 +151,14 @@ func RunWithin(ctx context.Context, timeout time.Duration, p Plugin, dir, plugin
 
 // forgeTokens can write to the forge and the tap.
 var forgeTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "LETSGO_TAP_TOKEN", "LETSGO_RELEASE_TOKEN"}
+
+// ciTokens let a GitHub Actions job mint credentials of its own: an OIDC
+// token for any audience the workflow's id-token permission allows, and the
+// runtime token for the Actions cache and artifacts.
+var ciTokens = []string{"ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_RUNTIME_TOKEN"}
+
+// waitDelay is how long a run waits for a stopped plugin's output to close.
+const waitDelay = 10 * time.Second
 
 // registryCredentials are the ones core pushes a non-ghcr image with.
 var registryCredentials = []string{"REGISTRY_USERNAME", "REGISTRY_PASSWORD", "DOCKER_USERNAME", "DOCKER_PASSWORD"}
