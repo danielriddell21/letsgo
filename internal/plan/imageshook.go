@@ -64,6 +64,7 @@ func (p *Plan) resolveImagesHook(ctx context.Context) {
 	cfg, err := pub.LoadConfig(filepath.Join(p.RootDir, pluginConfigDir), plugin.ShortName(configured.Command))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		p.warnRunnerPlatform(nil)
 	case err != nil:
 		p.addAt(pos, "images", Fail, "%v", err)
 		return
@@ -135,14 +136,27 @@ func (p *Plan) readImagesConfig(cfg *pub.Config, hook *ImagesHook) bool {
 		}
 	}
 
-	// An image with no platform builds for the runner's own. Said once, and
-	// only when the release does not build that platform either.
-	runner := "linux/" + runtime.GOARCH
-	if len(linux) > 0 && !slices.Contains(linux, runner) && unplatformedImage(cfg) {
-		p.add("images", Warn,
-			"an image with no platform builds for this machine's %s, which this release does not build", runner)
-	}
+	p.warnRunnerPlatform(cfg)
 	return true
+}
+
+// warnRunnerPlatform says, once, when an image will build for this machine's
+// platform and the release does not build it, so no binary is staged for it.
+// An image naming no platform does, and so does the one image a config naming
+// no images at all, or no config, leaves letsgo-docker to build.
+func (p *Plan) warnRunnerPlatform(cfg *pub.Config) {
+	targets := p.linuxTargets()
+	linux := make([]string, 0, len(targets))
+	for _, t := range targets {
+		linux = append(linux, t.String())
+	}
+	runner := "linux/" + runtime.GOARCH
+	if len(linux) == 0 || slices.Contains(linux, runner) || !onRunnerPlatform(cfg) {
+		return
+	}
+	p.add("images", Warn,
+		"an image with no platform builds for this machine's %s, which this release does not build, "+
+			"so no binary is staged for it", runner)
 }
 
 // imagesTimeout reads a timeout line's arguments, or says what is wrong with
@@ -161,9 +175,13 @@ func imagesTimeout(args []string) (time.Duration, string) {
 	return d, ""
 }
 
-// unplatformedImage reports whether any image block leaves its platform to
-// the default.
-func unplatformedImage(cfg *pub.Config) bool {
+// onRunnerPlatform reports whether any image builds for the runner's
+// platform: one whose block leaves its platform to the default, or the
+// default image of a config, nil or not, that names none.
+func onRunnerPlatform(cfg *pub.Config) bool {
+	if cfg == nil {
+		return true
+	}
 	named, platformed := map[string]bool{}, map[string]bool{}
 	for _, l := range cfg.Lines {
 		if l.Keyword != "image" || len(l.Args) < 2 {
@@ -173,6 +191,9 @@ func unplatformedImage(cfg *pub.Config) bool {
 		if l.Args[1] == "platform" {
 			platformed[l.Args[0]] = true
 		}
+	}
+	if len(named) == 0 {
+		return true
 	}
 	for name := range named {
 		if !platformed[name] {

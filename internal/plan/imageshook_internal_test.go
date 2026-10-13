@@ -41,7 +41,7 @@ func TestProbeReportsASilentFailure(t *testing.T) {
 	}
 }
 
-func TestUnplatformedImage(t *testing.T) {
+func TestOnRunnerPlatform(t *testing.T) {
 	line := func(args ...string) pub.ConfigLine { return pub.ConfigLine{Keyword: "image", Args: args} }
 
 	for _, tc := range []struct {
@@ -49,13 +49,18 @@ func TestUnplatformedImage(t *testing.T) {
 		lines []pub.ConfigLine
 		want  bool
 	}{
-		{"none", nil, false},
+		{"no config", nil, true},
+		{"no images", []pub.ConfigLine{}, true},
 		{"every image has one", []pub.ConfigLine{line("a", "platform", "linux/amd64"), line("a", "suffix", "-a")}, false},
 		{"one does not", []pub.ConfigLine{line("a", "platform", "linux/amd64"), line("b", "suffix", "-b")}, true},
-		{"a timeout is not an image", []pub.ConfigLine{{Keyword: "timeout", Args: []string{"1m"}}}, false},
+		{"only a timeout", []pub.ConfigLine{{Keyword: "timeout", Args: []string{"1m"}}}, true},
 	} {
-		if got := unplatformedImage(&pub.Config{Lines: tc.lines}); got != tc.want {
-			t.Errorf("%s: unplatformedImage = %v, want %v", tc.name, got, tc.want)
+		cfg := &pub.Config{Lines: tc.lines}
+		if tc.lines == nil {
+			cfg = nil
+		}
+		if got := onRunnerPlatform(cfg); got != tc.want {
+			t.Errorf("%s: onRunnerPlatform = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

@@ -369,3 +369,23 @@ func TestImagesHookPinnedByPathIsStillLetsgoDocker(t *testing.T) {
 		}
 	}
 }
+
+// With no docker.mod, letsgo-docker builds ./Dockerfile for this machine, so
+// the warning applies there too.
+func TestImagesHookWarnsAboutTheRunnersPlatformWithNoConfig(t *testing.T) {
+	fakeDocker(t, true)
+	r := newRepo(t)
+	r.git("remote", "add", "origin", "https://github.com/you/gambit.git")
+	r.write("go.mod", "module github.com/you/gambit\n\ngo 1.24\n")
+	r.write("main.go", "package main\n\nfunc main() {}\n")
+	r.write("letsgo.mod", "build linux/s390x\n"+imagesPin)
+	r.commit("v1.0.0")
+
+	p := r.resolve(plan.Options{})
+	for _, c := range imagesChecks(p) {
+		if c.Status == plan.Warn && strings.Contains(c.Detail, "this machine's") {
+			return
+		}
+	}
+	t.Errorf("no warning about the runner's platform in %+v", imagesChecks(p))
+}
