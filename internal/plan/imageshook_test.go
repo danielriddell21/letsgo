@@ -346,3 +346,26 @@ func TestImageBlockWithATooLongSuffixFails(t *testing.T) {
 		t.Errorf("check = %+v", c)
 	}
 }
+
+// A plugin pinned by path is still letsgo-docker: its docker.mod is read and
+// its docker probed, rather than an unknown plugin's nothing.
+func TestImagesHookPinnedByPathIsStillLetsgoDocker(t *testing.T) {
+	for _, works := range []bool{true, false} {
+		fakeDocker(t, works)
+		r := newRepo(t)
+		r.git("remote", "add", "origin", "https://github.com/you/gambit.git")
+		r.write("go.mod", "module github.com/you/gambit\n\ngo 1.24\n")
+		r.write("main.go", "package main\n\nfunc main() {}\n")
+		r.write("letsgo.mod", "build linux/amd64\nplugin images ./bin/letsgo-docker v0.1.0 sha256:"+strings.Repeat("a", 64)+"\n")
+		r.write(".letsgo/docker.mod", "timeout 45m\n")
+		r.commit("v1.0.0")
+		p := r.resolve(plan.Options{})
+
+		if works && (p.ImagesHook == nil || p.ImagesHook.Timeout != 45*time.Minute) {
+			t.Errorf("docker.mod was not read for a path pin: %+v", p.ImagesHook)
+		}
+		if !works && p.ImagesHook != nil {
+			t.Error("docker was not probed for a path pin")
+		}
+	}
+}

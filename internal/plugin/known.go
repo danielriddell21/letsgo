@@ -54,14 +54,26 @@ var Known = []KnownPlugin{
 	},
 }
 
-// Lookup finds a first-party plugin by its command name.
+// Lookup finds a first-party plugin by its command name. A command pinned
+// by path is looked up by its file's name, so ./bin/letsgo-docker is still
+// letsgo-docker.
 func Lookup(command string) (KnownPlugin, bool) {
+	name := BaseCommand(command)
 	for _, k := range Known {
-		if k.Command == command {
+		if k.Command == name {
 			return k, true
 		}
 	}
 	return KnownPlugin{}, false
+}
+
+// BaseCommand is a command's program name: the last element of a path, without
+// a Windows executable suffix. "./bin/letsgo-env.exe" is "letsgo-env".
+func BaseCommand(command string) string {
+	if i := strings.LastIndexAny(command, `/\`); i >= 0 {
+		command = command[i+1:]
+	}
+	return strings.TrimSuffix(command, ".exe")
 }
 
 // ShortName is a plugin's command with the "letsgo-" convention stripped,
@@ -69,5 +81,5 @@ func Lookup(command string) (KnownPlugin, bool) {
 // lives in under .letsgo/, and is defined for any command, not just one in
 // Known — a third-party plugin follows the same naming convention.
 func ShortName(command string) string {
-	return strings.TrimPrefix(command, "letsgo-")
+	return strings.TrimPrefix(BaseCommand(command), "letsgo-")
 }

@@ -81,7 +81,7 @@ func relativePath(command string) bool {
 // no way to tell which one the plugin would actually read.
 func (p *Plan) checkPluginConfigFiles() {
 	for _, configured := range p.Config.Plugins {
-		legacy := filepath.Join(p.RootDir, configured.Command+".mod")
+		legacy := filepath.Join(p.RootDir, plugin.BaseCommand(configured.Command)+".mod")
 		modern := filepath.Join(p.RootDir, pluginConfigDir, plugin.ShortName(configured.Command)+".mod")
 
 		_, legacyErr := os.Stat(legacy)
