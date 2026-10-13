@@ -1,69 +1,143 @@
-# HLD: Dockerfile images through the `images` hook
+# HLD: more than one image
 
 Status: proposed.
 
 | | |
 |---|---|
 | ADRs | [ADR-0027](../adr/0027-images-hook-plugin-builds-core-pushes.md) |
-| Plugin | `letsgo-images` (letsgo-plugins) |
+| Plugin | `letsgo-docker` (letsgo-plugins) |
 
 ## Problem
 
-letsgo builds one image per command, from the binaries, on a base image.
-A repository that also ships images from its own Dockerfile, such as Talos
-with its `fixer` stage, has nowhere to put them, and pushes them by hand with
-different tags and no record.
+letsgo builds one image per command, from the binary, on a base image.
+Talos needs two images from its own Dockerfile: the release image, and a
+`fixer` stage that adds more than the binary. letsgo can express neither.
 
 ## Shape
 
-```
-letsgo.mod                        .letsgo/images.mod
------------                       ------------------
-image                             timeout 45m
-plugin images letsgo-images \
-    v0.1.0 sha256:…               image fixer {
-                                      dockerfile ./build/fixer.Dockerfile
-                                      target     fixer
-                                      suffix     -fixer
-                                      platform   linux/amd64
-                                  }
-```
+Two ways to add images, which share one tagging rule:
 
-`.letsgo/images.mod` uses letsgo.mod's grammar (ADR-0025).
+| need | how | reproducible |
+| --- | --- | --- |
+| the same binary, set up differently | `image <name> ( … )` blocks in letsgo.mod | yes |
+| anything a Dockerfile does | the `images` hook, answered by `letsgo-docker` | no; recorded |
+
+**The tagging rule:** every image is pushed to the release's repository under
+every tag the release pushes, with its suffix appended (`1.2.3-fixer`,
+`1.2-fixer`, `latest-fixer`, `rc-fixer`). Floating tags move forward only, as
+they do today. Suffixes are unique across everything a release pushes.
+
+### Core blocks
+
+```
+image ghcr.io/you/talos
+image base gcr.io/distroless/static
+image cmd serve
+
+image fixer (
+    suffix -fixer
+    cmd    fix
+    base   gcr.io/distroless/static
+    expose 8080
+)
+```
 
 | setting | | meaning |
 | --- | --- | --- |
-| `timeout <duration>` | top level, optional | how long core lets the hook run; default `30m`, at most `2h` |
-| `image <name> { … }` | repeatable | one image; `<name>` is for messages |
-| `dockerfile <path>` | required | relative to the repository root |
-| `target <stage>` | optional | the build stage |
-| `suffix <text>` | required, unique | appended to every tag |
+| `suffix <text>` | required | `[A-Za-z0-9_.-]+`; appended to every tag |
+| `base <ref>` | optional | as `image base`; scratch when unset |
+| `cmd <arg>…` | optional | as `image cmd` |
+| `expose <port>…` | optional | as `image expose` |
+
+- A block inherits nothing from the release image except the repository.
+- A block builds every command, on every Linux target, exactly as the release
+  image does. A module with several commands pushes each one to
+  `<repo>/<binary>:<tag><suffix>`.
+- The names `base`, `cmd`, `expose` and `plugin` are reserved, because they
+  are already settings of the bare `image` directive.
+- A block needs the release image's repository, so it needs an `image`
+  directive or the default reference.
+
+### `image plugin`
+
+`image plugin` says the release image comes from the images hook: core builds
+no release image of its own. Under it:
+
+- `image base`, `image cmd` and `image expose` are a plan **Fail**, since
+  nothing reads them;
+- an `images` pin is required;
+- core blocks still build.
+
+### letsgo-docker
+
+```
+letsgo.mod                         .letsgo/docker.mod (optional)
+----------                         -----------------------------
+image plugin                       timeout 45m
+plugin images letsgo-docker \
+    v0.1.0 sha256:…                image release (
+                                       target talos
+                                   )
+
+                                   image fixer (
+                                       dockerfile ./build/fixer.Dockerfile
+                                       target     fixer
+                                       suffix     -fixer
+                                       platform   linux/amd64
+                                   )
+```
+
+| setting | | meaning |
+| --- | --- | --- |
+| `timeout <duration>` | top level, optional | read by core; default `30m`, at most `2h` |
+| `image <name> ( … )` | repeatable | one image; `<name>` names its layout and its messages |
+| `dockerfile <path>` | optional | relative to the repository root; defaults to `Dockerfile` |
+| `target <stage>` | optional | the build stage; the last one when unset |
+| `suffix <text>` | optional for one image | none means the release image |
 | `platform <os/arch>…` | optional | defaults to the runner's platform |
+
+With no docker.mod at all, letsgo-docker builds `./Dockerfile` as the
+release image. At most one image may leave out its suffix.
+
+## Rules for an unsuffixed plugin image
+
+| letsgo.mod | core release image | plugin may answer an unsuffixed image |
+| --- | --- | --- |
+| `image plugin` | not built | required, exactly one |
+| no `image` directive | not built | allowed, at most one; pushed to the default reference |
+| `image` or `image <ref>` | built | no: the release fails before publishing |
+
+Plan can't know what a Plugin will answer, so the last two rows are checked
+when the hook runs. That is still before anything is published.
 
 ## Flow
 
 ### Plan
 
-1. With an `images` pin, core reads images.mod for `timeout` only. More than
-   `2h`, or not a duration, is a **Fail** at the setting's position.
-2. `docker buildx version` must succeed, or it's a **Fail**: "the images hook
-   builds with docker buildx, which isn't available here".
-3. Each image's platforms that aren't among the release's Linux targets get a
-   **Warn**. The image still builds; its binaries just won't be staged.
-4. Without an `image` directive, the plan resolves the default reference as
-   `image` would and shows that core builds no image of its own.
-
-Plan doesn't run the Plugin. The other settings are the Plugin's to check,
-when it runs.
+1. **Core blocks.** Each is resolved like the release image: its base is
+   checked, it is reported as a **Pass**, and duplicate suffixes are a
+   **Fail**.
+2. **`image plugin`** without an `images` pin is a **Fail**, as is
+   `image plugin` beside `base`, `cmd` or `expose`.
+3. **With an `images` pin:**
+   - the Plugin's config is read for `timeout` and `platform` only. A bad
+     timeout is a **Fail** placed in that file.
+   - A platform the release doesn't build is a **Warn**.
+   - `docker buildx version` must work, or it's a **Fail**. That probe is
+     letsgo-docker's need, but buildx is the only builder a first-party
+     Plugin uses, so core probes for it when the pinned command is
+     `letsgo-docker`.
 
 ### Release
 
 After the build and archives, before any publication:
 
-1. **Stage.** Core creates `<dist>/images-hook/` and copies each Linux binary
-   to `context/<os>_<arch>/<binary>`, preserving the mode.
-2. **Run.** Core runs the Plugin, with the repository root as its working
-   directory and images.mod's timeout:
+1. **Core images.** The release image, if built, then each block's image.
+2. **Stage.** The release's own Linux binaries (not variants) are copied to
+   `<dist>/images-hook/context/<os>_<arch>/<binary>`.
+3. **Run.** The Plugin runs with its config's timeout, the repository root
+   as its working directory, and no forge or registry credentials in its
+   environment. Its input:
 
    ```json
    {
@@ -77,58 +151,67 @@ After the build and archives, before any publication:
    }
    ```
 
-   The Plugin builds each image with
-   `docker buildx build -f <dockerfile> [--target] --platform …
-   --build-context letsgo=<context>
-   --output type=oci,dest=<output>/<name>.tar,tar=false <repo root>`,
-   then answers:
+   letsgo-docker runs, for each image:
+
+   ```
+   docker buildx build --file <dockerfile> [--target <stage>]
+     --platform <platforms> --build-context letsgo=<context>
+     --output type=oci,tar=false,dest=<output>/<name> <repo root>
+   ```
+
+   with `SOURCE_DATE_EPOCH` set to the commit time. It answers:
 
    ```json
-   {"images": [{"suffix": "-fixer", "layout": "/…/dist/images-hook/out/fixer"}]}
+   {"images": [{"suffix": "", "layout": "/…/out/release"},
+               {"suffix": "-fixer", "layout": "/…/out/fixer"}]}
    ```
 
    A Dockerfile reads the staged binaries with
-   `COPY --from=letsgo linux_amd64/talos /usr/local/bin/`.
-3. **Check.** Core rejects the answer if:
-   - a layout isn't a directory under `output` after resolving symlinks;
-   - a suffix is empty, repeated, or isn't a valid tag fragment
-     (`[A-Za-z0-9_.-]`, and the full tag at most 128 characters);
-   - a layout has no index.
-4. **Load.** `oci.LoadLayout` reads `index.json` and its blobs into the same
-   shape `ImageBuild` already pushes. A layout with one manifest is pushed
-   as that manifest; one with several is pushed as an index.
+   `COPY --from=letsgo ${TARGETOS}_${TARGETARCH}/talos /usr/local/bin/`.
+
+4. **Check.** The whole answer is checked before any layout is read:
+   - every suffix is valid, or empty;
+   - suffixes are unique across the answer and core's own images;
+   - the unsuffixed-image rules above hold;
+   - no full tag is longer than 128 characters;
+   - each layout is a directory under `output` after resolving symlinks.
+5. **Load.** `oci.LoadLayout` reads each layout: its image manifests, the
+   attestations a builder attaches, and their blobs, checked by digest and
+   size. Core builds the index itself over those manifests, with the
+   release's annotations, which is what lets a floating tag read the version.
 
 ### Publication
 
-Each plugin image becomes an `ImageBuild` with core's registry and
-repository, and with core's `Tags` and `Floating` each given the suffix.
-It's pushed by the same `push.go` path, with the same credential. Floating
-tags compare against what `<tag><suffix>` currently points at.
+All images are pushed in the same way, with the same credential and the same
+floating-tag comparison. A plugin image's blobs are read from its layout one
+at a time as they are pushed.
 
 ### Manifest
 
 ```json
 "images": [
   {"reference": "ghcr.io/you/talos", "digest": "sha256:…",
-   "tags": ["1.2.3", "1.2", "1", "latest"], "platforms": ["linux/amd64"]},
+   "tags": ["1.2.3", "1.2", "1", "latest"], "platforms": ["linux/amd64"],
+   "source": "plugin"},
   {"reference": "ghcr.io/you/talos", "digest": "sha256:…",
-   "tags": ["1.2.3-fixer", "1.2-fixer", "1-fixer", "latest-fixer"],
-   "platforms": ["linux/amd64"], "source": "plugin"}
+   "tags": ["1.2.3-fixer", "…"], "platforms": ["linux/amd64"],
+   "source": "plugin"}
 ]
 ```
 
-`manifest.Image` gains `Source string \`json:"source,omitempty"\``.
-Empty means core built it.
+`manifest.Image.Source` is `"plugin"` for a plugin image, and empty for one
+core built, including a core block.
 
 ### After the release
 
-| command | plugin images |
-| --- | --- |
-| `verify` | checked like any image: tag → recorded digest |
-| repro | not involved; it rebuilds only core's image from the artifacts |
-| `promote` | rebuilds at the final tag (ADR-0009), so the hook runs again |
-| `yank` | untouched, as for core's images today |
-| `--snapshot` | builds, records, doesn't push |
+| command | core blocks | plugin images |
+| --- | --- | --- |
+| `verify` | tag → recorded digest | tag → recorded digest |
+| repro | not rebuilt; it rebuilds only the release image's digest | not involved |
+| `apply` | held byte for byte | digest may differ; logged |
+| `promote` | rebuilt at the final tag | the hook runs again |
+| `yank` | untouched | untouched |
+| `--snapshot` | built, recorded, not pushed | built, recorded, not pushed |
 
 ## Wire types
 
@@ -139,37 +222,37 @@ HookImages Hook = "images"
 
 type ImagesInput struct {
     Project, Version, Tag, Commit, Date string
-    Context  string        `json:"context"`
-    Output   string        `json:"output"`
-    Binaries []ImageBinary `json:"binaries"`
-    ConfigDir string       `json:"config_dir"`
+    Context, Output string
+    Binaries  []ImageBinary
+    ConfigDir string
 }
 type ImageBinary struct{ Name, OS, Arch, Path string }
-type ImagesOutput struct{ Images []OutputImage `json:"images"` }
-type OutputImage struct{ Suffix, Layout string }
+type ImagesOutput struct{ Images []OutputImage }
+type OutputImage struct{ Suffix, Layout string } // Suffix "" = the release image
 ```
 
-`Hooks` becomes `{ldflags, archive-layout, tap-files, images}`. `Known`
-gains `letsgo-images`.
+`Known` gains `letsgo-docker`.
 
 ## Delivery
 
 1. **letsgo:**
-   - the wire types, hook and catalogue entry;
-   - `Run` takes a per-call timeout;
-   - plan: the timeout read and the docker probe;
-   - release: staging, the hook call, the checks, `oci.LoadLayout`, and the
-     suffixed `ImageBuild`s;
-   - `manifest.Image.Source`;
+   - the hook, its wire types and the catalogue entry;
+   - `RunWithin`;
+   - `image <name> ( … )` blocks and `image plugin`;
+   - plan checks;
+   - `oci.LoadLayout` and `PushLayout`;
+   - the release step and the manifest's `source`;
+   - `apply`'s exception for plugin image digests;
    - docs.
 2. **Release letsgo.**
 3. **letsgo-plugins:**
-   - `cmd/letsgo-images`;
+   - `cmd/letsgo-docker`;
    - bump the `require`;
    - release.
 4. **Talos:**
-   - pin the Plugin;
-   - add images.mod;
+   - pin letsgo-docker;
+   - `image plugin`;
+   - a docker.mod naming the release target and `fixer`;
    - bump `LETSGO_VERSION`.
 
 ## Out of scope
@@ -177,4 +260,4 @@ gains `letsgo-images`.
 - Separate repositories per image (`talos-fixer`): suffix only.
 - Emulation setup (QEMU). A non-native `platform` needs the runner to have
   it.
-- Signing or attestations for plugin images.
+- Signing or attestations of letsgo's own for plugin images.

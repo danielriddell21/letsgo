@@ -41,7 +41,7 @@ A separate binary, pinned by digest in letsgo.mod, that answers one or more Hook
 _Avoid_: Extension, add-on
 
 **Hook**:
-A point in a Release where letsgo asks a Plugin a question and records the answer: `ldflags`, `archive-layout` or `tap-files`.
+A point in a Release where letsgo asks a Plugin a question and records the answer: `ldflags`, `archive-layout`, `tap-files` or `images`.
 _Avoid_: Callback, event
 
 **Plugin config**:
