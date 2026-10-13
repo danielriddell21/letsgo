@@ -87,9 +87,12 @@ func homebrewFormula(path string) string {
 // to date with the binary just written there.
 func (u *Update) rewriteRecord(path string, binary []byte) error {
 	previous, err := install.ReadRecord(path)
-	if err != nil || previous == nil {
-		// An unreadable record is left alone rather than failing an update
-		// that has already happened; doctor reports it.
+	if err != nil {
+		// The binary is already replaced, so this is reported rather than
+		// undone: the record beside it no longer describes it.
+		return fmt.Errorf("selfupdate: %s was updated, but %w", path, err)
+	}
+	if previous == nil {
 		return nil
 	}
 	err = install.WriteRecord(path, &install.Record{

@@ -82,7 +82,10 @@ func TestCheckTreatsAnUnparseableVersionAsOld(t *testing.T) {
 	}
 }
 
-func TestApplyToReplacesTheBinary(t *testing.T) {
+// staged finds the 1.3.0 update on a fake forge and writes the 1.2.0 binary
+// it would replace as dir/tool.
+func staged(t *testing.T, dir string) (*selfupdate.Update, string) {
+	t.Helper()
 	f := forgetest.New(t, "you/tool", "v1.3.0")
 	f.Publish(t, "tool", "1.3.0", "tool", "new binary bytes")
 
@@ -91,10 +94,15 @@ func TestApplyToReplacesTheBinary(t *testing.T) {
 		t.Fatalf("Check: %v", err)
 	}
 
-	target := filepath.Join(t.TempDir(), "tool")
+	target := filepath.Join(dir, "tool")
 	if err := os.WriteFile(target, []byte("old binary bytes"), 0o755); err != nil { //nolint:gosec
 		t.Fatal(err)
 	}
+	return update, target
+}
+
+func TestApplyToReplacesTheBinary(t *testing.T) {
+	update, target := staged(t, t.TempDir())
 
 	if err := update.ApplyTo(context.Background(), target); err != nil {
 		t.Fatal(err)
@@ -777,18 +785,7 @@ func TestCheckReportsEachStepsFailure(t *testing.T) {
 // A binary install.sh put there keeps a record that describes it, so the
 // update rewrites the record to describe the binary that replaced it.
 func TestApplyToRewritesTheInstallRecord(t *testing.T) {
-	f := forgetest.New(t, "you/tool", "v1.3.0")
-	f.Publish(t, "tool", "1.3.0", "tool", "new binary bytes")
-
-	update, err := selfupdate.Check(context.Background(), options(f, "1.2.0"))
-	if err != nil || update == nil {
-		t.Fatalf("Check: %v", err)
-	}
-
-	target := filepath.Join(t.TempDir(), "tool")
-	if err := os.WriteFile(target, []byte("old binary bytes"), 0o755); err != nil { //nolint:gosec
-		t.Fatal(err)
-	}
+	update, target := staged(t, t.TempDir())
 	old := &install.Record{Schema: 1, Via: "install.sh", Project: "tool", Version: "1.2.0", Tag: "v1.2.0", Binary: "tool"}
 	if err := install.WriteRecord(target, old); err != nil {
 		t.Fatal(err)
@@ -812,17 +809,7 @@ func TestApplyToRewritesTheInstallRecord(t *testing.T) {
 
 // No record means no record: an update must not invent one.
 func TestApplyToWritesNoRecordWhereThereWasNone(t *testing.T) {
-	f := forgetest.New(t, "you/tool", "v1.3.0")
-	f.Publish(t, "tool", "1.3.0", "tool", "new binary bytes")
-
-	update, err := selfupdate.Check(context.Background(), options(f, "1.2.0"))
-	if err != nil || update == nil {
-		t.Fatalf("Check: %v", err)
-	}
-	target := filepath.Join(t.TempDir(), "tool")
-	if err := os.WriteFile(target, []byte("old"), 0o755); err != nil { //nolint:gosec
-		t.Fatal(err)
-	}
+	update, target := staged(t, t.TempDir())
 	if err := update.ApplyTo(context.Background(), target); err != nil {
 		t.Fatal(err)
 	}
@@ -834,24 +821,13 @@ func TestApplyToWritesNoRecordWhereThereWasNone(t *testing.T) {
 // Overwriting a file inside a Cellar would leave Homebrew believing it still
 // had the old version, and its next upgrade would undo this one.
 func TestApplyToRefusesAHomebrewInstall(t *testing.T) {
-	f := forgetest.New(t, "you/tool", "v1.3.0")
-	f.Publish(t, "tool", "1.3.0", "tool", "new binary bytes")
-
-	update, err := selfupdate.Check(context.Background(), options(f, "1.2.0"))
-	if err != nil || update == nil {
-		t.Fatalf("Check: %v", err)
-	}
-
 	dir := filepath.Join(t.TempDir(), "Cellar", "tool", "1.2.0", "bin")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(dir, "tool")
-	if err := os.WriteFile(target, []byte("old binary bytes"), 0o755); err != nil { //nolint:gosec
-		t.Fatal(err)
-	}
+	update, target := staged(t, dir)
 
-	err = update.ApplyTo(context.Background(), target)
+	err := update.ApplyTo(context.Background(), target)
 	if err == nil || !strings.Contains(err.Error(), "brew upgrade tool") {
 		t.Fatalf("err = %v, want a pointer to brew upgrade", err)
 	}
