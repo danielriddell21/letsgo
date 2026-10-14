@@ -71,16 +71,19 @@ func (f forge) runPlan(args []string) error {
 
 	ctx := context.Background()
 
+	// A diff predicts a release, whose manifest records the gates it ran, so
+	// it runs the publish gates too: an apply's rebuild is held to that manifest.
+	publish := *publishGates || diffing
+
 	// Credentials are resolved only when something will use them: a plan that
 	// contacts nothing never runs the token-command.
 	var set credential.Set
-	if *publishGates || diffing {
+	if publish {
 		set = f.credentials(ctx, credential.Flags{Token: *token, TapToken: *tapToken, ReleaseToken: *releaseToken})
 	}
 	options := f.planOptions(plan.Options{
 		Dir: ".", Snapshot: *snapshot, AllowDirty: *allowDirty,
-		Publish: *publishGates, Credentials: set,
-		// A diff predicts a release, whose manifest records the gates it ran.
+		Publish: publish, Credentials: set, NewClient: f.client,
 		Analyse: *analyse || diffing, AllowVulnerable: *allowVulnerable, AllowBreaking: *allowBreaking,
 	})
 

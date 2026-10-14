@@ -2,17 +2,21 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/credential"
 
 	"github.com/danielriddell21/letsgo/internal/apply"
+	"github.com/danielriddell21/letsgo/internal/github"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	plandiff "github.com/danielriddell21/letsgo/plan"
 )
@@ -199,7 +203,7 @@ func serveForge(t *testing.T, writable bool) string {
 }
 
 func TestPlanOutSavesAPlanThatAnApplyWouldCheck(t *testing.T) {
-	f := emptyForge(t)
+	f := writableForge(t)
 	t.Chdir(moduleFixture(t))
 	path := filepath.Join(t.TempDir(), "release.plan")
 
@@ -236,7 +240,7 @@ func TestPlanDiffWithoutARepositoryCannotCompare(t *testing.T) {
 }
 
 func TestApplyStopsWhenThePlanCannotBeResolved(t *testing.T) {
-	f := emptyForge(t)
+	f := writableForge(t)
 	t.Chdir(moduleFixture(t))
 	path := filepath.Join(t.TempDir(), "release.plan")
 	_ = captureStdout(t, func() { _ = f.runPlan([]string{"-out", path}) })
@@ -272,7 +276,7 @@ func TestApplyWithNoFileStopsWhenThePlanFails(t *testing.T) {
 }
 
 func TestPlanFormatMarkdownWritesOnlyTheSummaryToStdout(t *testing.T) {
-	f := emptyForge(t)
+	f := writableForge(t)
 	t.Chdir(moduleFixture(t))
 
 	var err error
@@ -345,3 +349,58 @@ func TestApplyWithNoProxyWarmPlansWithoutIt(t *testing.T) {
 
 // unwired is the forge a test uses when it never reaches one.
 var unwired forge
+
+func TestApplyAcceptsAFreshPlanFromPlanOut(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	f := forge{endpoint: releasingForge(t)}
+	// As in the report: the sumdb gate is recorded, but nothing is looked up.
+	t.Chdir(moduleFixtureWith(t, "disable sumdb\n", nil))
+	path := filepath.Join(t.TempDir(), "release.plan")
+	if out := captureStdout(t, func() { _ = f.runPlan([]string{"-out", path}) }); !strings.Contains(out, "saved to "+path) {
+		t.Fatalf("plan -out saved nothing:\n%s", out)
+	}
+
+	// The saved manifest records the publish gates, as the apply's rebuild does.
+	var err error
+	out := captureStdout(t, func() { err = f.runApply([]string{path}) })
+	if err != nil {
+		t.Fatalf("runApply of a fresh plan = %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "the rebuild matches the plan") {
+		t.Errorf("the rebuild was not held to the plan:\n%s", out)
+	}
+}
+
+// releasingForge is writableForge that also accepts a release and its assets.
+func releasingForge(t *testing.T) string {
+	t.Helper()
+	var mu sync.Mutex
+	var assets []github.Asset
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/you/demo":
+			_, _ = w.Write([]byte(`{"permissions":{"push":true}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/you/demo/releases",
+			r.Method == http.MethodPatch && r.URL.Path == "/repos/you/demo/releases/1":
+			_, _ = w.Write([]byte(`{"id":1,"tag_name":"v1.2.3"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/you/demo/releases/1/assets":
+			body, _ := io.ReadAll(r.Body)
+			a := github.Asset{ID: int64(len(assets) + 2), Name: r.URL.Query().Get("name"), Size: int64(len(body))}
+			assets = append(assets, a)
+			_ = json.NewEncoder(w).Encode(a)
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/you/demo/releases/1/assets":
+			page := assets
+			if r.URL.Query().Get("page") != "1" {
+				page = nil
+			}
+			_ = json.NewEncoder(w).Encode(append([]github.Asset{}, page...))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
