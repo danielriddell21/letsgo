@@ -10,6 +10,7 @@ import (
 	"github.com/danielriddell21/letsgo/internal/feature"
 	"github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/plan"
+	"github.com/danielriddell21/letsgo/manifest"
 	pub "github.com/danielriddell21/letsgo/plugin"
 )
 
@@ -19,7 +20,11 @@ import (
 // A snapshot has no tag and therefore no download URL, and a repository with
 // no forge has no release page; in both cases the honest thing is to publish
 // no installer rather than one whose URLs resolve to nothing.
-func writeInstaller(p *plan.Plan, artifacts []build.Artifact, dir string) (string, string, error) {
+//
+// The manifest is already written, so the script carries its digest: it
+// checks letsgo.json like an archive, and with randomart on it ends by
+// showing the fingerprint the release page shows.
+func writeInstaller(p *plan.Plan, artifacts []build.Artifact, dir, manifestSum string) (string, string, error) {
 	if !p.Features.On(feature.InstallScript) {
 		return "", "", nil
 	}
@@ -40,9 +45,12 @@ func writeInstaller(p *plan.Plan, artifacts []build.Artifact, dir string) (strin
 	script, err := install.Script(install.Options{
 		Project: p.Project,
 		Version: p.Version,
+		Tag:     p.Tag,
 		BaseURL: strings.TrimSuffix(
 			pub.DownloadURL(p.Repo.Owner+"/"+p.Repo.Name, p.Tag, ""), "/"),
-		Targets: targets,
+		Targets:     targets,
+		Manifest:    install.File{Name: manifest.FileName, SHA256: manifestSum},
+		Fingerprint: p.Features.On(feature.Randomart),
 	})
 	if err != nil {
 		return "", "", err

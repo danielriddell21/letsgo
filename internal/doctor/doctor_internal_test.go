@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/danielriddell21/letsgo/internal/config"
+	"github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/pluginstore"
 )
 
@@ -167,5 +168,71 @@ func TestLoadConfigTreatsAMissingFileAsAbsentButReportsOtherReadErrors(t *testin
 	}
 	if _, err := loadConfig(dir); err == nil {
 		t.Fatal("a read error was swallowed as a missing file")
+	}
+}
+
+// The running letsgo is compared with the record install.sh left beside it:
+// no record, no row; a match is OK; a binary that changed since is a warning.
+func TestCheckSelfComparesTheInstallRecord(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "letsgo")
+	if err := os.WriteFile(bin, []byte("installed bytes"), 0o755); err != nil { //nolint:gosec
+		t.Fatal(err)
+	}
+	original := executable
+	t.Cleanup(func() { executable = original })
+	executable = func() (string, error) { return bin, nil }
+
+	run := func() []Check {
+		r := &Result{}
+		r.checkSelf()
+		return r.Checks
+	}
+
+	if got := run(); len(got) != 0 {
+		t.Fatalf("with no record, checks = %+v, want none", got)
+	}
+
+	sum := sha256.Sum256([]byte("installed bytes"))
+	rec := &install.Record{Schema: 1, Via: "install.sh", Tag: "v1.0.0", Binary: "letsgo", BinarySHA256: hex.EncodeToString(sum[:])}
+	if err := install.WriteRecord(bin, rec); err != nil {
+		t.Fatal(err)
+	}
+	if got := run(); len(got) != 1 || got[0].Status != OK || !strings.Contains(got[0].Detail, "v1.0.0 via install.sh") {
+		t.Fatalf("with a matching record, checks = %+v", got)
+	}
+
+	if err := os.WriteFile(bin, []byte("swapped bytes"), 0o755); err != nil { //nolint:gosec
+		t.Fatal(err)
+	}
+	if got := run(); len(got) != 1 || got[0].Status != Warn || !strings.Contains(got[0].Detail, "is not the v1.0.0 binary") {
+		t.Fatalf("with a changed binary, checks = %+v", got)
+	}
+}
+
+// A record that cannot be read is reported rather than ignored, and a
+// running binary that cannot be found gets no row at all.
+func TestCheckSelfReportsWhatItCannotRead(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "letsgo")
+	if err := os.WriteFile(bin, []byte("bytes"), 0o755); err != nil { //nolint:gosec
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(install.RecordPath(bin), []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	original := executable
+	t.Cleanup(func() { executable = original })
+
+	executable = func() (string, error) { return bin, nil }
+	r := &Result{}
+	r.checkSelf()
+	if len(r.Checks) != 1 || r.Checks[0].Status != Warn || !strings.Contains(r.Checks[0].Detail, "not an install record") {
+		t.Errorf("with a garbled record, checks = %+v", r.Checks)
+	}
+
+	executable = func() (string, error) { return "", os.ErrNotExist }
+	r = &Result{}
+	r.checkSelf()
+	if len(r.Checks) != 0 {
+		t.Errorf("with no executable, checks = %+v, want none", r.Checks)
 	}
 }

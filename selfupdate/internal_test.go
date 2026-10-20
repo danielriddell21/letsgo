@@ -101,3 +101,17 @@ func TestReplaceRefusesAnUnwritableDirectory(t *testing.T) {
 		t.Fatal("want an error for a directory that does not exist")
 	}
 }
+
+func TestHomebrewFormula(t *testing.T) {
+	for path, want := range map[string]string{
+		"/opt/homebrew/Cellar/letsgo/1.0.0/bin/letsgo":            "letsgo",
+		"/home/linuxbrew/.linuxbrew/Cellar/tool/2.1.0_1/bin/tool": "tool",
+		"/usr/local/bin/letsgo":                                   "",
+		"/home/you/go/bin/letsgo":                                 "",
+		"/opt/homebrew/Cellar/":                                   "",
+	} {
+		if got := homebrewFormula(path); got != want {
+			t.Errorf("homebrewFormula(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
