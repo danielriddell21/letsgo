@@ -2,8 +2,9 @@
 
 A release tool for Go. Only Go.
 
-> **Status: early.** letsgo releases itself, and reproducibility is proven
-> across Linux, macOS and Windows on every push.
+> **Status: v1.** letsgo releases itself, reproducibility is proven across
+> Linux, macOS and Windows on every push, and [what v1 will not
+> break](docs/stability.md) is written down.
 
 It builds your Go project, refuses to ship it if it's wrong, publishes it
 reproducibly, and lets anyone prove afterwards that the binaries match the
