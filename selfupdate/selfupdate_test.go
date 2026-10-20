@@ -835,3 +835,20 @@ func TestApplyToRefusesAHomebrewInstall(t *testing.T) {
 		t.Errorf("the Homebrew binary was replaced with %q", got)
 	}
 }
+
+// The binary is already replaced when the record is read, so a record that
+// cannot be read is reported rather than passed over.
+func TestApplyToReportsAGarbledInstallRecord(t *testing.T) {
+	update, target := staged(t, t.TempDir())
+	if err := os.WriteFile(install.RecordPath(target), []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := update.ApplyTo(context.Background(), target)
+	if err == nil || !strings.Contains(err.Error(), "was updated, but") {
+		t.Fatalf("err = %v, want the update reported alongside the record failure", err)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "new binary bytes" {
+		t.Errorf("installed %q", got)
+	}
+}

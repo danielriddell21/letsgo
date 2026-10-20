@@ -208,3 +208,31 @@ func TestCheckSelfComparesTheInstallRecord(t *testing.T) {
 		t.Fatalf("with a changed binary, checks = %+v", got)
 	}
 }
+
+// A record that cannot be read is reported rather than ignored, and a
+// running binary that cannot be found gets no row at all.
+func TestCheckSelfReportsWhatItCannotRead(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "letsgo")
+	if err := os.WriteFile(bin, []byte("bytes"), 0o755); err != nil { //nolint:gosec
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(install.RecordPath(bin), []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	original := executable
+	t.Cleanup(func() { executable = original })
+
+	executable = func() (string, error) { return bin, nil }
+	r := &Result{}
+	r.checkSelf()
+	if len(r.Checks) != 1 || r.Checks[0].Status != Warn || !strings.Contains(r.Checks[0].Detail, "not an install record") {
+		t.Errorf("with a garbled record, checks = %+v", r.Checks)
+	}
+
+	executable = func() (string, error) { return "", os.ErrNotExist }
+	r = &Result{}
+	r.checkSelf()
+	if len(r.Checks) != 0 {
+		t.Errorf("with no executable, checks = %+v, want none", r.Checks)
+	}
+}
