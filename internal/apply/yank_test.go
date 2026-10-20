@@ -137,7 +137,7 @@ func TestYankStaleHoldsTheWritesToThePlan(t *testing.T) {
 	}
 }
 
-// The formula and @next roll back with the release, and a formula already at
+// The formula and -next roll back with the release, and a formula already at
 // the previous release is left as it is.
 func TestObserveYankPlansTheTapRollback(t *testing.T) {
 	repo := github.Repo{Owner: "you", Name: "demo"}
@@ -161,7 +161,7 @@ func TestObserveYankPlansTheTapRollback(t *testing.T) {
 	recorder.Existing = &github.Release{ID: 7, TagName: "v1.2.3", Body: "notes"}
 	recorder.Files = map[string][]byte{
 		"Formula/demo.rb":      render("1.2.3", false),
-		"Formula/demo@next.rb": render("1.2.3", true),
+		"Formula/demo-next.rb": render("1.2.3", true),
 	}
 
 	actions, err := ObserveYank(context.Background(), yank.Options{
@@ -179,8 +179,8 @@ func TestObserveYankPlansTheTapRollback(t *testing.T) {
 			got[a.Target] = a.Op
 		}
 	}
-	want := map[string]plandiff.Op{"Formula/demo.rb": plandiff.Change, "Formula/demo@next.rb": plandiff.Change}
-	if len(got) != len(want) || got["Formula/demo.rb"] != plandiff.Change || got["Formula/demo@next.rb"] != plandiff.Change {
+	want := map[string]plandiff.Op{"Formula/demo.rb": plandiff.Change, "Formula/demo-next.rb": plandiff.Change}
+	if len(got) != len(want) || got["Formula/demo.rb"] != plandiff.Change || got["Formula/demo-next.rb"] != plandiff.Change {
 		t.Errorf("tap actions = %v, want %v", got, want)
 	}
 	for _, call := range recorder.Calls {

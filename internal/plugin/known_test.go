@@ -35,3 +35,17 @@ func TestShortName(t *testing.T) {
 		}
 	}
 }
+
+// A pin by path is the same plugin as one by name: its catalogue entry, its
+// config file and its probe all follow the file's name.
+func TestPinnedByPathIsLookedUpByName(t *testing.T) {
+	for _, command := range []string{"./bin/letsgo-docker", "/opt/letsgo/letsgo-docker", `tools\letsgo-docker.exe`} {
+		got, ok := Lookup(command)
+		if !ok || got.Command != "letsgo-docker" {
+			t.Errorf("Lookup(%q) = %+v, %v", command, got, ok)
+		}
+		if short := ShortName(command); short != "docker" {
+			t.Errorf("ShortName(%q) = %q, want docker", command, short)
+		}
+	}
+}

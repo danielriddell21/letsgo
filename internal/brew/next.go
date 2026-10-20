@@ -17,9 +17,13 @@ const Kept Status = "kept"
 // NextName is the "next" formula's name for a project whose stable formula
 // is name: whichever of the newest prerelease or the newest stable is
 // currently ahead.
-func NextName(name string) string { return name + "@next" }
+//
+// It is "-next", not "@next": Homebrew only spells "@" as "AT" when a digit
+// follows (openssl@3 -> OpensslAT3), so for foo@next it looks for a class
+// named "Foo@next", which Ruby can't have, and the formula never loads.
+func NextName(name string) string { return name + "-next" }
 
-// PublishNext writes f to the tap's @next formula, unless the version
+// PublishNext writes f to the tap's -next formula, unless the version
 // already published there is newer or equal.
 //
 // Every release, prerelease and stable alike, is a candidate: a normal
@@ -44,8 +48,8 @@ func PublishNext(ctx context.Context, api FileAPI, tap github.Repo, f Formula) (
 	return publish(ctx, api, tap, path, content, fmt.Sprintf("%s %s", f.Name, f.Version))
 }
 
-// RevertNext points the @next formula back at f, but only while it still names
-// version: the release being retracted. A @next that has since moved on to a
+// RevertNext points the -next formula back at f, but only while it still names
+// version: the release being retracted. A -next that has since moved on to a
 // newer release, or that does not exist, is left alone.
 func RevertNext(ctx context.Context, api FileAPI, tap github.Repo, f Formula, version string) (Result, error) {
 	path := f.FileName()

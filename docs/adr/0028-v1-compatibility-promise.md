@@ -1,4 +1,4 @@
-# ADR-0027: v1.0.0 promises compatibility for a named surface
+# ADR-0028: v1.0.0 promises compatibility for a named surface
 
 - Status: accepted
 - Date: 2026-10-06

@@ -61,4 +61,4 @@ working directory, so every Plugin test that touches config calls
   contract of three hooks, to carry a value `ConfigDir` already implies.
 - **Removing `ReadConfig` now.** Rejected: it breaks the public API without
   a breaking release. It was removed in v1.0.0, the next one
-  ([ADR-0027](0027-v1-compatibility-promise.md)).
+  ([ADR-0028](0028-v1-compatibility-promise.md)).

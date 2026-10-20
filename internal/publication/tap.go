@@ -16,8 +16,8 @@ import (
 )
 
 // publishTap writes a formula to the configured Homebrew tap, one per command
-// the module builds, plus that formula's @next: a stable release writes both,
-// a prerelease writes @next only.
+// the module builds, plus that formula's -next: a stable release writes both,
+// a prerelease writes -next only.
 //
 // A module with several commands gets several formulas rather than a refusal:
 // a formula installs one archive per platform, so `alpha` and `beta` cannot
@@ -48,13 +48,13 @@ func publishTap(ctx context.Context, out io.Writer, o Options) error {
 	}
 
 	// A prerelease's formula would overwrite the stable tap entry that
-	// `brew install foo` relies on, so it writes @next only — pointing at
+	// `brew install foo` relies on, so it writes -next only — pointing at
 	// whichever of the newest prerelease and the newest stable is newer.
 	// TapFiles are release output the same way the formula is, so they follow
 	// the same rule: skipped for a prerelease, written for a stable release.
 	prerelease := isPrerelease(p)
 	if prerelease {
-		fmt.Fprintln(out, "  ! a prerelease must not overwrite the stable formula: writing @next only")
+		fmt.Fprintln(out, "  ! a prerelease must not overwrite the stable formula: writing -next only")
 	}
 
 	for _, formula := range formulas(p, result, repo, info) {

@@ -153,4 +153,27 @@ type Image struct {
 	// Expose are the ports to record, as "port" or "port/proto". Metadata
 	// only: nothing is opened, and `docker run -p` works either way.
 	Expose []string
+
+	// Plugin says the release image comes from the images hook, so core
+	// builds none of its own: `image plugin`.
+	Plugin bool
+
+	// Extra are the `image <name> ( ... )` blocks: more images of the same
+	// binaries, each set up its own way and tagged with its suffix.
+	Extra []ExtraImage
+}
+
+// ExtraImage is one `image <name> ( ... )` block. It inherits nothing from
+// the release image but where it is pushed.
+type ExtraImage struct {
+	Name string
+
+	// Suffix is appended to every tag the release pushes.
+	Suffix string
+
+	Base   string
+	Cmd    []string
+	Expose []string
+
+	Pos modsyntax.Position
 }

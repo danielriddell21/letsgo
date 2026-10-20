@@ -43,10 +43,62 @@ func Agreed(file *plandiff.File) func(*plan.Plan, *release.Result) error {
 		}
 		sum := sha256.Sum256(rebuilt)
 		if got := "sha256:" + hex.EncodeToString(sum[:]); got != file.ManifestSHA256 {
+			if _, ok := pluginImagesOnly(file.Manifest, rebuilt); ok {
+				return nil
+			}
 			return refusal(file, rebuilt, got)
 		}
 		return nil
 	}
+}
+
+// pluginImagesOnly reports whether two manifests differ in nothing but the
+// digests of images an images-hook plugin built, and names those images.
+//
+// Such an image was built by a Dockerfile, not by letsgo, and a rebuild is
+// not expected to reproduce it: the manifest records the digest that was
+// published, and verification holds the tag to that. Everything else in the
+// manifest is still held to the plan byte for byte.
+func pluginImagesOnly(planned, rebuilt []byte) ([]string, bool) {
+	var a, b map[string]any
+	if json.Unmarshal(planned, &a) != nil || json.Unmarshal(rebuilt, &b) != nil {
+		return nil, false
+	}
+	changed := blankPluginDigests(a, b)
+	if len(changed) == 0 {
+		return nil, false
+	}
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	if errA != nil || errB != nil || string(ja) != string(jb) {
+		return nil, false
+	}
+	return changed, true
+}
+
+// blankPluginDigests empties the digest of every plugin image in both
+// manifests, pairwise, and returns the references whose digests differed.
+// Images that do not pair up by position are left alone, so any other change
+// to the list still differs.
+func blankPluginDigests(planned, rebuilt map[string]any) []string {
+	pa, _ := planned["images"].([]any)
+	pb, _ := rebuilt["images"].([]any)
+	if len(pa) != len(pb) {
+		return nil
+	}
+	var changed []string
+	for i := range pa {
+		ia, okA := pa[i].(map[string]any)
+		ib, okB := pb[i].(map[string]any)
+		if !okA || !okB || ia["source"] != release.SourcePlugin || ib["source"] != release.SourcePlugin {
+			continue
+		}
+		if ia["digest"] != ib["digest"] {
+			changed = append(changed, fmt.Sprintf("%v: %v → %v", ib["reference"], ia["digest"], ib["digest"]))
+		}
+		ia["digest"], ib["digest"] = "", ""
+	}
+	return changed
 }
 
 // Fresh reads the forge as it is now and holds it to the plan: every
@@ -124,6 +176,15 @@ func Hold(file *plandiff.File, p *plan.Plan, result *release.Result, logf func(s
 	}
 	if err := Agreed(file)(p, result); err != nil {
 		return err
+	}
+	if rebuilt, err := os.ReadFile(filepath.Join(result.Dir, manifest.FileName)); err == nil {
+		if changed, ok := pluginImagesOnly(file.Manifest, rebuilt); ok {
+			logf("  the rebuild matches the plan, except for images the images hook rebuilt, which cannot reproduce:")
+			for _, c := range changed {
+				logf("    %s", c)
+			}
+			return nil
+		}
 	}
 	logf("  the rebuild matches the plan")
 	return nil

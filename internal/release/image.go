@@ -44,6 +44,29 @@ type ImageBuild struct {
 	Images []*oci.Image
 	Index  oci.Blob
 	Base   *oci.Base
+
+	// Layout is set instead of Images for an image the images hook built:
+	// read from disk, and pushed as it was written, under Index.
+	Layout *oci.Layout
+
+	// Source is SourcePlugin for an image the images hook built, and empty
+	// for one core assembled.
+	Source string
+}
+
+// Platforms are the platforms the image runs on, sorted.
+func (b ImageBuild) Platforms() []string {
+	var out []string
+	if b.Layout != nil {
+		for _, p := range b.Layout.Platforms {
+			out = append(out, p.String())
+		}
+	}
+	for _, img := range b.Images {
+		out = append(out, img.Platform.String())
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Reference is the image's primary name.
@@ -51,9 +74,36 @@ func (b ImageBuild) Reference() string {
 	return fmt.Sprintf("%s/%s:%s", b.Registry, b.Repository, b.Tags[0])
 }
 
-// buildImages assembles one image per command, for every Linux target.
+// imageSpec is how one of core's images is set up: the release image, or an
+// image block. Suffix is empty for the release image.
+type imageSpec struct {
+	Suffix string
+	Base   oci.Reference
+	Cmd    []string
+	Expose []string
+}
+
+// imageSpecs are the images core builds: the release image unless the
+// images hook builds it, then every image block.
+func imageSpecs(target *plan.ImageTarget) []imageSpec {
+	var specs []imageSpec
+	if !target.Plugin {
+		specs = append(specs, imageSpec{Base: target.Base, Cmd: target.Cmd, Expose: target.Expose})
+	}
+	for _, extra := range target.Extra {
+		specs = append(specs, imageSpec{Suffix: extra.Suffix, Base: extra.Base, Cmd: extra.Cmd, Expose: extra.Expose})
+	}
+	return specs
+}
+
+// buildImages assembles, for each of core's images, one image per command
+// for every Linux target.
 func buildImages(ctx context.Context, p *plan.Plan, artifacts []build.Artifact, warnf func(string, ...any)) ([]ImageBuild, error) {
 	if p.Image == nil {
+		return nil, nil
+	}
+	specs := imageSpecs(p.Image)
+	if len(specs) == 0 {
 		return nil, nil
 	}
 
@@ -72,23 +122,28 @@ func buildImages(ctx context.Context, p *plan.Plan, artifacts []build.Artifact, 
 		"https://"+p.Repo.String(), p.Git.Commit, p.Version, p.Project, "", p.Git.CommitTime)
 
 	cache := bases{}
-	out := make([]ImageBuild, 0, len(binaries))
+	out := make([]ImageBuild, 0, len(specs)*len(binaries))
 
-	for _, binary := range binaries {
-		built := ImageBuild{
-			Registry:   p.Image.Registry,
-			APIHost:    p.Image.APIHost,
-			Repository: repos[binary],
-			Version:    p.Version,
-			Tags:       tags,
-			Floating:   floating,
-		}
+	for _, spec := range specs {
+		for _, binary := range binaries {
+			built := ImageBuild{
+				Registry:   p.Image.Registry,
+				APIHost:    p.Image.APIHost,
+				Repository: repos[binary],
+				Version:    p.Version,
+				Tags:       suffixed(tags, spec.Suffix),
+				Floating:   suffixed(floating, spec.Suffix),
+			}
 
-		one := oneImage{Plan: p, Built: &built, Binary: binary, Artifacts: byBinary[binary], Annotations: annotations, Cache: cache, Warnf: warnf}
-		if err := one.build(ctx); err != nil {
-			return nil, err
+			one := oneImage{
+				Plan: p, Spec: spec, Built: &built, Binary: binary, Artifacts: byBinary[binary],
+				Annotations: annotations, Cache: cache, Warnf: warnf,
+			}
+			if err := one.build(ctx); err != nil {
+				return nil, err
+			}
+			out = append(out, built)
 		}
-		out = append(out, built)
 	}
 	return out, nil
 }
@@ -128,6 +183,9 @@ func groupForImages(p *plan.Plan, artifacts []build.Artifact) ([]string, map[str
 type oneImage struct {
 	Plan *plan.Plan
 
+	// Spec is how this image is set up: its base, cmd and ports.
+	Spec imageSpec
+
 	// Built is filled in: its Base, Images and Index.
 	Built *ImageBuild
 
@@ -152,7 +210,7 @@ func (o oneImage) build(ctx context.Context) error {
 	for _, a := range o.Artifacts {
 		platform := oci.Platform{OS: a.OS, Architecture: a.Arch}
 
-		base, err := o.Cache.resolve(ctx, p, platform, o.Warnf)
+		base, err := o.Cache.resolve(ctx, o.Spec.Base, platform, o.Warnf)
 		if err != nil {
 			return err
 		}
@@ -164,8 +222,8 @@ func (o oneImage) build(ctx context.Context) error {
 			Platform:     platform,
 			Created:      p.Git.CommitTime,
 			Base:         base,
-			Cmd:          p.Image.Cmd,
-			ExposedPorts: p.Image.Expose,
+			Cmd:          o.Spec.Cmd,
+			ExposedPorts: o.Spec.Expose,
 			Annotations:  annotations,
 		})
 		if err != nil {
@@ -182,18 +240,17 @@ func (o oneImage) build(ctx context.Context) error {
 	return nil
 }
 
-// bases resolves each platform's base image once. A module with three
-// commands would otherwise read the same base three times per platform.
+// bases resolves each base once per platform. A module with three commands
+// would otherwise read the same base three times per platform.
 type bases map[string]*oci.Base
 
-// resolve reads the base image for one platform, or returns nil for scratch.
-func (cache bases) resolve(ctx context.Context, p *plan.Plan, platform oci.Platform, warnf func(string, ...any)) (*oci.Base, error) {
-	ref := p.Image.Base
+// resolve reads a base image for one platform, or returns nil for scratch.
+func (cache bases) resolve(ctx context.Context, ref oci.Reference, platform oci.Platform, warnf func(string, ...any)) (*oci.Base, error) {
 	if ref == (oci.Reference{}) {
 		return nil, nil
 	}
 
-	key := platform.String()
+	key := ref.String() + " " + platform.String()
 	if cached, ok := cache[key]; ok {
 		return cached, nil
 	}
@@ -289,17 +346,12 @@ func imageRecords(builds []ImageBuild) []manifest.Image {
 
 	out := make([]manifest.Image, 0, len(builds))
 	for _, b := range builds {
-		platforms := make([]string, 0, len(b.Images))
-		for _, img := range b.Images {
-			platforms = append(platforms, img.Platform.String())
-		}
-		sort.Strings(platforms)
-
 		record := manifest.Image{
 			Reference: b.Registry + "/" + b.Repository,
 			Digest:    string(b.Index.Digest),
 			Tags:      append(append([]string{}, b.Tags...), b.Floating...),
-			Platforms: platforms,
+			Platforms: b.Platforms(),
+			Source:    b.Source,
 		}
 		if b.Base != nil {
 			// The digest, not the tag: a tag says what was asked for, and a

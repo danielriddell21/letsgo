@@ -55,6 +55,10 @@ func decodeBlock(cfg *Config, file string, seen map[string]modsyntax.Position, b
 	if b.Keyword == "variant" {
 		return applyVariant(cfg, file, b)
 	}
+	// So is a named image: each is one more image of the same binaries.
+	if b.Keyword == "image" && len(b.Args) > 0 {
+		return applyImageBlock(cfg, file, b)
+	}
 	if len(b.Args) > 0 {
 		return errAt(file, b.P, "%s takes no name before its block", b.Keyword)
 	}

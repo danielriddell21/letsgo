@@ -234,6 +234,9 @@ type Plan struct {
 	Tap   github.Repo
 	Image *ImageTarget
 
+	// ImagesHook is set when an images hook is pinned and ready to run.
+	ImagesHook *ImagesHook
+
 	// Global is the machine configuration this plan was resolved under, so
 	// what is done with the plan reads the same settings the plan reported.
 	Global *config.Global
@@ -375,6 +378,7 @@ func Resolve(ctx context.Context, opts Options) (*Plan, error) {
 
 	p.resolveTap()
 	p.resolveImage(ctx)
+	p.resolveImagesHook(ctx)
 	p.hintPlugins()
 
 	if opts.Publish {

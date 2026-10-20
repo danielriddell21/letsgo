@@ -92,7 +92,7 @@ func artifact(archive, goos, goarch, sum string, binaries ...string) build.Artif
 }
 
 // A prerelease's formula would overwrite the stable formula that `brew
-// install foo` relies on, so publishTap must write @next only.
+// install foo` relies on, so publishTap must write -next only.
 func TestPublishTapSkipsAPrerelease(t *testing.T) {
 	t.Parallel()
 	p := releasePlan()
@@ -106,12 +106,12 @@ func TestPublishTapSkipsAPrerelease(t *testing.T) {
 	if err := publishTap(context.Background(), io.Discard, Options{Plan: p, Result: result, Tap: tap, Repo: github.Repo{Owner: "you", Name: "foo"}}); err != nil {
 		t.Fatal(err)
 	}
-	if len(tap.writes) != 1 || tap.writes[0] != "Formula/foo@next.rb" {
-		t.Errorf("writes = %v, want [Formula/foo@next.rb]", tap.writes)
+	if len(tap.writes) != 1 || tap.writes[0] != "Formula/foo-next.rb" {
+		t.Errorf("writes = %v, want [Formula/foo-next.rb]", tap.writes)
 	}
 }
 
-// A stable release must still write its formula normally, plus @next: the
+// A stable release must still write its formula normally, plus -next: the
 // prerelease guard must not over-suppress the tap.
 func TestPublishTapWritesAFormulaForAStableRelease(t *testing.T) {
 	t.Parallel()
@@ -124,8 +124,8 @@ func TestPublishTapWritesAFormulaForAStableRelease(t *testing.T) {
 	if err := publishTap(context.Background(), io.Discard, Options{Plan: p, Result: result, Tap: tap, Repo: github.Repo{Owner: "you", Name: "foo"}}); err != nil {
 		t.Fatal(err)
 	}
-	if len(tap.writes) != 2 || tap.writes[0] != "Formula/foo.rb" || tap.writes[1] != "Formula/foo@next.rb" {
-		t.Errorf("writes = %v, want [Formula/foo.rb Formula/foo@next.rb]", tap.writes)
+	if len(tap.writes) != 2 || tap.writes[0] != "Formula/foo.rb" || tap.writes[1] != "Formula/foo-next.rb" {
+		t.Errorf("writes = %v, want [Formula/foo.rb Formula/foo-next.rb]", tap.writes)
 	}
 }
 
@@ -170,7 +170,7 @@ func TestPublishTapNamesTheFileItCouldNotWrite(t *testing.T) {
 		want string
 	}{
 		{"the formula", "Formula/foo.rb", "publishing formula foo"},
-		{"the next formula", "Formula/foo@next.rb", "publishing formula foo@next"},
+		{"the next formula", "Formula/foo-next.rb", "publishing formula foo-next"},
 		{"a tap file", "Casks/foo.rb", "publishing Casks/foo.rb"},
 	}
 	for _, tt := range tests {

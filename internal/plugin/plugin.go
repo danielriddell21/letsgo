@@ -37,6 +37,7 @@ const (
 	HookLDFlags       = pub.HookLDFlags
 	HookArchiveLayout = pub.HookArchiveLayout
 	HookTapFiles      = pub.HookTapFiles
+	HookImages        = pub.HookImages
 )
 
 // Hooks is the closed set, in the order they run.
@@ -58,10 +59,14 @@ type Plugin struct {
 	Digest string
 }
 
-// timeout bounds a plugin's run. A hook answers a question from data it is
-// handed; one that has not answered in a minute is stuck, and a release that
-// hangs is worse than one that fails.
-const timeout = time.Minute
+// DefaultTimeout bounds a plugin's run. A hook answers a question from data
+// it is handed; one that has not answered in a minute is stuck, and a release
+// that hangs is worse than one that fails.
+//
+// The images hook is the exception: it builds, and a build takes as long as
+// it takes. Its caller passes a longer limit, read from the plugin's config
+// and capped by plan.
+const DefaultTimeout = time.Minute
 
 // Run executes the plugin in dir, sending input as JSON on stdin and decoding
 // its stdout into output.
@@ -79,6 +84,11 @@ const timeout = time.Minute
 // settings. A legacy root-relative file beside letsgo.mod is still read by
 // plugins that have not moved yet, with a plan Warn suggesting they do.
 func Run(ctx context.Context, p Plugin, dir, pluginsDir string, input, output any) error {
+	return RunWithin(ctx, DefaultTimeout, p, dir, pluginsDir, input, output)
+}
+
+// RunWithin is Run with a limit other than DefaultTimeout.
+func RunWithin(ctx context.Context, timeout time.Duration, p Plugin, dir, pluginsDir string, input, output any) error {
 	path, err := resolve(p, dir, pluginsDir)
 	if err != nil {
 		return err
@@ -101,14 +111,27 @@ func Run(ctx context.Context, p Plugin, dir, pluginsDir string, input, output an
 	// is that the answer is recorded and replayed, not that its inputs were
 	// rationed. One hook exists precisely to read the environment.
 	//
-	// tap-files is the one exception: it renders files for core to write, and
-	// core is the one that talks to the forge and the tap. A credential that
-	// can publish to someone else's repository has no reason to be in this
-	// process's environment at all.
+	// tap-files and images are the exceptions: each produces something for
+	// core to publish, and core is the one that talks to the forge, the tap
+	// and the registry. A credential that can publish has no reason to be in
+	// this process's environment at all.
+	//
+	// images also loses the registry credentials core pushes with. A build
+	// that pulls a private base reads docker's own login, not these.
 	cmd.Env = os.Environ()
-	if p.Hook == HookTapFiles {
-		cmd.Env = withoutEnv(cmd.Env, "GITHUB_TOKEN", "GH_TOKEN", "LETSGO_TAP_TOKEN", "LETSGO_RELEASE_TOKEN")
+	switch p.Hook {
+	case HookTapFiles:
+		cmd.Env = withoutEnv(withoutEnv(cmd.Env, forgeTokens...), ciTokens...)
+	case HookImages:
+		cmd.Env = withoutEnv(withoutEnv(withoutEnv(cmd.Env, forgeTokens...), ciTokens...), registryCredentials...)
 	}
+
+	// A plugin may start programs of its own: the images hook runs a whole
+	// build. Run in its own process group, a timeout stops all of it rather
+	// than the plugin alone, and WaitDelay stops the wait on a child that
+	// still holds stdout open.
+	inOwnGroup(cmd)
+	cmd.WaitDelay = waitDelay
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -125,6 +148,20 @@ func Run(ctx context.Context, p Plugin, dir, pluginsDir string, input, output an
 	}
 	return nil
 }
+
+// forgeTokens can write to the forge and the tap.
+var forgeTokens = []string{"GITHUB_TOKEN", "GH_TOKEN", "LETSGO_TAP_TOKEN", "LETSGO_RELEASE_TOKEN"}
+
+// ciTokens let a GitHub Actions job mint credentials of its own: an OIDC
+// token for any audience the workflow's id-token permission allows, and the
+// runtime token for the Actions cache and artifacts.
+var ciTokens = []string{"ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_RUNTIME_TOKEN"}
+
+// waitDelay is how long a run waits for a stopped plugin's output to close.
+const waitDelay = 10 * time.Second
+
+// registryCredentials are the ones core pushes a non-ghcr image with.
+var registryCredentials = []string{"REGISTRY_USERNAME", "REGISTRY_PASSWORD", "DOCKER_USERNAME", "DOCKER_PASSWORD"}
 
 // withoutEnv returns env with any variable named in drop removed.
 func withoutEnv(env []string, drop ...string) []string {

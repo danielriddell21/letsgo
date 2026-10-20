@@ -3,7 +3,7 @@
 From v1.0.0, letsgo follows [semantic versioning][semver] for the surface
 listed here. A change that breaks any of it is a major release; anything
 added to it is a minor release; a fix is a patch. The reasoning and the
-alternatives are in [ADR-0027](adr/0027-v1-compatibility-promise.md).
+alternatives are in [ADR-0028](adr/0028-v1-compatibility-promise.md).
 
 ## What is covered
 
@@ -11,9 +11,9 @@ alternatives are in [ADR-0027](adr/0027-v1-compatibility-promise.md).
 | --- | --- |
 | **Command line** | The commands and flags in the README's Usage section, their meanings, and their exit statuses (`2` from `plan --diff --exit-code` means the plan has changes). A flag may be added; none is removed or changes meaning. |
 | **`letsgo.mod`** | Every directive and its arguments, and the defaults a repository gets with no config. A directive that parses today parses the same way. New directives are additive. `modsyntax` and `letsgo fmt` keep their grammar. |
-| **Machine-readable output** | The JSON forms: `plan --json`, `version --json`, `plugin list --json`, `doctor --json`, `verify --json`, `diff --format json`, `features --json`. Fields are added, never renamed, removed or retyped. |
+| **Machine-readable output** | The JSON forms: `plan --json`, `version --json`, `plugin list --json`, `tag --json`, `doctor --json`, `verify --json`, `diff --format json`, `features --json`. Fields are added, never renamed, removed or retyped. |
 | **Files letsgo writes** | The manifest `letsgo.json` (schema 1), the plan file (schema 1), the install record `.<binary>.install.json` (schema 1), and the asset names a release publishes. `install.sh` keeps its `-b` and `-n` flags. A new schema number is a major release; readers that tolerate an unfamiliar number (`manifest.Decode`) keep doing so. |
-| **Plugin wire contract** | The hooks `ldflags`, `archive-layout` and `tap-files`, their JSON input and output, and how a plugin finds its config ([ADR-0023](adr/0023-plugins-share-cores-wire-contract.md), [ADR-0025](adr/0025-core-owns-plugin-config-syntax.md)). A new hook is additive. |
+| **Plugin wire contract** | The hooks `ldflags`, `archive-layout`, `tap-files` and `images`, their JSON input and output, the OCI image layout an `images` plugin writes, and how a plugin finds its config ([ADR-0023](adr/0023-plugins-share-cores-wire-contract.md), [ADR-0025](adr/0025-core-owns-plugin-config-syntax.md), [ADR-0027](adr/0027-images-hook-plugin-builds-core-pushes.md)). A new hook is additive. |
 | **Reading old releases** | `verify`, `diff`, `audit`, `promote` and `yank` keep reading the manifests of every earlier v1 release. |
 | **Go API** | The exported identifiers of `github.com/danielriddell21/letsgo/plan`, `plugin`, `manifest`, `selfupdate` and `modsyntax`. letsgo's own release runs its API gate against the previous release, so a removal cannot ship by accident. |
 

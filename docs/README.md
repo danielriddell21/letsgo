@@ -31,6 +31,7 @@ Each HLD opens with its status. Implemented designs are kept as the record of wh
 | Randomart | [#34](https://github.com/danielriddell21/letsgo/issues/34) | [#42](https://github.com/danielriddell21/letsgo/issues/42) | [prd](prd/randomart.md) | [hld](hld/randomart.md) | [pbs](pbs/randomart.md) | [0014](adr/0014-fingerprints-from-manifest-digest.md) |
 | PGP words | [#35](https://github.com/danielriddell21/letsgo/issues/35) | [#42](https://github.com/danielriddell21/letsgo/issues/42) | [prd](prd/pgp-words.md) | [hld](hld/pgp-words.md) | [pbs](pbs/pgp-words.md) | [0014](adr/0014-fingerprints-from-manifest-digest.md) |
 | Receipt | [#36](https://github.com/danielriddell21/letsgo/issues/36) | [#42](https://github.com/danielriddell21/letsgo/issues/42) | [prd](prd/receipt.md) | [hld](hld/receipt.md) | [pbs](pbs/receipt.md) | [0014](adr/0014-fingerprints-from-manifest-digest.md), [0015](adr/0015-easter-eggs-render-verify-result.md) |
+| More than one image (`image` blocks, `images` hook) | — | — | — | [hld](hld/images-hook.md) | — | [0027](adr/0027-images-hook-plugin-builds-core-pushes.md) |
 
 ## ADRs
 
@@ -62,8 +63,9 @@ Each HLD opens with its status. Implemented designs are kept as the record of wh
 | [0024](adr/0024-published-release-reader.md) | One Published Release reader selects and fetches what the forge holds | accepted |
 | [0025](adr/0025-core-owns-plugin-config-syntax.md) | Core owns Plugin config syntax, not just its location | accepted |
 | [0026](adr/0026-releaser-owns-the-release-flow.md) | An internal releaser module owns the release flow | accepted |
-| [0027](adr/0027-v1-compatibility-promise.md) | v1.0.0 promises compatibility for a named surface | accepted |
-| [0028](adr/0028-installer-fingerprint-and-record.md) | The installer checks the manifest, shows its fingerprint, and leaves a record | accepted |
+| [0027](adr/0027-images-hook-plugin-builds-core-pushes.md) | Suffixed `image` blocks in core; Dockerfiles via an `images` hook | accepted |
+| [0028](adr/0028-v1-compatibility-promise.md) | v1.0.0 promises compatibility for a named surface | accepted |
+| [0029](adr/0029-installer-fingerprint-and-record.md) | The installer checks the manifest, shows its fingerprint, and leaves a record | accepted |
 
 New ADRs take the next number. Superseded ADRs stay, with their status set to
 `superseded by NNNN`.

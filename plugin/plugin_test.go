@@ -12,7 +12,7 @@ import (
 )
 
 func TestHooksAreAClosedSet(t *testing.T) {
-	if !HookLDFlags.Valid() || !HookArchiveLayout.Valid() || !HookTapFiles.Valid() {
+	if !HookLDFlags.Valid() || !HookArchiveLayout.Valid() || !HookTapFiles.Valid() || !HookImages.Valid() {
 		t.Error("a documented hook is not valid")
 	}
 	if Hook("exec").Valid() {
@@ -20,8 +20,9 @@ func TestHooksAreAClosedSet(t *testing.T) {
 	}
 }
 
-func TestHooksListsBothHooks(t *testing.T) {
-	if len(Hooks) != 3 || Hooks[0] != HookLDFlags || Hooks[1] != HookArchiveLayout || Hooks[2] != HookTapFiles {
+func TestHooksListsEveryHookInOrder(t *testing.T) {
+	if len(Hooks) != 4 || Hooks[0] != HookLDFlags || Hooks[1] != HookArchiveLayout || Hooks[2] != HookTapFiles ||
+		Hooks[3] != HookImages {
 		t.Errorf("Hooks = %v", Hooks)
 	}
 }
@@ -240,5 +241,18 @@ func TestMainExitsNonZeroForTheWrongHook(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), string(HookLDFlags)) {
 		t.Errorf("stderr = %q, want it to name the hook asked for", stderr.String())
+	}
+}
+
+func TestCheckSuffix(t *testing.T) {
+	for _, ok := range []string{"-fixer", "_tool", "-fixer.debug", "-a1", "-x-y_z"} {
+		if err := CheckSuffix(ok); err != nil {
+			t.Errorf("CheckSuffix(%q) = %v, want nil", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "fixer", "-1", "-rc.1", "-beta.2", ".4", "-a/b", "-a.", "-a..b", "-fixer.1"} {
+		if err := CheckSuffix(bad); err == nil {
+			t.Errorf("CheckSuffix(%q) = nil, want a refusal", bad)
+		}
 	}
 }

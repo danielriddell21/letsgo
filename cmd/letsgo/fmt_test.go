@@ -100,3 +100,37 @@ func TestRunFmtDashMatchesFileModeByteForByte(t *testing.T) {
 		t.Errorf("runFmt - output = %q, want %q", out, string(wantFile))
 	}
 }
+
+// A Plugin's config shares the grammar, not letsgo.mod's directives: an image
+// block's platform is letsgo-docker's setting, and fmt formats it as written.
+func TestRunFmtFormatsAPluginConfigWithoutLetsgoModsDirectives(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".letsgo", "docker.mod")
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("image fixer (\n    platform   linux/amd64\n)\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runFmt([]string{path}); err != nil {
+		t.Fatalf("fmt refused a plugin config: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "\tplatform linux/amd64") {
+		t.Errorf("formatted = %q", got)
+	}
+}
+
+// letsgo.mod itself is still held to its directives.
+func TestRunFmtStillDecodesLetsgoMod(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "letsgo.mod")
+	if err := os.WriteFile(path, []byte("image fixer (\n\tplatform linux/amd64\n)\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runFmt([]string{path}); err == nil {
+		t.Error("fmt accepted a letsgo.mod image block setting letsgo.mod does not have")
+	}
+}

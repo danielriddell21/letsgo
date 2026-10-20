@@ -4,11 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/internal/pluginstore"
@@ -206,7 +210,8 @@ func putInStore(t *testing.T, storeDir, digest, name, src string) {
 }
 
 func TestHooksAreAClosedSet(t *testing.T) {
-	if !plugin.HookLDFlags.Valid() || !plugin.HookArchiveLayout.Valid() || !plugin.HookTapFiles.Valid() {
+	if !plugin.HookLDFlags.Valid() || !plugin.HookArchiveLayout.Valid() || !plugin.HookTapFiles.Valid() ||
+		!plugin.HookImages.Valid() {
 		t.Error("a documented hook is not valid")
 	}
 	if plugin.Hook("exec").Valid() {
@@ -219,7 +224,7 @@ func TestHooksAreAClosedSet(t *testing.T) {
 func TestRunStripsTokensFromTheTapFilesHookEnv(t *testing.T) {
 	noStore(t)
 	dir, digest := fake(t, `
-if [ -n "$GITHUB_TOKEN$GH_TOKEN$LETSGO_TAP_TOKEN$LETSGO_RELEASE_TOKEN" ]; then
+if [ -n "$GITHUB_TOKEN$GH_TOKEN$LETSGO_TAP_TOKEN$LETSGO_RELEASE_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN" ]; then
   echo "a token reached the plugin" >&2
   exit 1
 fi
@@ -229,6 +234,8 @@ echo '{"files":[]}'`)
 	t.Setenv("GH_TOKEN", "secret")
 	t.Setenv("LETSGO_TAP_TOKEN", "secret")
 	t.Setenv("LETSGO_RELEASE_TOKEN", "secret")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "secret")
+	t.Setenv("ACTIONS_RUNTIME_TOKEN", "secret")
 
 	var out plugin.TapFilesOutput
 	err := plugin.Run(context.Background(),
@@ -237,6 +244,101 @@ echo '{"files":[]}'`)
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// The images hook builds for core to push, so neither the forge's token nor
+// the registry's credentials belong in its environment.
+func TestRunStripsCredentialsFromTheImagesHookEnv(t *testing.T) {
+	noStore(t)
+	dir, digest := fake(t, `
+if [ -n "$GITHUB_TOKEN$GH_TOKEN$LETSGO_TAP_TOKEN$LETSGO_RELEASE_TOKEN$REGISTRY_PASSWORD$DOCKER_PASSWORD$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_ID_TOKEN_REQUEST_URL$ACTIONS_RUNTIME_TOKEN" ]; then
+  echo "a credential reached the plugin" >&2
+  exit 1
+fi
+echo '{"images":[]}'`)
+	t.Setenv("PATH", dir)
+	for _, name := range []string{
+		"GITHUB_TOKEN", "GH_TOKEN", "LETSGO_TAP_TOKEN", "LETSGO_RELEASE_TOKEN",
+		"REGISTRY_PASSWORD", "DOCKER_PASSWORD",
+		"ACTIONS_ID_TOKEN_REQUEST_TOKEN", "ACTIONS_ID_TOKEN_REQUEST_URL", "ACTIONS_RUNTIME_TOKEN",
+	} {
+		t.Setenv(name, "secret")
+	}
+
+	var out plugin.ImagesOutput
+	err := plugin.Run(context.Background(),
+		plugin.Plugin{Hook: plugin.HookImages, Command: "letsgo-fake", Digest: digest},
+		t.TempDir(), "", plugin.ImagesInput{}, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// RunWithin's limit is the one that applies: a plugin outliving it is killed
+// and the run fails rather than hanging the release.
+func TestRunWithinStopsAPluginAtItsLimit(t *testing.T) {
+	noStore(t)
+	dir, digest := fake(t, `exec sleep 5`)
+	t.Setenv("PATH", dir)
+
+	start := time.Now()
+	err := plugin.RunWithin(context.Background(), 100*time.Millisecond,
+		plugin.Plugin{Hook: plugin.HookImages, Command: "letsgo-fake", Digest: digest},
+		t.TempDir(), "", plugin.ImagesInput{}, &plugin.ImagesOutput{})
+	if err == nil {
+		t.Fatal("a plugin past its limit succeeded")
+	}
+	if elapsed := time.Since(start); elapsed > 3*time.Second {
+		t.Errorf("the run took %s; the limit was not applied", elapsed)
+	}
+}
+
+// A timeout stops what the plugin started too: a build it is waiting on, and
+// one that holds the plugin's stdout open after the plugin itself is gone.
+func TestRunWithinStopsWhatThePluginStarted(t *testing.T) {
+	noStore(t)
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	dir, digest := fake(t, `sleep 30 &
+echo $! > `+pidFile+`
+wait`)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	start := time.Now()
+	err := plugin.RunWithin(context.Background(), 300*time.Millisecond,
+		plugin.Plugin{Hook: plugin.HookImages, Command: "letsgo-fake", Digest: digest},
+		t.TempDir(), "", plugin.ImagesInput{}, &plugin.ImagesOutput{})
+	if err == nil {
+		t.Fatal("a plugin past its limit succeeded")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("the run took %s: it waited on the plugin's child", elapsed)
+	}
+
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for alive(pid) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the plugin's child %d outlived the timeout", pid)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// alive reports whether a process still exists and is not a zombie.
+func alive(pid int) bool {
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return exec.Command("kill", "-0", strconv.Itoa(pid)).Run() == nil
+	}
+	fields := strings.Fields(string(stat))
+	return len(fields) > 2 && fields[2] != "Z"
 }
 
 // Every other hook keeps the whole environment: only tap-files talks about a

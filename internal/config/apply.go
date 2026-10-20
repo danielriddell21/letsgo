@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/danielriddell21/letsgo/modsyntax"
+	pub "github.com/danielriddell21/letsgo/plugin"
 
 	"github.com/danielriddell21/letsgo/internal/feature"
 )
@@ -250,6 +252,106 @@ var imageSettings = map[string]func(*Image, string, *modsyntax.Line) error{
 	"base":   applyImageBase,
 	"cmd":    applyImageCmd,
 	"expose": applyImageExpose,
+	"plugin": applyImagePlugin,
+}
+
+func applyImagePlugin(img *Image, file string, line *modsyntax.Line) error {
+	if len(line.Args) != 1 {
+		return arity(file, line)
+	}
+	if img.Plugin {
+		return errAt(file, line.P, "image plugin is already set")
+	}
+	img.Plugin = true
+	return nil
+}
+
+// imageName is what an image block may be called: it names the block in
+// messages, so it is kept to one plain word.
+var imageName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
+
+// imageBlockSettings are what an image block may set: how the image runs,
+// and the suffix that tells its tags apart. Where it is pushed is the release
+// image's, and is not repeated.
+var imageBlockSettings = map[string]bool{"base": true, "cmd": true, "expose": true}
+
+// applyImageBlock reads one `image <name> ( ... )` block: another image of
+// the same binaries.
+//
+// Its base, cmd and expose lines are parsed by the same functions as the
+// release image's, onto an image of its own, so the two cannot drift.
+func applyImageBlock(cfg *Config, file string, b *modsyntax.Block) error {
+	if len(b.Args) != 1 {
+		return errAt(file, b.P, "expected an image <name> ( ... ) block")
+	}
+	name := b.Args[0]
+	if _, reserved := imageSettings[name]; reserved || !imageName.MatchString(name) {
+		return errAt(file, b.P, "%q cannot name an image block: use a plain word that is not base, cmd, expose or plugin",
+			name)
+	}
+	if cfg.Image == nil {
+		cfg.Image = &Image{}
+	}
+
+	extra, err := readImageBlock(file, b)
+	if err != nil {
+		return err
+	}
+	for _, existing := range cfg.Image.Extra {
+		switch {
+		case existing.Name == name:
+			return errAt(file, b.P, "image %s is already defined", name)
+		case existing.Suffix == extra.Suffix:
+			return errAt(file, b.P, "images %s and %s share the suffix %s", existing.Name, name, extra.Suffix)
+		}
+	}
+	cfg.Image.Extra = append(cfg.Image.Extra, extra)
+	return nil
+}
+
+// readImageBlock reads an image block's lines into the image it describes.
+func readImageBlock(file string, b *modsyntax.Block) (ExtraImage, error) {
+	extra := ExtraImage{Name: b.Args[0], Pos: b.P}
+	inner := &Image{}
+	for _, line := range b.Lines {
+		if len(line.Args) == 0 {
+			continue
+		}
+		keyword := line.Args[0]
+		var err error
+		switch {
+		case keyword == "suffix":
+			err = applyImageSuffix(&extra, file, line)
+		case imageBlockSettings[keyword]:
+			err = imageSettings[keyword](inner, file, &modsyntax.Line{Keyword: "image", Args: line.Args, P: line.P})
+		default:
+			err = errAt(file, line.P, "an image block sets suffix, base, cmd and expose; %q is not one of them", keyword)
+		}
+		if err != nil {
+			return ExtraImage{}, err
+		}
+	}
+
+	if extra.Suffix == "" {
+		return ExtraImage{}, errAt(file, b.P,
+			"image %s needs a suffix; it is what tells its tags apart from the release image's", extra.Name)
+	}
+	extra.Base, extra.Cmd, extra.Expose = inner.Base, inner.Cmd, inner.Expose
+	return extra, nil
+}
+
+func applyImageSuffix(extra *ExtraImage, file string, line *modsyntax.Line) error {
+	switch {
+	case len(line.Args) != 2:
+		return errAt(file, line.P, "expected `suffix <text>`")
+	case extra.Suffix != "":
+		return errAt(file, line.P, "suffix is already set")
+	}
+	if err := pub.CheckSuffix(line.Args[1]); err != nil {
+		return errAt(file, line.P, "%v", err)
+	}
+	extra.Suffix = line.Args[1]
+	return nil
 }
 
 func applyImage(cfg *Config, file string, line *modsyntax.Line) error {

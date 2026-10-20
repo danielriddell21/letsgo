@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,5 +126,54 @@ func TestAgreedReportsAMissingManifest(t *testing.T) {
 	file := planFileFor("v1.3.0", "abc", "{}", "sha256:x")
 	if err := Agreed(file)(resolvedPlan("v1.3.0", "abc"), &release.Result{Dir: t.TempDir()}); err == nil {
 		t.Error("agreedPlan succeeded with no manifest to compare")
+	}
+}
+
+// A Dockerfile image does not rebuild to the same digest, and the plan cannot
+// have expected it to; everything else is still held byte for byte.
+func TestAgreedAcceptsARebuiltPluginImageOnly(t *testing.T) {
+	image := func(digest string) string {
+		return `{"version":"1.3.0","images":[` +
+			`{"reference":"ghcr.io/you/talos","digest":"sha256:core"},` +
+			`{"reference":"ghcr.io/you/talos","digest":"` + digest + `","source":"plugin"}]}`
+	}
+	planned := image("sha256:planned")
+	_, plannedDigest := rebuiltIn(t, planned)
+	result, _ := rebuiltIn(t, image("sha256:rebuilt"))
+	file := planFileFor("v1.3.0", "abc", planned, plannedDigest)
+
+	if err := Agreed(file)(resolvedPlan("v1.3.0", "abc"), result); err != nil {
+		t.Fatalf("a rebuilt plugin image was refused: %v", err)
+	}
+
+	var logged []string
+	logf := func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
+	if err := Hold(file, resolvedPlan("v1.3.0", "abc"), result, logf); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(logged, "\n"); !strings.Contains(got, "sha256:planned → sha256:rebuilt") {
+		t.Errorf("the changed digest was not reported:\n%s", got)
+	}
+}
+
+func TestAgreedStillRefusesAnythingElseBesideAPluginImage(t *testing.T) {
+	for name, rebuilt := range map[string]string{
+		"core's image": `{"version":"1.3.0","images":[{"reference":"r","digest":"sha256:other"},` +
+			`{"reference":"r","digest":"sha256:rebuilt","source":"plugin"}]}`,
+		"another field": `{"version":"1.3.1","images":[{"reference":"r","digest":"sha256:core"},` +
+			`{"reference":"r","digest":"sha256:rebuilt","source":"plugin"}]}`,
+		"a plugin image's tags": `{"version":"1.3.0","images":[{"reference":"r","digest":"sha256:core"},` +
+			`{"reference":"r","digest":"sha256:rebuilt","source":"plugin","tags":["x"]}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			planned := `{"version":"1.3.0","images":[{"reference":"r","digest":"sha256:core"},` +
+				`{"reference":"r","digest":"sha256:planned","source":"plugin"}]}`
+			_, plannedDigest := rebuiltIn(t, planned)
+			result, _ := rebuiltIn(t, rebuilt)
+
+			if err := Agreed(planFileFor("v1.3.0", "abc", planned, plannedDigest))(resolvedPlan("v1.3.0", "abc"), result); err == nil {
+				t.Error("a rebuild differing in more than a plugin image's digest was accepted")
+			}
+		})
 	}
 }

@@ -46,14 +46,25 @@ func pushImages(ctx context.Context, builds []release.ImageBuild, registryAt fun
 			return err
 		}
 
-		result, err := oci.Push(ctx, oci.PushOptions{
-			Registry:   registry,
-			Repository: built.Repository,
-			Tags:       tags,
-			Images:     built.Images,
-			Index:      built.Index,
-			Base:       baseSource(built, registry),
-		})
+		var result *oci.PushResult
+		if built.Layout != nil {
+			result, err = oci.PushLayout(ctx, oci.LayoutPushOptions{
+				Registry:   registry,
+				Repository: built.Repository,
+				Tags:       tags,
+				Layout:     built.Layout,
+				Index:      built.Index,
+			})
+		} else {
+			result, err = oci.Push(ctx, oci.PushOptions{
+				Registry:   registry,
+				Repository: built.Repository,
+				Tags:       tags,
+				Images:     built.Images,
+				Index:      built.Index,
+				Base:       baseSource(built, registry),
+			})
+		}
 		if err != nil {
 			return err
 		}

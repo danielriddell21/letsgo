@@ -83,17 +83,25 @@ jobs:
       # Two credentials, each scoped to the one repository it writes to. The
       # plan gate probes both, so a tap the App cannot reach fails here rather
       # than after everything has been built and published.
+      #
+      # version: local builds letsgo from this checkout, so letsgo releases
+      # itself with the source being released.
       - name: plan
-        run: go run ./cmd/letsgo plan --publish
-        env:
-          GITHUB_TOKEN: ${{ steps.letsgo-token.outputs.token }}
-          LETSGO_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
+        uses: danielriddell21/letsgo-action@v1
+        with:
+          version: local
+          command: plan
+          args: --publish
+          token: ${{ steps.letsgo-token.outputs.token }}
+          tap-token: ${{ steps.tap-token.outputs.token }}
 
       - name: release
-        run: go run ./cmd/letsgo release
-        env:
-          GITHUB_TOKEN: ${{ steps.letsgo-token.outputs.token }}
-          LETSGO_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
+        uses: danielriddell21/letsgo-action@v1
+        with:
+          version: local
+          command: release
+          token: ${{ steps.letsgo-token.outputs.token }}
+          tap-token: ${{ steps.tap-token.outputs.token }}
 
       # Records which workflow built these bytes. Keyed by digest, so it
       # applies equally to the copies already uploaded.

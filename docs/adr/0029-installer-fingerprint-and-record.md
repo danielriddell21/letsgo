@@ -1,4 +1,4 @@
-# ADR-0028: The installer checks the manifest, shows its fingerprint, and leaves a record
+# ADR-0029: The installer checks the manifest, shows its fingerprint, and leaves a record
 
 - Status: accepted
 - Date: 2026-10-12

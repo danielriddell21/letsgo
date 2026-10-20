@@ -19,4 +19,8 @@ type (
 	TapArtifact         = pub.TapArtifact
 	TapFilesOutput      = pub.TapFilesOutput
 	TapFile             = pub.TapFile
+	ImagesInput         = pub.ImagesInput
+	ImageBinary         = pub.ImageBinary
+	ImagesOutput        = pub.ImagesOutput
+	OutputImage         = pub.OutputImage
 )
