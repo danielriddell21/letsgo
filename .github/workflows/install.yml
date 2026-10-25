@@ -1,0 +1,97 @@
+name: install
+
+# Installs a published release the way the README tells people to: through
+# its own install.sh, on the two systems that script supports. Nothing else
+# runs it — letsgo-action uses go install — so without this the installer is
+# only ever tested by whoever installs the next release.
+on:
+  # Every release, candidates included: they are published with letsgo's own
+  # App token, so the event fires.
+  release:
+    types: [published]
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to install"
+        required: true
+
+  # A change to this file is tested against the latest release.
+  pull_request:
+    paths: [".github/workflows/install.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: fetch install.sh
+        run: |
+          set -euo pipefail
+          if [ -z "${TAG}" ]; then
+            TAG=$(gh release view --repo "${REPO}" --json tagName --jq .tagName)
+          fi
+          echo "TAG=${TAG}" >> "${GITHUB_ENV}"
+          # HTTPS only, redirects included: the script is what checks every
+          # digest, so it must not arrive over a connection anyone can rewrite.
+          curl --proto "=https" --tlsv1.2 -fsSL "https://github.com/${REPO}/releases/download/${TAG}/install.sh" -o install.sh
+
+      # The dry run checks the manifest, prints the fingerprint, and must not
+      # write anything.
+      - name: dry run
+        run: |
+          set -euo pipefail
+          bin="${RUNNER_TEMP}/dry"
+          sh install.sh -n -b "${bin}" | tee dry.txt
+          grep -q 'matches its recorded digest' dry.txt
+          grep -q 'SHA256' dry.txt
+          grep -q 'dry run; nothing was installed' dry.txt
+          if [ -e "${bin}" ]; then
+            echo "the dry run created ${bin}" >&2
+            exit 1
+          fi
+
+      - name: install
+        run: |
+          set -euo pipefail
+          bin="${RUNNER_TEMP}/bin"
+          sh install.sh -b "${bin}"
+
+          want="${TAG#v}"
+          got=$("${bin}/letsgo" version --json | jq -r .version)
+          if [ "${got}" != "${want}" ]; then
+            echo "installed letsgo reports ${got}, want ${want}" >&2
+            exit 1
+          fi
+
+          # The record letsgo update and letsgo doctor read back.
+          record="${bin}/.letsgo.install.json"
+          jq -e --arg tag "${TAG}" '.schema == 1 and .via == "install.sh" and .tag == $tag' "${record}"
+
+          "${bin}/letsgo" update --check
+
+      # A digest that does not match must stop the install before anything is
+      # written.
+      - name: refuses a tampered digest
+        run: |
+          set -euo pipefail
+          sed "s/^MANIFEST_SHA256=.*/MANIFEST_SHA256='0000'/" install.sh > tampered.sh
+          if sh tampered.sh -b "${RUNNER_TEMP}/tampered" 2> err.txt; then
+            echo "a tampered manifest digest installed anyway" >&2
+            exit 1
+          fi
+          grep -q 'does not match its recorded digest' err.txt
+          if [ -e "${RUNNER_TEMP}/tampered" ]; then
+            echo "the refused install still wrote ${RUNNER_TEMP}/tampered" >&2
+            exit 1
+          fi
