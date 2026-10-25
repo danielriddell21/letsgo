@@ -17,19 +17,29 @@ import (
 // writeInstaller generates the self-verifying installer and returns its name
 // and digest, or an empty name when the release has nowhere to point it.
 //
-// A snapshot has no tag and therefore no download URL, and a repository with
-// no forge has no release page; in both cases the honest thing is to publish
-// no installer rather than one whose URLs resolve to nothing.
-//
 // The manifest is already written, so the script carries its digest: it
 // checks letsgo.json like an archive, and with randomart on it ends by
 // showing the fingerprint the release page shows.
 func writeInstaller(p *plan.Plan, artifacts []build.Artifact, dir, manifestSum string) (string, string, error) {
-	if !p.Features.On(feature.InstallScript) {
+	o := installerFor(p, artifacts)
+	if o == nil {
 		return "", "", nil
 	}
+	return renderInstaller(*o, dir, manifestSum)
+}
+
+// installerFor is what the installer is generated from, everything but the
+// manifest's digest, or nil when the release gets no installer.
+//
+// A snapshot has no tag and therefore no download URL, and a repository with
+// no forge has no release page; in both cases the honest thing is to publish
+// no installer rather than one whose URLs resolve to nothing.
+func installerFor(p *plan.Plan, artifacts []build.Artifact) *install.Options {
+	if !p.Features.On(feature.InstallScript) {
+		return nil
+	}
 	if p.Tag == "" || !p.HasRepo() || p.Repo.Host != "github.com" {
-		return "", "", nil
+		return nil
 	}
 
 	targets := make([]install.Target, 0, len(artifacts))
@@ -39,19 +49,26 @@ func writeInstaller(p *plan.Plan, artifacts []build.Artifact, dir, manifestSum s
 		})
 	}
 	if len(install.Platforms(targets)) == 0 {
-		return "", "", nil
+		return nil
 	}
 
-	script, err := install.Script(install.Options{
+	return &install.Options{
 		Project: p.Project,
 		Version: p.Version,
 		Tag:     p.Tag,
 		BaseURL: strings.TrimSuffix(
 			pub.DownloadURL(p.Repo.Owner+"/"+p.Repo.Name, p.Tag, ""), "/"),
 		Targets:     targets,
-		Manifest:    install.File{Name: manifest.FileName, SHA256: manifestSum},
 		Fingerprint: p.Features.On(feature.Randomart),
-	})
+	}
+}
+
+// renderInstaller writes the installer for o into dir, checking the manifest
+// against manifestSum, and returns its name and digest. It runs again whenever
+// the manifest is rewritten, since the script is only as good as that digest.
+func renderInstaller(o install.Options, dir, manifestSum string) (string, string, error) {
+	o.Manifest = install.File{Name: manifest.FileName, SHA256: manifestSum}
+	script, err := install.Script(o)
 	if err != nil {
 		return "", "", err
 	}

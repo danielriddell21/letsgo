@@ -20,6 +20,7 @@ import (
 
 	"github.com/danielriddell21/letsgo/internal/build"
 	"github.com/danielriddell21/letsgo/internal/gobuild"
+	"github.com/danielriddell21/letsgo/internal/install"
 	"github.com/danielriddell21/letsgo/internal/plan"
 	"github.com/danielriddell21/letsgo/internal/plugin"
 	"github.com/danielriddell21/letsgo/manifest"
@@ -43,6 +44,10 @@ type Result struct {
 
 	// Files are the names of every file to publish, in upload order.
 	Files []string
+
+	// installer is what install.sh was generated from, nil when the release
+	// has none, so Restamp can generate it again for a rewritten manifest.
+	installer *install.Options
 }
 
 // RepoInfo is what the forge says about the repository, for a tap-files
@@ -139,46 +144,51 @@ func Build(ctx context.Context, o BuildOptions) (*Result, error) {
 		source: source, mods: mods, artifacts: artifacts, images: images, tapFiles: tapFiles,
 	})
 
-	files, err := writeMetadata(p, m, toolVersion, dir, artifacts, source)
+	files, installer, err := writeMetadata(p, m, toolVersion, dir, artifacts, source)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Result{
 		Dir: dir, Manifest: m, Artifacts: artifacts, Source: source,
-		Images: images, TapFiles: tapFiles, Files: files,
+		Images: images, TapFiles: tapFiles, Files: files, installer: installer,
 	}, nil
 }
 
 // writeMetadata writes the manifest, the installer and the checksum file, and
-// returns everything to publish in upload order.
+// returns everything to publish in upload order, with what the installer was
+// generated from (nil for none).
 func writeMetadata(
 	p *plan.Plan,
 	m *manifest.Manifest,
 	toolVersion, dir string,
 	artifacts []build.Artifact,
 	source build.Source,
-) ([]string, error) {
+) ([]string, *install.Options, error) {
 	// Generated before the manifest is written, so the manifest can name it
 	// and SHA256SUMS can cover both.
 	document, documentSum, err := writeSBOM(p, m, toolVersion, dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	m.SBOM = document
 
 	manifestPath := filepath.Join(dir, manifest.FileName)
 	if err := m.Write(manifestPath); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	manifestSum, err := sha256File(manifestPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	installer, installerSum, err := writeInstaller(p, artifacts, dir, manifestSum)
-	if err != nil {
-		return nil, err
+	var installer, installerSum string
+	installerOpts := installerFor(p, artifacts)
+	if installerOpts != nil {
+		installer, installerSum, err = renderInstaller(*installerOpts, dir, manifestSum)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// The checksum file covers everything published except itself, the
@@ -195,7 +205,7 @@ func writeMetadata(
 		sums = append(sums, build.Sum{Name: installer, SHA256: installerSum})
 	}
 	if _, err := build.WriteChecksums(dir, sums); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	files := make([]string, 0, len(sums)+1)
@@ -209,7 +219,7 @@ func writeMetadata(
 	if installer != "" {
 		files = append(files, installer)
 	}
-	return append(files, build.ChecksumFile), nil
+	return append(files, build.ChecksumFile), installerOpts, nil
 }
 
 // buildOutputs is everything Build assembles before it can describe the
