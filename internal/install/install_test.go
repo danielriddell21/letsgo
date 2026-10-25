@@ -60,6 +60,21 @@ func TestScriptIsDeterministic(t *testing.T) {
 	}
 }
 
+// A release download is a redirect; curl must not follow one off HTTPS, even
+// though every file it fetches is digest-checked after.
+func TestScriptRefusesARedirectOffHTTPS(t *testing.T) {
+	script, err := install.Script(install.Options{
+		Project: "foo", Version: "1.0.0", BaseURL: "https://example.com/d",
+		Targets: []install.Target{{OS: "linux", Arch: "amd64", Archive: "a.tar.gz", SHA256: "aa"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(script), "curl --proto-redir '=https' --tlsv1.2 -fsSL") {
+		t.Error("the installer's curl follows a redirect to any protocol")
+	}
+}
+
 func TestPlatformsExcludesWindows(t *testing.T) {
 	got := install.Platforms([]install.Target{
 		{OS: "linux", Arch: "amd64"},

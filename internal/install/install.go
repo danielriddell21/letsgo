@@ -213,8 +213,14 @@ matches=$(echo "$ARCHIVES" | awk -v os="$os" -v arch="$arch" '$1 == os && $2 == 
 
 # Downloading with whichever of the two is present, rather than requiring one,
 # is the difference between working on a bare container and not.
+#
+# Every URL below is HTTPS, but a release download is a redirect, and curl
+# follows one to any protocol it speaks. Nothing fetched is trusted before its
+# digest is checked, so a downgrade could not substitute a file; refusing it
+# is defence in depth. wget has no such switch: GNU wget's --https-only covers
+# recursive links only, and BusyBox wget has none.
 if command -v curl >/dev/null 2>&1; then
-	fetch() { curl -fsSL "$1" -o "$2"; }
+	fetch() { curl --proto-redir '=https' --tlsv1.2 -fsSL "$1" -o "$2"; }
 elif command -v wget >/dev/null 2>&1; then
 	fetch() { wget -qO "$2" "$1"; }
 else
