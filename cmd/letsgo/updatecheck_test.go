@@ -33,6 +33,14 @@ func newNoticeRig(t *testing.T) *noticeRig {
 		return "1.3.0", r.err
 	}
 	t.Setenv("CI", "")
+
+	// Every variable os.UserCacheDir reads, so a notice that falls back to the
+	// user cache directory writes a temporary one, never the real one: on
+	// Windows that is LocalAppData, which XDG_CACHE_HOME and HOME do not move.
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
+	t.Setenv("HOME", cache)
+	t.Setenv("LocalAppData", cache)
 	return r
 }
 
@@ -120,8 +128,10 @@ func TestUpdateNoticeNeedsACache(t *testing.T) {
 
 func TestUpdateNoticeHonoursTheUserCacheDir(t *testing.T) {
 	r := newNoticeRig(t)
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", dir)
+	t.Setenv("HOME", dir)
+	t.Setenv("LocalAppData", dir)
 
 	var out bytes.Buffer
 	printUpdateNotice(&out, &config.Global{UpdateCheck: "daily"}, "plan", nil)
