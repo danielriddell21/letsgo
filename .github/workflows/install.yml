@@ -42,6 +42,21 @@ jobs:
             TAG=$(gh release view --repo "${REPO}" --json tagName --jq .tagName)
           fi
           echo "TAG=${TAG}" >> "${GITHUB_ENV}"
+
+          # A release is published before its assets are uploaded, so the event
+          # can arrive first. SHA256SUMS is uploaded last: once it is there,
+          # everything install.sh fetches is too.
+          for i in $(seq 1 60); do
+            if gh release view "${TAG}" --repo "${REPO}" --json assets --jq ".assets[].name" | grep -qx SHA256SUMS; then
+              break
+            fi
+            if [ "${i}" = 60 ]; then
+              echo "${TAG} still has no SHA256SUMS after 10 minutes" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
           # HTTPS only, redirects included: the script is what checks every
           # digest, so it must not arrive over a connection anyone can rewrite.
           curl --proto "=https" --tlsv1.2 -fsSL "https://github.com/${REPO}/releases/download/${TAG}/install.sh" -o install.sh
