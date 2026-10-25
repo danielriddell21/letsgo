@@ -26,7 +26,7 @@ Or with the installer letsgo generated for its own release, which carries each
 archive's SHA-256 and fails rather than installing a substituted one:
 
 ```sh
-curl -fsSL https://github.com/danielriddell21/letsgo/releases/latest/download/install.sh | sh
+curl --proto "=https" --tlsv1.2 -fsSL https://github.com/danielriddell21/letsgo/releases/latest/download/install.sh | sh
 ```
 
 Or from the tap. letsgo writes the formula from the manifest it just
