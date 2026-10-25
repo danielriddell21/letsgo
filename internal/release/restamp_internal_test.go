@@ -135,18 +135,26 @@ func TestWriteMetadataStopsAtTheFirstFailure(t *testing.T) {
 		name    string
 		plan    *plan.Plan
 		missing bool // write into a directory that does not exist
+		sumsDir bool // SHA256SUMS is already a directory
 	}{
 		// sbom on: the SBOM is the first file written.
-		{"the SBOM", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve(nil), Source: repo}, true},
+		{"the SBOM", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve(nil), Source: repo}, true, false},
 		// sbom off: the manifest is.
-		{"the manifest", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve([]string{"sbom"}), Source: repo}, true},
+		{"the manifest", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve([]string{"sbom"}), Source: repo}, true, false},
 		// No project: the installer cannot be rendered, after the manifest was.
-		{"the installer", &plan.Plan{Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve([]string{"sbom"}), Source: repo}, false},
+		{"the installer", &plan.Plan{Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve([]string{"sbom"}), Source: repo}, false, false},
+		// Everything else written: only the checksum file is left to fail.
+		{"the checksums", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve([]string{"sbom"}), Source: repo}, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
 			if tc.missing {
 				dir = filepath.Join(dir, "missing")
+			}
+			if tc.sumsDir {
+				if err := os.Mkdir(filepath.Join(dir, build.ChecksumFile), 0o700); err != nil {
+					t.Fatal(err)
+				}
 			}
 			files, installer, err := writeMetadata(tc.plan, &manifest.Manifest{Schema: 1}, "0.1.0", dir, artifacts, build.Source{Name: "tool_source.tar.gz"})
 			if err == nil {
@@ -154,6 +162,32 @@ func TestWriteMetadataStopsAtTheFirstFailure(t *testing.T) {
 			}
 			if files != nil || installer != nil {
 				t.Errorf("writeMetadata returned files %v and installer %v alongside its error", files, installer)
+			}
+		})
+	}
+}
+
+// installerFor gives no installer, rather than one whose URLs resolve to
+// nothing, for a release with no tag, no forge or nothing it can install.
+func TestInstallerForSkipsWhatHasNowhereToPoint(t *testing.T) {
+	github := plan.Source{Location: discover.Location{Repo: discover.Repo{Host: "github.com", Owner: "you", Name: "tool"}}}
+	gitlab := plan.Source{Location: discover.Location{Repo: discover.Repo{Host: "gitlab.com", Owner: "you", Name: "tool"}}}
+	linux := []build.Artifact{{OS: "linux", Arch: "amd64", Archive: "tool_1.0.0_linux_amd64.tar.gz", ArchiveSHA256: "deadbeef"}}
+	windows := []build.Artifact{{OS: "windows", Arch: "amd64", Archive: "tool_1.0.0_windows_amd64.zip", ArchiveSHA256: "deadbeef"}}
+
+	for _, tc := range []struct {
+		name      string
+		plan      *plan.Plan
+		artifacts []build.Artifact
+	}{
+		{"a snapshot has no tag", &plan.Plan{Project: "tool", Version: "1.0.0", Features: feature.Resolve(nil), Source: github}, linux},
+		{"no repository", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve(nil)}, linux},
+		{"a forge other than GitHub", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve(nil), Source: gitlab}, linux},
+		{"no build the script can install", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve(nil), Source: github}, windows},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if o := installerFor(tc.plan, tc.artifacts); o != nil {
+				t.Errorf("installerFor = %+v, want none", o)
 			}
 		})
 	}
