@@ -42,7 +42,9 @@ jobs:
             TAG=$(gh release view --repo "${REPO}" --json tagName --jq .tagName)
           fi
           echo "TAG=${TAG}" >> "${GITHUB_ENV}"
-          curl -fsSL "https://github.com/${REPO}/releases/download/${TAG}/install.sh" -o install.sh
+          # HTTPS only, redirects included: the script is what checks every
+          # digest, so it must not arrive over a connection anyone can rewrite.
+          curl --proto "=https" --tlsv1.2 -fsSL "https://github.com/${REPO}/releases/download/${TAG}/install.sh" -o install.sh
 
       # The dry run checks the manifest, prints the fingerprint, and must not
       # write anything.
