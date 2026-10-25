@@ -11,7 +11,7 @@ func TestRunVersionJSONListsCapabilities(t *testing.T) {
 			t.Fatalf("runVersion: %v", err)
 		}
 	})
-	for _, want := range []string{`"schema": 1`, `"version": "` + version + `"`, `"tag-ref"`, `"lsp"`} {
+	for _, want := range []string{`"schema": 1`, `"version": "` + version + `"`, `"tag-ref"`, `"lsp"`, `"plan-diagnostics"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("version --json = %s, want %q", out, want)
 		}

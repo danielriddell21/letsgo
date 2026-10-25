@@ -8,7 +8,11 @@ import (
 
 // capabilities are what this build offers an editor or CI, so a client asks
 // the binary instead of keeping its own table of which release added what.
-var capabilities = []string{"plan-json", "tag-json", "tag-ref", "plugin-install", "lsp", "update-pin", "did-you-mean"}
+//
+// plan-diagnostics is the language server publishing plan warnings as
+// diagnostics. letsgo v0.42.0 did that before it was advertised, so a client
+// that needs it also accepts that version or later.
+var capabilities = []string{"plan-json", "tag-json", "tag-ref", "plugin-install", "lsp", "update-pin", "did-you-mean", "plan-diagnostics"}
 
 func runVersion(args []string) error {
 	fs := flag.NewFlagSet("version", flag.ExitOnError)
