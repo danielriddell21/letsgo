@@ -139,6 +139,12 @@ jobs:
     # Only a push to trunk. `on: push` fires for the tag this job creates too,
     # and tagging a tag is how a loop starts.
     if: github.event_name == 'push' && github.ref == 'refs/heads/trunk'
+    # Shared with promote.yml: a promotion in flight would otherwise leave this
+    # job seeing the last stable tag, not the one being made, and proposing a
+    # candidate for a version that is about to ship.
+    concurrency:
+      group: versioning
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     # Nothing is written with the workflow token; the push below uses its own.
     permissions:

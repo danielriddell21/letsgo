@@ -25,6 +25,14 @@ permissions:
 jobs:
   promote:
     name: promote
+    # Shared with reproducibility.yml's tag job, so trunk never proposes a
+    # version while one is being promoted: a tagger that runs before the stable
+    # tag exists proposes another candidate for the version being released.
+    # A waiting run is cancelled if a third one joins the group; promote is
+    # idempotent, so run it again.
+    concurrency:
+      group: versioning
+      cancel-in-progress: false
     # release: released also fires for an ordinary stable release; only a
     # prerelease tag (one that carries a "-") is something to promote.
     if: github.event_name == 'workflow_dispatch' || contains(github.event.release.tag_name, '-')
