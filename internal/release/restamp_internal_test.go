@@ -131,22 +131,24 @@ func TestWriteMetadataStopsAtTheFirstFailure(t *testing.T) {
 	artifacts := []build.Artifact{
 		{OS: "linux", Arch: "amd64", Archive: "tool_1.0.0_linux_amd64.tar.gz", ArchiveSHA256: "deadbeef"},
 	}
-	missing := func(t *testing.T) string { return filepath.Join(t.TempDir(), "missing") }
-
 	for _, tc := range []struct {
-		name string
-		plan *plan.Plan
-		dir  func(*testing.T) string
+		name    string
+		plan    *plan.Plan
+		missing bool // write into a directory that does not exist
 	}{
 		// sbom on: the SBOM is the first file written.
-		{"the SBOM", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve(nil), Source: repo}, missing},
+		{"the SBOM", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve(nil), Source: repo}, true},
 		// sbom off: the manifest is.
-		{"the manifest", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve([]string{"sbom"}), Source: repo}, missing},
+		{"the manifest", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve([]string{"sbom"}), Source: repo}, true},
 		// No project: the installer cannot be rendered, after the manifest was.
-		{"the installer", &plan.Plan{Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve([]string{"sbom"}), Source: repo}, func(t *testing.T) string { return t.TempDir() }},
+		{"the installer", &plan.Plan{Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve([]string{"sbom"}), Source: repo}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			files, installer, err := writeMetadata(tc.plan, &manifest.Manifest{Schema: 1}, "0.1.0", tc.dir(t), artifacts, build.Source{Name: "tool_source.tar.gz"})
+			dir := t.TempDir()
+			if tc.missing {
+				dir = filepath.Join(dir, "missing")
+			}
+			files, installer, err := writeMetadata(tc.plan, &manifest.Manifest{Schema: 1}, "0.1.0", dir, artifacts, build.Source{Name: "tool_source.tar.gz"})
 			if err == nil {
 				t.Fatalf("writeMetadata = %v, want an error", files)
 			}
