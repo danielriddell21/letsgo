@@ -120,6 +120,7 @@ func Run(ctx context.Context, dir string, global *config.Global) (*Result, error
 	cfg, cfgErr := loadConfig(root.Dir)
 
 	r := &Result{}
+	r.checkSelf()
 	r.checkGo(ctx, root, global)
 	r.checkGit(ctx, gitBin)
 	r.checkVulncheck(global, cfgErr == nil && requiresVulncheck(cfg))

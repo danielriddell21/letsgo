@@ -2,8 +2,9 @@
 
 A release tool for Go. Only Go.
 
-> **Status: early.** letsgo releases itself, and reproducibility is proven
-> across Linux, macOS and Windows on every push.
+> **Status: v1.** letsgo releases itself, reproducibility is proven across
+> Linux, macOS and Windows on every push, and [what v1 will not
+> break](docs/stability.md) is written down.
 
 It builds your Go project, refuses to ship it if it's wrong, publishes it
 reproducibly, and lets anyone prove afterwards that the binaries match the
@@ -141,6 +142,13 @@ return update.Apply(ctx)
 Nothing is written until `Apply`, so a program can offer the update rather than
 take it. `letsgo update` is the same package, pointed at letsgo — see
 [Self-update][].
+
+## Stability
+
+From v1.0.0 the command line, `letsgo.mod`, the JSON output, the manifest and
+plan files, the plugin wire contract and the public Go packages follow
+[semantic versioning](docs/stability.md). Internals and human-readable output
+do not.
 
 ## Documentation
 
