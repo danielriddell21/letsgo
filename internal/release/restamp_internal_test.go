@@ -99,3 +99,60 @@ func TestRestampWithoutAnInstallerWritesNone(t *testing.T) {
 		t.Errorf("Restamp wrote %s for a release that has none (stat err = %v)", install.FileName, err)
 	}
 }
+
+// An installer that cannot be rendered fails the restamp rather than leaving
+// the old script beside a new manifest.
+func TestRestampFailsWhenTheInstallerCannotBeRendered(t *testing.T) {
+	dir := t.TempDir()
+	r := &Result{
+		Dir: dir, Manifest: &manifest.Manifest{Schema: 1}, installer: &install.Options{},
+		Files: []string{manifest.FileName, install.FileName, build.ChecksumFile},
+	}
+	if err := r.Restamp(); err == nil {
+		t.Error("Restamp succeeded with an installer missing its project, version and URL")
+	}
+}
+
+func TestRenderInstallerReportsAnUnwritableDirectory(t *testing.T) {
+	o := install.Options{
+		Project: "tool", Version: "1.0.0", Tag: "v1.0.0", BaseURL: "https://example.com/dl",
+		Targets: []install.Target{{OS: "linux", Arch: "amd64", Archive: "tool.tar.gz", SHA256: "deadbeef"}},
+	}
+	_, _, err := renderInstaller(o, filepath.Join(t.TempDir(), "missing"), strings.Repeat("ab", 32))
+	if err == nil || !strings.Contains(err.Error(), install.FileName) {
+		t.Errorf("err = %v, want one naming %s", err, install.FileName)
+	}
+}
+
+// writeMetadata stops at the first file it cannot write, and says nothing
+// about an installer it never wrote.
+func TestWriteMetadataStopsAtTheFirstFailure(t *testing.T) {
+	repo := plan.Source{Location: discover.Location{Repo: discover.Repo{Host: "github.com", Owner: "you", Name: "tool"}}}
+	artifacts := []build.Artifact{
+		{OS: "linux", Arch: "amd64", Archive: "tool_1.0.0_linux_amd64.tar.gz", ArchiveSHA256: "deadbeef"},
+	}
+	missing := func(t *testing.T) string { return filepath.Join(t.TempDir(), "missing") }
+
+	for _, tc := range []struct {
+		name string
+		plan *plan.Plan
+		dir  func(*testing.T) string
+	}{
+		// sbom on: the SBOM is the first file written.
+		{"the SBOM", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve(nil), Source: repo}, missing},
+		// sbom off: the manifest is.
+		{"the manifest", &plan.Plan{Project: "tool", Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve([]string{"sbom"}), Source: repo}, missing},
+		// No project: the installer cannot be rendered, after the manifest was.
+		{"the installer", &plan.Plan{Version: "1.0.0", Tag: "v1.0.0", Features: feature.Resolve([]string{"sbom"}), Source: repo}, func(t *testing.T) string { return t.TempDir() }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files, installer, err := writeMetadata(tc.plan, &manifest.Manifest{Schema: 1}, "0.1.0", tc.dir(t), artifacts, build.Source{Name: "tool_source.tar.gz"})
+			if err == nil {
+				t.Fatalf("writeMetadata = %v, want an error", files)
+			}
+			if files != nil || installer != nil {
+				t.Errorf("writeMetadata returned files %v and installer %v alongside its error", files, installer)
+			}
+		})
+	}
+}
