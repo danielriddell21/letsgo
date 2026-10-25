@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -414,5 +415,71 @@ func TestSetEndpointsTrimsTrailingSlashes(t *testing.T) {
 	c.SetEndpoints("https://api.example/", "https://up.example/")
 	if c.api != "https://api.example" || c.upload != "https://up.example" {
 		t.Errorf("api = %q, upload = %q", c.api, c.upload)
+	}
+}
+
+// CreateTag makes the tag object, then the ref naming the object it got back.
+func TestCreateTagWritesTheObjectThenTheRef(t *testing.T) {
+	var paths []string
+	var object, ref map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		body, _ := io.ReadAll(r.Body)
+		switch r.URL.Path {
+		case "/repos/you/foo/git/tags":
+			_ = json.Unmarshal(body, &object)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"t4g"}`))
+		case "/repos/you/foo/git/refs":
+			_ = json.Unmarshal(body, &ref)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	c := New("token")
+	c.SetEndpoints(server.URL, server.URL)
+
+	err := c.CreateTag(context.Background(), testRepo, TagInput{
+		Tag: "v1.0.0", Message: "v1.0.0", Commit: "c0ffee",
+		Tagger: &Tagger{Name: "Champ", Email: "champ@example.com", Date: "2026-10-25T22:30:00Z"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"POST /repos/you/foo/git/tags", "POST /repos/you/foo/git/refs"}; !slices.Equal(paths, want) {
+		t.Errorf("requests = %v, want %v", paths, want)
+	}
+	if object["tag"] != "v1.0.0" || object["object"] != "c0ffee" || object["type"] != "commit" {
+		t.Errorf("tag object = %v", object)
+	}
+	if tagger, _ := object["tagger"].(map[string]any); tagger["name"] != "Champ" || tagger["date"] != "2026-10-25T22:30:00Z" {
+		t.Errorf("tagger = %v", object["tagger"])
+	}
+	if ref["ref"] != "refs/tags/v1.0.0" || ref["sha"] != "t4g" {
+		t.Errorf("ref = %v, want refs/tags/v1.0.0 at the new object", ref)
+	}
+}
+
+// A refused tag object stops before any ref is written.
+func TestCreateTagStopsWhenTheObjectIsRefused(t *testing.T) {
+	var refs int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/you/foo/git/refs" {
+			refs++
+		}
+		http.Error(w, `{"message":"Resource not accessible by integration"}`, http.StatusForbidden)
+	}))
+	t.Cleanup(server.Close)
+	c := New("token")
+	c.SetEndpoints(server.URL, server.URL)
+
+	if err := c.CreateTag(context.Background(), testRepo, TagInput{Tag: "v1.0.0", Commit: "c0ffee"}); err == nil {
+		t.Fatal("CreateTag succeeded against a forge that refused the object")
+	}
+	if refs != 0 {
+		t.Errorf("wrote %d refs after the object was refused", refs)
 	}
 }

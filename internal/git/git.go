@@ -332,6 +332,31 @@ func (r Runner) CreateTagAt(ctx context.Context, tag, commit, message string) er
 	return nil
 }
 
+// TagRecord is what an annotated tag records besides its commit.
+type TagRecord struct {
+	Name, Email, Date, Message string
+}
+
+// Tagger reads who tagged tag, when, and with what message, so the same tag
+// can be recreated elsewhere. A lightweight tag records none of it.
+func (r Runner) Tagger(ctx context.Context, tag string) (TagRecord, error) {
+	out, err := r.Run(ctx, "for-each-ref",
+		"--format=%(taggername)%00%(taggeremail)%00%(taggerdate:iso-strict)%00%(contents)", "refs/tags/"+tag)
+	if err != nil {
+		return TagRecord{}, err
+	}
+	fields := strings.SplitN(out, "\x00", 4)
+	if len(fields) != 4 || fields[0] == "" {
+		return TagRecord{}, fmt.Errorf("git: %s is not an annotated tag", tag)
+	}
+	return TagRecord{
+		Name:    fields[0],
+		Email:   strings.Trim(fields[1], "<>"),
+		Date:    fields[2],
+		Message: strings.TrimSpace(fields[3]),
+	}, nil
+}
+
 // TagCommit resolves the commit a tag points at.
 func (r Runner) TagCommit(ctx context.Context, tag string) (string, error) {
 	return r.Run(ctx, "rev-list", "-n", "1", tag)

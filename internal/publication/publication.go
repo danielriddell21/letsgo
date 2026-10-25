@@ -51,6 +51,12 @@ type Options struct {
 	// described rather than pushed.
 	Snapshot bool
 
+	// TagPending says the tag is not on the forge yet and only the release can
+	// create it, so the gate runs after the release instead of before: the
+	// module proxy asked about a tag that does not exist remembers that it
+	// does not, long after it does.
+	TagPending bool
+
 	// Out receives what the publication reports. Nil discards it.
 	Out io.Writer
 }
@@ -80,10 +86,12 @@ func Publish(ctx context.Context, o Options) (*Result, error) {
 	out := o.out()
 	var done []Step
 
-	if err := gate(ctx, out, o); err != nil {
-		return nil, &StepError{Step: StepGate, Done: done, Err: err}
+	if !o.TagPending {
+		if err := gate(ctx, out, o); err != nil {
+			return nil, &StepError{Step: StepGate, Done: done, Err: err}
+		}
+		done = append(done, StepGate)
 	}
-	done = append(done, StepGate)
 
 	ro, err := releaseOptions(o, func(format string, args ...any) {
 		fmt.Fprintf(out, "  "+format+"\n", args...)
@@ -97,6 +105,15 @@ func Publish(ctx context.Context, o Options) (*Result, error) {
 	}
 	done = append(done, StepRelease)
 	reportPublished(out, released)
+
+	// Later than it should be, but the first moment the tag exists: the
+	// release is already public, so a disagreement here can only be reported.
+	if o.TagPending {
+		if err := gate(ctx, out, o); err != nil {
+			return nil, &StepError{Step: StepGate, Done: done, Err: err}
+		}
+		done = append(done, StepGate)
+	}
 
 	if err := publishTap(ctx, out, o); err != nil {
 		return nil, &StepError{Step: StepTap, Done: done, Err: err}

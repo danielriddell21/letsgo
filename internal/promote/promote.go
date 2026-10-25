@@ -151,7 +151,8 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 
 	// Step 2: tag the RC's own commit, not HEAD.
 	logf("tagging %s on %s", stableTag, shortCommit(rcManifest.Commit))
-	if err := tagCommit(ctx, o, stableTag, rcManifest.Commit, logf); err != nil {
+	pushed, err := tagCommit(ctx, o, stableTag, rcManifest.Commit, logf)
+	if err != nil {
 		return nil, err
 	}
 
@@ -196,6 +197,10 @@ func Run(ctx context.Context, o Options) (*Result, error) {
 		Append: o.AppendNotes,
 		Token:  o.Token,
 		Out:    o.Out,
+		// Only the release itself can create a tag that neither a push nor the
+		// API could, and the proxy and sum.golang.org cannot be asked about a
+		// tag that does not exist yet.
+		TagPending: !pushed,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("promote: %w", err)
@@ -324,30 +329,54 @@ func restoreRC(ctx context.Context, o Options, rc *releases.Published) (*github.
 	return updated, nil
 }
 
-// tagCommit is step 2: tag the RC's commit, idempotently, and push the tag
-// best effort.
-func tagCommit(ctx context.Context, o Options, tag, commit string, logf func(string, ...any)) error {
-	if git.New(o.GitBin, o.Dir).TagExists(ctx, tag) {
-		existing, err := git.New(o.GitBin, o.Dir).TagCommit(ctx, tag)
+// tagCommit is step 2: tag the RC's commit, idempotently, and put the tag on
+// the forge, reporting whether it is there. A refused push falls back to the
+// API, which creates the same annotated tag; only if that fails too is the tag
+// left to the release in step 4, which can create only a lightweight one.
+func tagCommit(ctx context.Context, o Options, tag, commit string, logf func(string, ...any)) (bool, error) {
+	repo := git.New(o.GitBin, o.Dir)
+	if repo.TagExists(ctx, tag) {
+		existing, err := repo.TagCommit(ctx, tag)
 		if err != nil {
-			return fmt.Errorf("promote: %w", err)
+			return false, fmt.Errorf("promote: %w", err)
 		}
 		if existing != commit {
-			return fmt.Errorf("promote: %s already exists locally and points at %s, not the RC's commit %s",
+			return false, fmt.Errorf("promote: %s already exists locally and points at %s, not the RC's commit %s",
 				tag, shortCommit(existing), shortCommit(commit))
 		}
-	} else if err := git.New(o.GitBin, o.Dir).CreateTagAt(ctx, tag, commit, tag); err != nil {
-		return fmt.Errorf("promote: %w", err)
+	} else if err := repo.CreateTagAt(ctx, tag, commit, tag); err != nil {
+		return false, fmt.Errorf("promote: %w", err)
 	}
 
 	remote := o.Remote
 	if remote == "" {
 		remote = "origin"
 	}
-	if err := git.New(o.GitBin, o.Dir).PushTag(ctx, remote, tag); err != nil {
-		logf("! could not push %s to %s: %v (the release in step 4 will create it there)", tag, remote, err)
+	pushErr := repo.PushTag(ctx, remote, tag)
+	if pushErr == nil {
+		return true, nil
 	}
-	return nil
+
+	// GitHub refuses a token that may not write workflows a tag whose commit's
+	// workflows differ from the default branch's, which they do whenever one
+	// changed between the RC and its promotion. The API takes the same tag.
+	if o.Client != nil {
+		in := github.TagInput{Tag: tag, Message: tag, Commit: commit}
+		if record, err := repo.Tagger(ctx, tag); err == nil {
+			in.Message = record.Message
+			in.Tagger = &github.Tagger{Name: record.Name, Email: record.Email, Date: record.Date}
+		}
+		apiErr := o.Client.CreateTag(ctx, o.Repo, in)
+		if apiErr == nil {
+			logf("could not push %s to %s (%v); created it through the API instead", tag, remote, pushErr)
+			return true, nil
+		}
+		logf("! could not push %s to %s: %v", tag, remote, pushErr)
+		logf("! nor create it through the API: %v (the release in step 4 will create it there)", apiErr)
+		return false, nil
+	}
+	logf("! could not push %s to %s: %v (the release in step 4 will create it there)", tag, remote, pushErr)
+	return false, nil
 }
 
 // rebuild is step 3's build half: a plan resolved at the stable tag,

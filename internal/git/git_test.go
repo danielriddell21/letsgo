@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -134,3 +135,33 @@ func TestCheckoutTagFailsForAnUnknownTagAndLeavesNothingBehind(t *testing.T) {
 }
 
 func runner(bin, dir string) Runner { return Runner{Bin: bin, Dir: dir} }
+
+// Tagger reads back what an annotated tag records, so promote can recreate
+// the same tag through the API; a lightweight tag records nothing to read.
+func TestTaggerReadsWhatAnAnnotatedTagRecords(t *testing.T) {
+	t.Setenv("GIT_COMMITTER_NAME", "Champ")
+	t.Setenv("GIT_COMMITTER_EMAIL", "champ@example.com")
+	t.Setenv("GIT_COMMITTER_DATE", "2026-10-25T22:30:00+00:00")
+	ctx := context.Background()
+	bin := testGit(t)
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-q", "-b", "main")
+	write(t, dir, "README.md", "hi\n")
+	gitRun(t, dir, "add", ".")
+	gitRun(t, dir, "commit", "-q", "-m", "first")
+	gitRun(t, dir, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
+	gitRun(t, dir, "tag", "light")
+
+	got, err := runner(bin, dir).Tagger(ctx, "v1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := TagRecord{Name: "Test", Email: "test@example.com", Date: "2024-03-15T12:30:45Z", Message: "v1.0.0"}
+	if got != want {
+		t.Errorf("Tagger = %+v, want %+v", got, want)
+	}
+
+	if _, err := runner(bin, dir).Tagger(ctx, "light"); err == nil || !strings.Contains(err.Error(), "not an annotated tag") {
+		t.Errorf("Tagger(lightweight) err = %v, want one saying it is not annotated", err)
+	}
+}

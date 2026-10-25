@@ -369,3 +369,26 @@ func TestObserveNamesWhatItCouldNotRead(t *testing.T) {
 		})
 	}
 }
+
+// A tag only the release can create is not on the forge for the gate to ask
+// about, so with TagPending the gate runs once the release is out instead of
+// before it.
+func TestPublishRunsTheGateAfterTheReleaseWhenTheTagIsPending(t *testing.T) {
+	t.Parallel()
+	for _, pending := range []bool{false, true} {
+		o, _, _ := publishFixture(t)
+		var out strings.Builder
+		o.Out, o.TagPending = &out, pending
+
+		if _, err := Publish(t.Context(), o); err != nil {
+			t.Fatal(err)
+		}
+		gated, released := strings.Index(out.String(), "sum.golang.org"), strings.Index(out.String(), "uploaded 0, skipped 0")
+		if gated < 0 || released < 0 {
+			t.Fatalf("TagPending=%v: the gate or the release is missing:\n%s", pending, out.String())
+		}
+		if after := gated > released; after != pending {
+			t.Errorf("TagPending=%v: gate after the release = %v, want %v:\n%s", pending, after, pending, out.String())
+		}
+	}
+}

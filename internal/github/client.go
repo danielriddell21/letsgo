@@ -412,6 +412,56 @@ type Tag struct {
 	Name string `json:"name"`
 }
 
+// TagInput is an annotated tag to create through the API: the tag object,
+// then the ref that names it.
+type TagInput struct {
+	Tag     string
+	Message string
+	Commit  string
+
+	// Tagger is who and when the tag object records; nil leaves it to the
+	// forge, which names the authenticated identity.
+	Tagger *Tagger
+}
+
+// Tagger is the identity and time an annotated tag records.
+type Tagger struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	Date  string `json:"date,omitempty"`
+}
+
+// CreateTag creates an annotated tag without a git push: a tag object for
+// in.Commit, then refs/tags/in.Tag pointing at it. It is for a push the remote
+// refuses, as GitHub refuses a token that may not write workflows a tag whose
+// commit's workflows differ from the default branch's.
+func (c *Client) CreateTag(ctx context.Context, repo Repo, in TagInput) error {
+	body, err := json.Marshal(struct {
+		Tag     string  `json:"tag"`
+		Message string  `json:"message"`
+		Object  string  `json:"object"`
+		Type    string  `json:"type"`
+		Tagger  *Tagger `json:"tagger,omitempty"`
+	}{in.Tag, in.Message, in.Commit, "commit", in.Tagger})
+	if err != nil {
+		return fmt.Errorf("github: encoding tag: %w", err)
+	}
+	var object struct {
+		SHA string `json:"sha"`
+	}
+	url := fmt.Sprintf("%s/repos/%s/git/tags", c.api, repo)
+	if err := c.do(ctx, http.MethodPost, url, bytes.NewReader(body), "application/json", &object); err != nil {
+		return err
+	}
+
+	ref, err := json.Marshal(map[string]string{"ref": "refs/tags/" + in.Tag, "sha": object.SHA})
+	if err != nil {
+		return fmt.Errorf("github: encoding ref: %w", err)
+	}
+	url = fmt.Sprintf("%s/repos/%s/git/refs", c.api, repo)
+	return c.do(ctx, http.MethodPost, url, bytes.NewReader(ref), "application/json", nil)
+}
+
 // Tags lists the repository's tags.
 //
 // The API returns them in its own order, which is not version order, so
