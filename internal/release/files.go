@@ -29,13 +29,27 @@ func (r *Result) Digests() (map[string]string, error) {
 	return sums, nil
 }
 
-// Restamp writes the manifest and SHA256SUMS again after a change to the
-// manifest or to one of the files, so neither can be left describing a release
-// that no longer exists.
+// Restamp writes the manifest, the installer and SHA256SUMS again after a
+// change to the manifest or to one of the files, so none of them can be left
+// describing a release that no longer exists.
 func (r *Result) Restamp() error {
 	if err := r.Manifest.Write(filepath.Join(r.Dir, manifest.FileName)); err != nil {
 		return fmt.Errorf("release: writing the manifest: %w", err)
 	}
+
+	// The installer refuses a letsgo.json whose digest is not the one it
+	// carries, so a rewritten manifest needs a rewritten installer, before
+	// SHA256SUMS covers both.
+	if r.installer != nil {
+		manifestSum, err := r.Digest(manifest.FileName)
+		if err != nil {
+			return err
+		}
+		if _, _, err := renderInstaller(*r.installer, r.Dir, manifestSum); err != nil {
+			return err
+		}
+	}
+
 	sums := make([]build.Sum, 0, len(r.Files))
 	for _, name := range r.Files {
 		if name == build.ChecksumFile {
